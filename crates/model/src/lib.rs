@@ -8,6 +8,12 @@ use std::collections::HashSet;
 use std::fmt;
 
 pub mod automation;
+mod tempo;
+
+pub use tempo::{
+    BarPosition, MAX_BPM, MAX_CHANGE_BEAT, MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, MIN_BPM, Meter, TempoMap,
+    TempoPoint, TimeSignatureChange, valid_bpm,
+};
 
 mod launch;
 mod mapping;
@@ -44,6 +50,9 @@ pub struct Project {
     pub extensions: Extensions,
 }
 
+/// The song's tempo and time signature: `tempo_bpm` and `time_signature` hold from the start,
+/// and the changes take over later in the song (`docs/spec/tempo-map.md`). Convert beats to time
+/// and bars with [`Transport::tempo_map`] and [`Transport::meter`], never with `tempo_bpm` alone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transport {
     pub tempo_bpm: f64,
@@ -53,6 +62,10 @@ pub struct Transport {
     pub loop_range: Option<LoopRange>,
     /// Whether playback repeats the loop region.
     pub loop_enabled: bool,
+    /// Tempo changes after beat 0, in order of beat.
+    pub tempo_changes: Vec<TempoPoint>,
+    /// Time-signature changes after bar 0, in order of bar.
+    pub time_signature_changes: Vec<TimeSignatureChange>,
 }
 
 impl Default for Transport {
@@ -62,6 +75,8 @@ impl Default for Transport {
             time_signature: TimeSignature { numerator: 4, denominator: 4 },
             loop_range: None,
             loop_enabled: false,
+            tempo_changes: Vec::new(),
+            time_signature_changes: Vec::new(),
         }
     }
 }
@@ -185,6 +200,9 @@ pub struct Channel {
     pub pan: f64,
     pub mute: bool,
     pub solo: bool,
+    /// Also heard on the cue output (headphones), so it can be listened to apart from the main
+    /// mix; the main mix does not change.
+    pub cue: bool,
     /// Where the channel's output goes; `None` means the audio output (the master).
     pub output: Option<ChannelId>,
     pub sends: Vec<Send>,
@@ -328,6 +346,10 @@ pub struct Note {
     pub release_velocity: f32,
     /// MIDI channel, 0–15.
     pub channel: u8,
+    /// A muted note stays in the clip but is not played: the engine emits no voice for it, as if
+    /// it were not there ([ADR 0001](../../docs/decisions/0001-daw-neutral-model.md) › Amendment:
+    /// muted notes).
+    pub muted: bool,
 }
 
 /// An audio file mapped onto musical time.
@@ -1034,7 +1056,7 @@ mod tests {
     use super::*;
 
     fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.25, key, velocity: 0.8, release_velocity: 0.5, channel: 0 }
+        Note { time, duration: 0.25, key, velocity: 0.8, release_velocity: 0.5, channel: 0, muted: false }
     }
 
     fn track(id: u32, channel: u32) -> Track {
@@ -1060,6 +1082,7 @@ mod tests {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices: Vec::new(),

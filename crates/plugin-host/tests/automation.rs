@@ -56,7 +56,8 @@ fn gain(id: &str, points: &[(f64, f64)]) -> Device {
 
 /// One track playing a note for `length` beats through `devices`.
 fn project(length: f64, devices: Vec<Device>) -> Project {
-    let note = Note { time: 0.0, duration: length, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0 };
+    let note =
+        Note { time: 0.0, duration: length, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false };
     Project {
         tracks: vec![Track {
             id: TrackId(1),
@@ -77,6 +78,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices,

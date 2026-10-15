@@ -41,6 +41,7 @@ fn everything() -> Project {
         pan: -0.25,
         mute: id == 2,
         solo: false,
+        cue: id == 2,
         output: output.map(ChannelId),
         sends: Vec::new(),
         devices: Vec::new(),
@@ -133,6 +134,14 @@ fn everything() -> Project {
             time_signature: TimeSignature { numerator: 7, denominator: 8 },
             loop_range: Some(LoopRange { start: 4.0, end: 12.5 }),
             loop_enabled: true,
+            tempo_changes: vec![
+                TempoPoint { beat: 14.0, bpm: 90.0, ramp: false },
+                TempoPoint { beat: 30.5, bpm: 140.25, ramp: true },
+            ],
+            time_signature_changes: vec![TimeSignatureChange {
+                bar: 4,
+                time_signature: TimeSignature { numerator: 3, denominator: 4 },
+            }],
         },
         tracks: vec![
             Track {
@@ -166,8 +175,24 @@ fn everything() -> Project {
                 lanes: vec![ContentLane {
                     target: None,
                     data: LaneData::Notes(vec![
-                        Note { time: 0.0, duration: 1.0, key: 60, velocity: 0.75, release_velocity: 0.5, channel: 0 },
-                        Note { time: 1.5, duration: 0.25, key: 127, velocity: 1.0, release_velocity: 0.0, channel: 15 },
+                        Note {
+                            time: 0.0,
+                            duration: 1.0,
+                            key: 60,
+                            velocity: 0.75,
+                            release_velocity: 0.5,
+                            channel: 0,
+                            muted: false,
+                        },
+                        Note {
+                            time: 1.5,
+                            duration: 0.25,
+                            key: 127,
+                            velocity: 1.0,
+                            release_velocity: 0.0,
+                            channel: 15,
+                            muted: false,
+                        },
                     ]),
                 }],
                 extensions: ext("MidiClip"),
@@ -256,6 +281,20 @@ fn every_part_of_a_project_survives_a_round_trip() {
     assert_eq!(from_json(&to_json(&project)), Ok(project));
 }
 
+/// A channel's cue is written only when on, so a project without one reads and writes as it
+/// did before the cue existed.
+#[test]
+fn the_cue_is_written_only_when_on() {
+    let text = to_json(&everything());
+    assert_eq!(text.matches("\"cue\"").count(), 1, "{text}");
+    let mut quiet = everything();
+    for channel in &mut quiet.channels {
+        channel.cue = false;
+    }
+    assert!(!to_json(&quiet).contains("\"cue\""));
+    assert_eq!(from_json(&to_json(&quiet)), Ok(quiet));
+}
+
 /// Mappings are written under the launcher with 1-based scenes, and left out when there are none.
 #[test]
 fn launch_mappings_are_written_with_their_targets() {
@@ -275,6 +314,49 @@ fn launch_mappings_are_written_with_their_targets() {
 #[test]
 fn an_empty_project_survives_a_round_trip() {
     assert_eq!(from_json(&to_json(&Project::default())), Ok(Project::default()));
+}
+
+/// The notes of content 1, to change.
+fn notes_of(project: &mut Project) -> Option<&mut Vec<Note>> {
+    match &mut project.contents.first_mut()?.lanes.first_mut()?.data {
+        LaneData::Notes(notes) => Some(notes),
+        LaneData::Audio(_) => None,
+    }
+}
+
+#[test]
+fn a_muted_note_survives_a_round_trip() {
+    let mut project = everything();
+    if let Some(note) = notes_of(&mut project).and_then(|notes| notes.get_mut(1)) {
+        note.muted = true;
+    }
+    let text = to_json(&project);
+    assert!(text.contains(r#""muted": true"#), "{text}");
+    // Only the muted note names a mute.
+    assert_eq!(text.matches(r#""muted""#).count(), 1, "{text}");
+    assert_eq!(from_json(&text), Ok(project));
+}
+
+#[test]
+fn a_project_without_muted_notes_writes_no_muted_key() {
+    // The fixture holds notes, all of them unmuted: none of them names a mute, so a project
+    // saved now is the file a version before muted notes wrote.
+    let text = to_json(&everything());
+    assert!(!text.contains(r#""muted""#), "{text}");
+}
+
+#[test]
+fn a_note_without_the_muted_key_reads_as_unmuted() {
+    let read = from_json(
+        r#"{ "format": "suhina", "version": 1, "project": { "contents": [ { "id": 1, "length": 4,
+        "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 60 } ] } ] } ] } }"#,
+    );
+    let project = read.expect("a version-1 file reads");
+    let muted = match project.contents.first().and_then(|c| c.lanes.first()).map(|lane| &lane.data) {
+        Some(LaneData::Notes(notes)) => notes.first().map(|n| n.muted),
+        _ => None,
+    };
+    assert_eq!(muted, Some(false), "a note from before this reads as unmuted");
 }
 
 #[test]
@@ -353,8 +435,21 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "transport": { "time_signature": [300, 4] } }"#,
         r#"{ "launcher": { "scenes": [ { "name": "A", "time_signature": [4, 0] } ], "columns": [] } }"#,
         r#"{ "launcher": { "scenes": [ { "name": "A", "time_signature": "4/4" } ], "columns": [] } }"#,
+        r#"{ "transport": { "tempo_changes": 3 } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 0, "bpm": 100 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": -4, "bpm": 100 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 1e9, "bpm": 100 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 4, "bpm": 1000 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 4 } ] } }"#,
+        r#"{ "transport": { "tempo_changes": [ { "beat": 4, "bpm": 100, "ramp": "yes" } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 0, "time_signature": [3, 4] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": -2, "time_signature": [3, 4] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 2, "time_signature": [3, 5] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 2, "time_signature": [3] } ] } }"#,
+        r#"{ "transport": { "time_signature_changes": [ { "bar": 2 } ] } }"#,
         r#"{ "channels": [ { "id": 1, "role": "boss" } ] }"#,
         r#"{ "channels": [ { "id": 1, "pan": 3 } ] }"#,
+        r#"{ "channels": [ { "id": 1, "cue": "on" } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst9" } } ] } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "clap", "id": "x" }, "automation": [ { "points": [] } ] } ] } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "clap", "id": "x" }, "automation": [ { "param": "1", "points": [ { "beat": "one", "value": 1 } ] } ] } ] } ] }"#,
@@ -365,6 +460,7 @@ fn hostile_values_are_errors_not_crashes() {
         r#"{ "channels": [ { "id": 1, "automation": { "param": "pan" } } ] }"#,
         r#"{ "channels": [ { "id": 1, "devices": [ { "kind": { "type": "vst3", "id": "x" }, "state": "***" } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 200 } ] } ] } ] }"#,
+        r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { "notes": [ { "time": 0, "duration": 1, "key": 60, "muted": "yes" } ] } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": 4, "lanes": [ { } ] } ] }"#,
         r#"{ "contents": [ { "id": 1, "length": "long" } ] }"#,
         r#"{ "arrangement": { "lanes": [ { "clips": [ { "content": 1, "start": 0, "length": 4, "loop": [3, 1] } ] } ] } }"#,
@@ -527,6 +623,22 @@ fn markers_are_read_in_beat_order_and_left_out_when_there_are_none() {
     assert_eq!(markers, [(0.5, ""), (8.0, "Verse"), (32.0, "Outro")]);
     assert!(!to_json(&Project::default()).contains("markers"));
     assert!(to_json(&project).contains(r#""markers""#));
+}
+
+/// A project without tempo or time-signature changes is written as it was before they existed,
+/// and a file from before then reads with none.
+#[test]
+fn a_project_without_changes_writes_no_change_lists() {
+    let text = to_json(&Project::default());
+    assert!(!text.contains("tempo_changes") && !text.contains("time_signature_changes"), "{text}");
+    let project = from_json(r#"{ "format": "suhina", "version": 1, "project": { "transport": { "tempo_bpm": 90 } } }"#);
+    let transport = project.map(|p| p.transport).unwrap_or_default();
+    assert!(transport.tempo_changes.is_empty() && transport.time_signature_changes.is_empty());
+    let too_many = format!(
+        r#"{{ "format": "suhina", "version": 1, "project": {{ "transport": {{ "tempo_changes": [{}] }} }} }}"#,
+        vec![r#"{ "beat": 1, "bpm": 100 }"#; suhina_model::MAX_TEMPO_CHANGES + 1].join(",")
+    );
+    assert!(from_json(&too_many).is_err());
 }
 
 /// A clip without a follow action writes none, and a file written before follow actions reads

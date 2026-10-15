@@ -30,13 +30,15 @@ fn project(volume: f64) -> Project {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
         automation: Vec::new(),
         extensions: Extensions::default(),
     };
-    let note = Note { time: 0.0, duration: 16.0, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0 };
+    let note =
+        Note { time: 0.0, duration: 16.0, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false };
     let clip = Clip {
         content: ContentId(1),
         start: 0.0,

@@ -27,12 +27,14 @@ use crate::project_dialog::{
     self, AboutChoice, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice,
 };
 use crate::session_view::{self, SessionViewState, Step};
-use crate::settings::{AtStart, DeviceLayout, EditorPlacement, OnOpen, PianoRollTop, PlayFrom, Settings, Side};
+use crate::settings::{
+    AtStart, DeviceLayout, EditorPlacement, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side,
+};
 use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
 use crate::start_panel::{self, AudioSummary, StartChoice, StartState};
 use crate::theme::{self, PAD};
 use crate::themes::{FileAction, ThemeEntry, Themes};
-use crate::timeline::Timeline;
+use crate::timeline::{Folds, Timeline};
 use crate::widgets::{self, Action, Drag};
 
 /// Launch quantisation choices, as `launcher.setQuantization` takes them; the Arrangement
@@ -99,9 +101,8 @@ type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioDat
 struct Stash {
     view: SessionViewState,
     arrangement: Option<ArrangementViewState>,
-    launches: HashMap<TrackId, (usize, f64)>,
     revision: u64,
-    timeline: Option<(u64, Timeline)>,
+    timeline: Option<(u64, Folds, Timeline)>,
     waveforms: std::sync::Arc<crate::waveform::Waveforms>,
 }
 
@@ -195,14 +196,13 @@ pub struct App {
     view: SessionViewState,
     arrangement: ArrangementViewState,
     status: Status,
-    /// Where each column's playing clip started, in beats, to show its progress.
-    launches: HashMap<TrackId, (usize, f64)>,
     tempo_drag: Option<f64>,
     open_request: Option<(PathBuf, OpenAs)>,
     /// Counts changes to the project, so views derived from it are rebuilt only when it changed.
     revision: u64,
-    /// The Arrangement view's data and the revision it was built from.
-    timeline: Option<(u64, Timeline)>,
+    /// The Arrangement view's data, the revision it was built from and the folds it was built
+    /// with: folding a group changes what the lanes are, without changing the project.
+    timeline: Option<(u64, Folds, Timeline)>,
     /// Waveforms of the open project's audio files.
     waveforms: std::sync::Arc<crate::waveform::Waveforms>,
     /// The plug-in library as Settings shows it, and a scan running in the background.
@@ -312,7 +312,6 @@ impl App {
             meters_moved_at: 0.0,
             arrangement: ArrangementViewState::default(),
             status: Status::Hint("Drop a Live Set (.als) on the window to open it".into()),
-            launches: HashMap::new(),
             tempo_drag: None,
             open_request: None,
             revision: 0,
@@ -449,7 +448,6 @@ impl App {
         let stash = Stash {
             view: std::mem::take(&mut self.view),
             arrangement: Some(std::mem::take(&mut self.arrangement)),
-            launches: std::mem::take(&mut self.launches),
             revision: self.revision,
             timeline: self.timeline.take(),
             waveforms: std::mem::take(&mut self.waveforms),
@@ -465,7 +463,6 @@ impl App {
         self.arrangement = stash.arrangement.unwrap_or_default();
         self.arrangement.headers_left = headers_left;
         self.arrangement.header_width = header_width;
-        self.launches = stash.launches;
         self.revision = stash.revision.wrapping_add(1);
         self.timeline = stash.timeline;
         self.waveforms = stash.waveforms;
@@ -495,7 +492,6 @@ impl App {
                 self.shown_project = None;
                 self.view = SessionViewState::default();
                 self.timeline = None;
-                self.launches.clear();
             }
         }
     }
@@ -653,6 +649,12 @@ impl App {
     /// The clip selected in the Arrangement view: its track and index.
     pub fn selected_clip(&self) -> Option<(TrackId, usize)> {
         self.arrangement.selected_clip()
+    }
+
+    /// The Arrangement view's state: what is selected, how far it is scrolled and which groups are
+    /// folded. The view draws itself from it, and the window's tests read it.
+    pub fn arrangement(&self) -> &ArrangementViewState {
+        &self.arrangement
     }
 
     /// `transport.stop`, with where the playhead goes from the settings.
@@ -1206,11 +1208,23 @@ impl App {
                 if changes_project || action.id == "track.setArm" {
                     self.revision += 1;
                 }
+                self.fold_new_groups(&result);
                 if let Some(done) = describe(action) {
                     self.status = Status::Done(done);
                 }
             }
             Err(e) => self.status = Status::Error(e.0),
+        }
+    }
+
+    /// A Stems file arrives as one group of its stems and its master (`clip.addFiles` reports
+    /// the groups it made): the group opens folded, so the drop reads as a single lane until its
+    /// triangle is clicked ([`crate::arrangement_view`]).
+    fn fold_new_groups(&mut self, result: &serde_json::Value) {
+        for group in result["groups"].as_array().map(Vec::as_slice).unwrap_or_default() {
+            if let Some(id) = group.as_u64().and_then(|n| u32::try_from(n).ok()) {
+                self.arrangement.fold_group(TrackId(id));
+            }
         }
     }
 
@@ -1256,6 +1270,7 @@ impl App {
         }
         let window = ui.max_rect();
         let mut actions = Vec::new();
+        let revision = self.revision;
         self.follow_active();
         self.poll_scan(ui.ctx());
         self.poll_plugins(ui.ctx());
@@ -1385,20 +1400,27 @@ impl App {
                     _ if inner.height() < 1.0 => {}
                     (Some(grid), View::Session) => {
                         self.view.keep_selection_on_launch = !self.settings.select_on_launch;
-                        // Both views fold the same groups.
-                        std::mem::swap(&mut self.view.folded, &mut self.arrangement.folded);
+                        self.view.knobs = self.settings.mixer_controls == MixerControls::Knob;
+                        // Both views fold the same groups: the Arrangement view keeps them.
+                        self.view.folded = self.arrangement.folds.groups();
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
-                        std::mem::swap(&mut self.view.folded, &mut self.arrangement.folded);
+                        self.arrangement.folds.set_groups(&self.view.folded);
                     }
                     (Some(_), View::Arrangement) => {
                         if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
                             self.arrangement.stack_audio = self.settings.sample_stacking;
                             self.arrangement.stack_midi = self.settings.midi_stacking;
+                            self.arrangement.knobs = self.settings.mixer_controls == MixerControls::Knob;
                             let monitor = session.player().map(|p| p.monitor());
+                            // A folded group's row shows the track being worked on, so the folds
+                            // are brought in line before the lanes are built from them.
+                            self.arrangement.reconcile(session.project());
                             // Clips and their notes are rebuilt only after the project changed; the
                             // playhead is read every frame.
                             let timeline = match self.timeline.take() {
-                                Some((revision, mut timeline)) if revision == self.revision => {
+                                Some((revision, folds, mut timeline))
+                                    if revision == self.revision && folds == self.arrangement.folds =>
+                                {
                                     timeline.follow(monitor);
                                     timeline
                                 }
@@ -1421,7 +1443,7 @@ impl App {
                                 .and_then(suhina_session::Player::output_info)
                                 .map_or(0, |i| i.input_channels);
                             arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
-                            self.timeline = Some((self.revision, timeline));
+                            self.timeline = Some((self.revision, self.arrangement.folds.clone(), timeline));
                             // The headers can be moved from the view itself; that is the setting too.
                             let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
                             if side != self.settings.track_headers {
@@ -1476,6 +1498,12 @@ impl App {
             }
         }
         self.guard_quit(ui.ctx());
+        // The views drew before the actions and drops of this frame ran: when the project changed,
+        // ask for a frame at once, so what the user just did (a moved clip, a file that landed)
+        // is on screen without waiting for another click or pointer move.
+        if self.revision != revision {
+            ui.ctx().request_repaint();
+        }
         if grid.is_some_and(|g| {
             g.running || g.columns.iter().any(|c| c.stop_queued || c.slots.iter().any(|s| s.state == SlotState::Queued))
         }) {
@@ -1527,15 +1555,17 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let arrangement_clip = match clip {
-            Some(detail_view::ClipRef::Arrangement(track, index)) => Some((track, index)),
-            _ => None,
-        };
-        let piano = self.piano_clip(arrangement_clip);
+        let piano = self.piano_clip(clip);
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
-        let focus =
-            arrangement_clip.map(|(t, _)| t).filter(|_| pulled && self.settings.piano_roll_top == PianoRollTop::Track);
+        let focus = match clip {
+            Some(detail_view::ClipRef::Arrangement(track, _))
+                if pulled && self.settings.piano_roll_top == PianoRollTop::Track =>
+            {
+                Some(track)
+            }
+            _ => None,
+        };
         self.arrangement.focus = focus;
         let (view, splitter, detail) = if stacked {
             self.detail_width = self.detail_width.clamp(180.0, (area.width() - 240.0).max(180.0));
@@ -1594,9 +1624,17 @@ impl App {
         if let Some(shown_track) = clip.map(ClipRef::track).or(track) {
             self.detail_drop = Some((detail, shown_track));
         }
-        let shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
+        let mut shown = self.session().map_or(detail_view::Detail::Nothing, |s| {
             detail_view::build_with(s.project(), track, clip, &mut |t, i| reports.remove(&(t, i)))
         });
+        // What the piano roll has selected, described for the clip column (› Clip column).
+        if let (detail_view::Detail::Clip(info, _), Some(piano), Some(session)) = (&mut shown, &piano, self.session()) {
+            info.selection = detail_view::SelectionInfo::of(
+                &piano.notes,
+                &self.piano_roll.selected,
+                detail_view::bar_beats(session.project()),
+            );
+        }
         // A selected slot clip's follow action comes first, the rest of the detail beside or
         // under it.
         let follow = match (self.shown, self.view.selected_slot, self.session()) {
@@ -1622,18 +1660,37 @@ impl App {
             self.piano_roll.hide();
         }
         let mut places = Vec::new();
-        let options = piano_roll::Options { right_click_deletes: self.keymap.preset().right_click_deletes() };
+        let options = piano_roll::Options {
+            right_click_deletes: self.keymap.preset().right_click_deletes(),
+            toolbar_size: self.settings.toolbar_size,
+            mouse: self.keymap.mouse(),
+        };
         // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
         // visible on the button.
         let keymap = self.keymap.clone();
         let copied = self.session().and_then(Session::copied_notes);
-        // While the transport runs, the piano roll shows where playback is.
-        let playhead =
-            self.session().and_then(|s| s.player()).map(|p| p.monitor()).filter(|m| m.running()).map(|m| m.beat());
+        // While the transport runs, the piano roll shows where playback is: for a slot's clip,
+        // the beats since its launch (its placement starts at the launch and never ends); for
+        // an arrangement clip, the transport's beat through the clip's placement.
+        let playhead = match self.shown {
+            View::Session => self.view.selected_slot.and_then(|(track, scene)| self.slot_playhead(track, scene)),
+            View::Arrangement => {
+                self.session().and_then(|s| s.player()).map(|p| p.monitor()).filter(|m| m.running()).map(|m| m.beat())
+            }
+        };
         let piano_roll = &mut self.piano_roll;
         ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
-                let rest = detail_view::show_clip_column(ui, info, stacked, piano_roll, actions);
+                let mut rest = detail_view::show_clip_column(ui, info, stacked);
+                // The MIDI tools column, between the clip's properties and the note grid. With the
+                // detail area stacked there is no room beside the notes, so it is not drawn there
+                // (the quantise settings and Ctrl+U still work: › Other note tools).
+                if piano_roll.tools_open && !stacked {
+                    let selected = piano_roll.selected.clone();
+                    let tools =
+                        crate::midi_tools::Tools { address: &piano.address, notes: &piano.notes, selected: &selected };
+                    rest = crate::midi_tools::show(ui, rest, &tools, piano_roll, actions);
+                }
                 let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
             } else if stacked {
@@ -1657,21 +1714,30 @@ impl App {
 
     /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is its
     /// own grid value, or the control bar's when Settings says so.
-    fn piano_clip(&self, clip: Option<(TrackId, usize)>) -> Option<piano_roll::PianoClip> {
-        let (track, index) = clip?;
+    /// The piano roll for the shown clip: an arrangement clip's, or the Session view's selected
+    /// slot's clip.
+    fn piano_clip(&self, clip: Option<detail_view::ClipRef>) -> Option<piano_roll::PianoClip> {
         let grid = self.piano_grid_name();
         let quantization = suhina_session::parse_quantization(grid).ok()?;
-        let mut clip = piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?;
-        clip.grid_name = grid;
-        Some(clip)
+        let mut piano = match clip? {
+            detail_view::ClipRef::Arrangement(track, index) => {
+                piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?
+            }
+            detail_view::ClipRef::Slot(track, scene) => {
+                piano_roll::launcher_clip(self.session()?.project(), track, scene, quantization)?
+            }
+        };
+        piano.grid_name = grid;
+        Some(piano)
     }
 
     /// The params that name the clip the piano roll shows in a `note.*` command, if it shows one.
     pub fn piano_roll_address(&self) -> Option<serde_json::Value> {
-        if self.shown != View::Arrangement {
-            return None;
-        }
-        self.piano_clip(self.arrangement.selected_clip()).map(|c| c.address)
+        let clip = match self.shown {
+            View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
+            View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
+        };
+        self.piano_clip(clip).map(|c| c.address)
     }
 
     /// The grid value the piano roll uses.
@@ -1685,13 +1751,40 @@ impl App {
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
     fn piano_key(&mut self, action: &str) -> Option<Action> {
-        if self.shown != View::Arrangement {
-            return None;
-        }
-        let clip = self.piano_clip(self.arrangement.selected_clip())?;
-        let playhead = self.timeline.as_ref().map_or(0.0, |(_, t)| t.beat);
+        let clip = match self.shown {
+            View::Session => self
+                .view
+                .selected_slot
+                .map(|(t, s)| detail_view::ClipRef::Slot(t, s))
+                .and_then(|clip| self.piano_clip(Some(clip)))?,
+            View::Arrangement => self
+                .arrangement
+                .selected_clip()
+                .map(|(t, i)| detail_view::ClipRef::Arrangement(t, i))
+                .and_then(|clip| self.piano_clip(Some(clip)))?,
+        };
+        // Where playback is, in the clip's placement's input (the arrangement's beat, or the
+        // beats since a slot clip's launch); 0.0 while the transport is stopped.
+        let playhead = match self.shown {
+            View::Arrangement => self.timeline.as_ref().map_or(0.0, |(_, _, t)| t.beat),
+            View::Session => {
+                let (track, scene) = self.view.selected_slot?;
+                self.slot_playhead(track, scene).unwrap_or(0.0)
+            }
+        };
         let copied = self.session().and_then(Session::copied_notes);
         self.piano_roll.key_action(action, &clip, playhead, copied)
+    }
+
+    /// The beats the selected slot's clip has played, while the engine plays that very slot: the
+    /// piano roll's playhead for a launcher clip, whose placement starts at the launch.
+    fn slot_playhead(&self, track: TrackId, scene: usize) -> Option<f64> {
+        let monitor = self.session()?.player()?.monitor();
+        let column = self.session()?.project().launcher.columns.iter().position(|c| c.track == track)?;
+        if !monitor.running() || monitor.column(column)?.playing != Some(scene) {
+            return None;
+        }
+        monitor.elapsed_beats(column)
     }
 
     /// The piano roll's state: its zoom, scroll and selected notes.
@@ -1935,8 +2028,39 @@ impl App {
     }
 
     /// Plays on the output `choice` names from now on (`audio.setOutput`): the active project's
-    /// output opens again there, the transport where it was.
+    /// output opens again there, the transport where it was. When only the cue changed, the
+    /// cue's command runs instead (`output.setCuePair`, `output.setCueVolume`).
     fn choose_output(&mut self, choice: &suhina_session::OutputChoice) {
+        let current = self.projects.output_choice().clone();
+        if choice.device_only() == current.device_only() && choice.cue_pair == current.cue_pair {
+            let db =
+                if choice.cue_gain > 0.0 { json!(20.0 * f64::from(choice.cue_gain).log10()) } else { json!("-inf") };
+            match self.projects.execute("output.setCueVolume", &json!({ "db": db })) {
+                Ok(result) => {
+                    let db =
+                        result["cue_db"].as_f64().map_or_else(|| "silent".to_string(), |db| format!("{db:+.0} dB"));
+                    self.status = Status::Done(format!("Cue volume: {db}"));
+                }
+                Err(e) => self.status = Status::Error(e.0),
+            }
+            return;
+        }
+        if choice.device_only() == current.device_only() {
+            match self.projects.execute("output.setCuePair", &json!({ "pair": choice.cue_pair.unwrap_or(0) })) {
+                Ok(result) => {
+                    self.status = match (result["notice"].as_str(), choice.cue_pair) {
+                        (Some(notice), _) => Status::Hint(notice.to_string()),
+                        (None, Some(pair)) => {
+                            let (first, second) = suhina_session::audio::cue_channels(pair);
+                            Status::Done(format!("Cue: outputs {first}/{second}"))
+                        }
+                        (None, None) => Status::Done("Cue: with the main output".to_string()),
+                    };
+                }
+                Err(e) => self.status = Status::Error(e.0),
+            }
+            return;
+        }
         let params = choice.to_json();
         let params = json!({
             "host": params["host"].as_str().unwrap_or(""),
@@ -2330,7 +2454,7 @@ impl App {
         let notes = self.piano_roll.focused;
         let pressed = ui.input_mut(|i| {
             self.keymap.pressed(i, |id| {
-                if notes { !crate::keymap::slot_only(id) } else { !crate::keymap::piano_roll_only(id) }
+                if notes { !crate::keymap::not_in_piano_roll(id) } else { !crate::keymap::piano_roll_only(id) }
             })
         });
         for action in pressed {
@@ -2399,9 +2523,13 @@ impl App {
             "transport.playFromSelection" => actions.push(self.play_action(true)),
             // Quantise in the piano roll, while it shows a clip.
             "pianoRoll.quantize" => {
-                let showing = self.detail_open
-                    && matches!(self.shown, View::Arrangement)
-                    && self.piano_clip(self.arrangement.selected_clip()).is_some();
+                let clip = match self.shown {
+                    View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
+                    View::Arrangement => {
+                        self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i))
+                    }
+                };
+                let showing = self.detail_open && self.piano_clip(clip).is_some();
                 if showing && let Some(quantize) = self.piano_roll.quantize_selected() {
                     actions.push(quantize);
                 }
@@ -2425,7 +2553,9 @@ impl App {
                 let params = json!({ "track": track.0, "scene": scene + 1 });
                 actions.push(Action::new(if action == "selection.copy" { "clip.copy" } else { "clip.paste" }, params));
             }
-            "selection.cut" | "selection.duplicate" | "selection.delete" if self.shown == View::Session => {
+            // Cut and duplicate of a slot's clip wait for launcher clip commands; Delete works,
+            // in the arm below.
+            "selection.cut" | "selection.duplicate" if self.shown == View::Session => {
                 self.status = Status::Hint("In the Session view, a slot's clip can be copied and pasted".into());
             }
             "selection.copy" | "selection.cut" | "selection.duplicate" | "selection.delete" => {
@@ -2436,7 +2566,28 @@ impl App {
                     actions.push(delete);
                     return;
                 }
-                let Some((track, index)) = self.arrangement.selected_clip() else { return };
+                // The Session view: Delete takes the selected slot's clip off its slot, and the
+                // detail area falls back to the track's devices.
+                if self.shown == View::Session {
+                    if action == "selection.delete"
+                        && let Some((track, scene)) = self.view.selected_slot
+                        && self.session().is_some_and(|s| {
+                            let p = s.project();
+                            p.launcher
+                                .columns
+                                .iter()
+                                .any(|c| c.track == track && c.slots.get(scene).is_some_and(|slot| slot.clip.is_some()))
+                        })
+                    {
+                        self.view.selected_slot = None;
+                        actions.push(Action::new("clip.delete", json!({ "track": track.0, "scene": scene + 1 })));
+                    }
+                    return;
+                }
+                let clips = self.selected_clip_list();
+                if clips.is_empty() {
+                    return;
+                }
                 let id = match action {
                     "selection.copy" => "clip.copy",
                     "selection.cut" => "clip.cut",
@@ -2446,24 +2597,66 @@ impl App {
                 if matches!(id, "clip.cut" | "clip.delete") {
                     self.arrangement.clear_selected_clip();
                 }
-                let mut params = json!({ "track": track.0, "index": index });
-                // A copy follows the stacking setting for its kind, as a moved clip does.
-                if id == "clip.duplicate" {
-                    let audio = self
-                        .timeline
-                        .as_ref()
-                        .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
-                        .and_then(|l| l.clips.iter().find(|c| c.index == index))
-                        .map(|c| c.audio);
-                    if audio.is_some_and(|audio| self.stacks(audio)) {
-                        params["stack"] = json!(true);
-                    }
+                let mut params = json!({ "clips": clips });
+                // A copy follows the stacking setting for its kind, as a moved clip does: with
+                // clips of both kinds selected, only a setting that covers them all stacks.
+                if id == "clip.duplicate" && self.stacks_every_selected_clip() {
+                    params["stack"] = json!(true);
                 }
                 actions.push(Action::new(id, params));
             }
+            "selection.split" | "selection.consolidate" => {
+                let Some((track, index)) = self.arrangement.selected_clip() else {
+                    self.status = Status::Hint("Select a clip in the Arrangement first".into());
+                    return;
+                };
+                let timeline = self.timeline.as_ref().map(|(_, _, t)| t);
+                let beat = timeline.map_or(0.0, |t| t.beat);
+                let clip = timeline
+                    .and_then(|t| t.lanes.iter().find(|l| l.track == track))
+                    .and_then(|l| l.clips.iter().find(|c| c.index == index))
+                    .map(|c| (c.start, c.length));
+                let Some((start, length)) = clip else { return };
+                if action == "selection.consolidate" {
+                    // The clips under it become one new clip.
+                    self.arrangement.clear_selected_clip();
+                    let params = json!({ "track": track.0, "start": start, "end": start + length });
+                    actions.push(Action::new("clip.consolidate", params));
+                } else if beat > start && beat < start + length {
+                    actions.push(Action::new("clip.split", json!({ "track": track.0, "index": index, "at": beat })));
+                } else {
+                    self.status = Status::Hint("Move the playhead into the selected clip to split it there".into());
+                }
+            }
+            "selection.mute" => {
+                let clips = self.selected_clip_list();
+                if clips.is_empty() {
+                    return;
+                }
+                // What the clips are now decides which way the key turns them: any of them
+                // playing turns the whole selection off, else all of them back on.
+                let enabled = self.any_selected_clip_plays();
+                actions.push(Action::new("clip.setEnabled", json!({ "clips": clips, "enabled": !enabled })));
+            }
+            "selection.selectAll" => {
+                let clips: Vec<(TrackId, usize)> = self
+                    .session()
+                    .map(|session| {
+                        session
+                            .project()
+                            .arrangement
+                            .lanes
+                            .iter()
+                            .filter_map(|lane| lane.track.map(|track| (track, lane.clips.len())))
+                            .flat_map(|(track, count)| (0..count).map(move |index| (track, index)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.arrangement.select_clips(clips);
+            }
             "selection.paste" => {
                 // After the selected clip, or at the playhead on the selected track.
-                let timeline = self.timeline.as_ref().map(|(_, t)| t);
+                let timeline = self.timeline.as_ref().map(|(_, _, t)| t);
                 let target = match self.arrangement.selected_clip() {
                     Some((track, index)) => timeline
                         .and_then(|t| t.lanes.iter().find(|l| l.track == track))
@@ -2526,6 +2719,47 @@ impl App {
     /// Options › Settings › sample stacking for audio, MIDI stacking for notes.
     fn stacks(&self, audio: bool) -> bool {
         if audio { self.settings.sample_stacking } else { self.settings.midi_stacking }
+    }
+
+    /// The clips the Arrangement view has selected, as `clip.*` commands name them.
+    fn selected_clip_list(&self) -> Vec<serde_json::Value> {
+        self.arrangement
+            .selected_clips()
+            .iter()
+            .map(|(track, index)| json!({ "track": track.0, "index": index }))
+            .collect()
+    }
+
+    /// Whether any selected clip plays now. The window reads the clips it drew; a clip it cannot
+    /// find counts as playing, so the first key press turns the selection off.
+    fn any_selected_clip_plays(&self) -> bool {
+        let Some((_, _, timeline)) = self.timeline.as_ref() else { return true };
+        self.arrangement.selected_clips().iter().any(|(track, index)| {
+            timeline
+                .lanes
+                .iter()
+                .find(|l| l.track == *track)
+                .and_then(|l| l.clips.iter().find(|c| c.index == *index))
+                .is_none_or(|c| c.enabled)
+        })
+    }
+
+    /// Whether the stacking setting covers every selected clip: with clips of both kinds picked,
+    /// only when both settings are on does a copy leave what it lands on alone.
+    fn stacks_every_selected_clip(&self) -> bool {
+        let Some((_, _, timeline)) = self.timeline.as_ref() else { return false };
+        let selected = self.arrangement.selected_clips();
+        if selected.is_empty() {
+            return false;
+        }
+        selected.iter().all(|(track, index)| {
+            timeline
+                .lanes
+                .iter()
+                .find(|l| l.track == *track)
+                .and_then(|l| l.clips.iter().find(|c| c.index == *index))
+                .is_none_or(|c| self.stacks(c.audio))
+        })
     }
 
     /// Makes the whole window `steps` zoom steps larger or smaller and keeps that in the settings.
@@ -2962,7 +3196,7 @@ impl App {
             let name = self
                 .timeline
                 .as_ref()
-                .and_then(|(_, t)| t.lanes.iter().find(|l| l.track == track))
+                .and_then(|(_, _, t)| t.lanes.iter().find(|l| l.track == track))
                 .and_then(|l| l.clips.iter().find(|c| c.index == index))
                 .map(|c| c.name.clone())
                 .unwrap_or_default();
@@ -3045,7 +3279,7 @@ impl App {
     /// `clip.paste` there, the same commands as Ctrl+C and Ctrl+V; the paste is one undo step.
     fn drop_carried(&mut self, carry: &Carry, target: DropTarget) {
         let copy = match carry.from {
-            CarryFrom::Arrangement { track, index } => json!({ "track": track.0, "index": index }),
+            CarryFrom::Arrangement { track, index } => json!({ "clips": [{ "track": track.0, "index": index }] }),
             CarryFrom::Slot { track, scene } => json!({ "track": track.0, "scene": scene + 1 }),
         };
         let mut paste = match target {
@@ -3185,6 +3419,9 @@ impl App {
                 Ok(result) => {
                     self.revision += 1;
                     self.timeline = None;
+                    // A Stems file arrives as one group: it opens folded, so the drop reads as a
+                    // single lane until the group's triangle is clicked (`clip.addFiles`).
+                    self.fold_new_groups(&result);
                     let skipped = result["skipped"].as_array().map_or(0, Vec::len);
                     let placed = result["clips"].as_array().map_or(0, Vec::len);
                     self.status = match (id, skipped) {
@@ -3206,27 +3443,42 @@ impl App {
         }
     }
 
-    /// How far each column's playing clip is, from the beat it was first seen playing.
-    fn progress(&mut self, grid: &Grid) -> Vec<Option<f32>> {
-        grid.columns
-            .iter()
-            .map(|column| {
-                let playing = column.slots.iter().position(|s| s.state == SlotState::Playing);
-                let Some(slot) = playing else {
-                    self.launches.remove(&column.track);
-                    return None;
-                };
-                let started = match self.launches.get(&column.track) {
-                    Some((s, beat)) if *s == slot && *beat <= grid.beat => *beat,
-                    _ => {
-                        self.launches.insert(column.track, (slot, grid.beat));
-                        grid.beat
-                    }
-                };
-                let length = column.slots.get(slot).map_or(0.0, |s| s.length);
-                (length > 0.0).then(|| (((grid.beat - started) % length) / length) as f32)
-            })
-            .collect()
+    /// How far each column's playing clip is through its loop — or through itself, without one —
+    /// from the engine's monitor: the beats since the clip's launch, folded through its offset
+    /// and loop, as the piano roll's playhead maps them.
+    fn progress(&self, grid: &Grid) -> Vec<Option<f32>> {
+        let Some(monitor) = self.session().and_then(|s| s.player()).map(|p| p.monitor()) else {
+            return Vec::new();
+        };
+        let project = self.session().map(|s| s.project());
+        grid.columns.iter().map(|column| Self::clip_progress(project, monitor, column)).collect()
+    }
+
+    /// How far the clip in `column`'s playing slot is through its loop — or through itself,
+    /// without one — from the engine's beats since its launch, folded through its offset and loop.
+    fn clip_progress(
+        project: Option<&suhina_engine::model::Project>,
+        monitor: &suhina_engine::LauncherMonitor,
+        column: &crate::grid::Column,
+    ) -> Option<f32> {
+        // The launcher column's index in the monitor, and the slot playing there.
+        let index = column.launcher?;
+        let scene = monitor.column(index)?.playing?;
+        let clip = project?.launcher.columns.get(index)?.slots.get(scene)?.clip.as_ref()?;
+        // A slot's clip plays from its launch: the elapsed beats through its offset and loop.
+        let placement = piano_roll::Placement {
+            start: 0.0,
+            length: f64::INFINITY,
+            offset: clip.offset,
+            loop_range: clip.loop_range.map(|r| (r.start, r.end)),
+        };
+        let beat = placement.content_beat(monitor.elapsed_beats(index)?)?;
+        // How far through the loop — or, without one, the clip — that is.
+        let (from, span) = match clip.loop_range {
+            Some(range) if range.end > range.start => (range.start, range.end - range.start),
+            _ => (clip.offset, clip.length),
+        };
+        (span > 0.0).then(|| ((beat - from) / span).clamp(0.0, 1.0) as f32)
     }
 
     fn control_bar(
@@ -3260,7 +3512,7 @@ impl App {
         let tempo_rect = row(x, 56.0);
         let tempo_shown = self.tempo_drag.unwrap_or(grid.tempo_bpm);
         let response = widgets::value_area(ui, tempo_rect, Id::new("tempo"), "Tempo", format!("{tempo_shown:.2}"));
-        match widgets::drag_value(ui, &response, &mut self.tempo_drag, grid.tempo_bpm, 0.1, (20.0, 999.0), 120.0) {
+        match widgets::drag_value(ui, &response, &mut self.tempo_drag, grid.tempo_bpm, 0.1, 1.0, (20.0, 999.0), 120.0) {
             Drag::Done(bpm) => {
                 actions.push(Action::new("transport.setTempo", json!({ "bpm": (bpm * 100.0).round() / 100.0 })))
             }
@@ -3282,7 +3534,7 @@ impl App {
         );
         x = tempo_rect.right() + PAD;
         // The time signature playing, like the tempo: a launched scene may have changed it.
-        let ts = grid.meter.time_signature;
+        let ts = grid.time_signature();
         let signature =
             if self.session().is_some() { format!("{} / {}", ts.numerator, ts.denominator) } else { String::new() };
         let ts_rect = row(x, 40.0);

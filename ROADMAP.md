@@ -32,10 +32,10 @@ The gaps that matter most, in the order [ADR 0016](docs/decisions/0016-parity-ta
 3. **Recording and inputs:** audio and MIDI recording, audio inputs, monitoring, count-in
    ([#263](https://github.com/suhina-daw/suhina-daw/issues/263); arming and playing from MIDI
    controllers work).
-4. **Cue, and the rest of the mixer:** sends and return tracks play and level meters are done;
-   the cue output follows.
+4. **The crossfader and track delay:** sends and return tracks play, level meters are done and
+   the cue output works.
 5. **Arrangement editing:** the loop brace ([#98](https://github.com/suhina-daw/suhina-daw/issues/98)),
-   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)), split and consolidate.
+   locators ([#99](https://github.com/suhina-daw/suhina-daw/issues/99)).
 6. **EQ and filter**, then bus compressor, delays and reverb (see the devices below).
 7. **Launching from live MIDI notes** (the rest of M4, [#264](https://github.com/suhina-daw/suhina-daw/issues/264)).
 
@@ -148,6 +148,8 @@ Session clips do not fit ARA's linear timeline; Session view later. ADR before i
 From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-format.md),
 [corpus guide](docs/spec/als-corpus.md)):
 - tempo and time signature (read from their automation default, where Live keeps them)
+- tempo and time-signature changes over the song, from the breakpoints of the same envelopes
+  (a reading still to be confirmed by a corpus file; [tempo map](docs/spec/tempo-map.md))
 - MIDI, audio, group and return tracks; volume, pan, track on/off, sends (read, kept and
   played), routing into groups
 - scenes, session clip slots and arrangement clips
@@ -172,6 +174,16 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   return runs its devices over what it is sent and plays into the main channel or a group, with
   latency compensation on every send; loops are refused (`track.setSend`, `track.setSendMode`,
   `return.add`, `return.remove`, `return.rename`; [spec](docs/spec/sends-and-returns.md)).
+- Tempo and time-signature changes over the song (the tempo map): tempo steps and ramps, and
+  signature changes at bars, saved in the project file and edited with `tempo.addPoint`,
+  `tempo.movePoint`, `tempo.deletePoint` and `timeSignature.add`/`move`/`delete`. Notes, audio
+  clips (stretched or re-pitched), fades, the playhead, launched clips, launch quantisation and
+  the metronome all follow it; a ramp is converted exactly, so nothing drifts. The bar ruler
+  numbers bars through the signature changes and marks every change
+  ([spec](docs/spec/tempo-map.md)). The arrangement loop keeps its beats through a tempo change.
+- A launched scene's tempo or time signature overrides the tempo map until
+  `transport.followTempoMap`, the next start of the transport or an edit to the map
+  ([spec](docs/spec/tempo-map.md#scenes-and-the-tempo-map)).
 
 ### M3 Commands and agents (in progress)
 - Every edit is a command with an id, typed parameters and one undo step; failed or invalid edits
@@ -222,12 +234,18 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - One clip per track; a clip loops until it is stopped or replaced, a clip without a loop plays
   once. Scenes launch their row, empty slots with a stop button stop their track, and a scene
   tempo changes the tempo at the launch.
-- A track that launched a clip leaves its arrangement clips until "back to arrangement".
+- A track that launched a clip leaves its arrangement clips until "back to arrangement": in
+  the Arrangement view its lane dims, and while any track plays launched clips the ruler shows
+  a **Back to arrangement** icon at its right end, which returns every track to the arrangement.
 - Scenes are edited with commands and from the scene button's right-click menu: insert,
   duplicate (with copies of its clips), delete, rename, and a tempo and time signature that
   apply when the scene launches (bars and the metronome count in the new time signature from
   there). Playing clips stay with their row when scenes are inserted or deleted while playing
   ([#404](https://github.com/suhina-daw/suhina-daw/issues/404)).
+- A slot's mark is the shape its click does: a play triangle in the track colour while stopped,
+  a stop square while playing — a playing trigger clip's click stops it, and a playing scene's
+  row stops on its button's click (`scene.stop`). The Delete key takes a selected slot's clip
+  off its slot.
 - A sample dropped into a slot loops over the whole file even when its tempo is not known (it
   plays at its own speed); `clip.setLoop` switches a slot clip's loop off to make a one-shot.
 - An arrangement clip goes into a clip slot, and a slot's clip onto the arrangement, as a copy
@@ -476,22 +494,45 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
   double-click for off, right-click for before or after the fader.
+- Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
+  `track.adjustPan` move each track by the same amount, keeping what is between them, and
+  `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
+  volume or pan moves every selected track with it, the wheel over a value changes it (1 dB a
+  tick) instead of scrolling, and Settings › Interface › Arrangement › Mixer controls draws the
+  volume and pan as fields or as knobs ([spec](docs/spec/arrangement-editing.md#volume-pan-mute-and-solo)).
+- A cue output for headphones: Settings › Audio › Cue puts browser previews and the tracks whose
+  **C** button is on (`track.setCue`) on another output pair of the same device (outputs 3/4 and
+  up, `output.setCuePair`) at their own volume (`output.setCueVolume`), while the main outputs
+  stay as they are; `suhina-cli render --cue` writes the cue beside the mix
+  ([spec](docs/spec/cue-output.md)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
   stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
   sub-rows ([spec](docs/spec/arrangement-editing.md)).
+- Arrangement clips split and consolidate: Ctrl+E cuts the selected clip at the playhead and
+  a clip's right-click menu has Split here (`clip.split`, the second part playing on from where
+  the clip was); Ctrl+J or Consolidate turns a range of one track into one clip, MIDI by joining
+  the notes, audio by rendering the clips without devices to a WAV file next to the project
+  (`clip.consolidate`, [spec](docs/spec/arrangement-editing.md#splitting)).
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Groups inside groups, up to 16 levels ([#209](https://github.com/suhina-daw/suhina-daw/issues/209)):
   the sound goes through every group's volume, mute and devices to the output, solo follows the
-  nesting, and a fold arrow on a group's header hides its tracks in both views. Drag a header
+  nesting, and the fold triangle on a group's header hides its tracks in both views. Drag a header
   into a group, or use Move into group / Move out of group in its menu (`track.setGroup`); nested
   groups are saved and read from Live Sets ([spec](docs/spec/arrangement-editing.md#groups-inside-groups)).
 - A double-click on an empty Session slot or an empty spot of an Arrangement lane of a MIDI track
   makes an empty MIDI clip there, a bar long and on the grid (`clip.create`, also over MCP); in
   the Arrangement it is selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-midi-clip)).
+- Clips: Ctrl-click adds one to the selection and Shift-click takes the run up to one, Ctrl+A
+  selects the lot, and Ctrl+C, Ctrl+X, Ctrl+D, Delete and 0 (clip mute) act on the whole
+  selection as one undo step ([spec](docs/spec/arrangement-editing.md#selecting-clips)). Header
+  clicks take a run of tracks the same way.
+- A group's triangle folds its tracks away into one lane, which stands in for the track being
+  worked on (its clips, waveform and colour), or the first track inside it; a Stems file's group
+  arrives folded ([spec](docs/spec/arrangement-editing.md#folded-groups)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
@@ -548,6 +589,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ahead of the device instead of two, and Settings › Audio and `audio.info` say how long a key
   takes to be heard (`live_latency_ms`); at 128 frames, at most about 5 ms plus the device
   ([#265](https://github.com/suhina-daw/suhina-daw/issues/265), ADR 0017).
+- A buffer size is never asked of a driver that did not declare it: the dropdown lists the sizes
+  the device's own range allows, a range holding none of the engine's sizes (or no range at all)
+  leaves the driver its own buffer size and the notice says which size plays, and on WASAPI shared
+  mode the row is *Engine block* — Windows sets the device's buffer there, so the number is
+  Suhina's render block and the note names the period Windows gives the device, in milliseconds.
+  A device is not given up over a size its driver refuses: the same output is tried without one
+  before anything falls back.
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
@@ -591,6 +639,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   them; and Settings › Shortcuts has the presets **Select-first** (Ctrl+D duplicates) and
   **Draw-first** (Ctrl+B duplicates, a right-click in Draw and Paint deletes), kept in
   `keymap.json`.
+- **Piano roll, step 4** ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the toolbar
+  takes a size in Settings › General › Piano roll (Normal, Large, Larger, Large at first) and its
+  six tool icons are drawn as outlines; the **Mute** tool (key 6) mutes and unmutes the notes a
+  click or drag touches, and a muted note keeps its place in the clip, is drawn faded and is never
+  played (`note.setMuted`, and `Note.muted` in the model, the `.suhina` file and a Live Set's
+  `IsEnabled="false"`); a **MIDI tools column** beside the notes holds quantise (Ctrl+U still
+  works) and the tools Transpose, Humanise, Fit to scale, Invert, Reverse, Legato, ×2, ÷2 and the
+  velocity Randomise and Ramp, each one command (`note.humanize`, `.fitToScale`, `.invert`,
+  `.reverse`, `.legato`, `.stretch`, `.randomizeVelocity`, `.rampVelocity`) and one undo step; the
+  clip column lists what is selected (Notes "N of M", From, To, Pitch, Velocity); and
+  Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
+  (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
+  their own, kept in `keymap.json`.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

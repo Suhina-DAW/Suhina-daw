@@ -22,6 +22,7 @@ fn project() -> Project {
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
@@ -59,6 +60,7 @@ fn project() -> Project {
                     velocity: 1.0,
                     release_velocity: 0.5,
                     channel: 0,
+                    muted: false,
                 }]),
             }],
             extensions: Extensions::default(),
@@ -114,9 +116,9 @@ fn reads_project_tracks_and_clips() {
 fn edits_record_one_undo_step_each() {
     let mut session = Session::new(project());
     run(&mut session, "transport.setTempo", json!({ "bpm": 128 })).unwrap();
-    run(&mut session, "track.setVolume", json!({ "track": "Lead", "db": -6 })).unwrap();
-    run(&mut session, "track.setPan", json!({ "track": 2, "pan": -1 })).unwrap();
-    run(&mut session, "track.setMute", json!({ "track": "Bass", "mute": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Lead"], "db": -6 })).unwrap();
+    run(&mut session, "track.setPan", json!({ "tracks": [2], "pan": -1 })).unwrap();
+    run(&mut session, "track.setMute", json!({ "tracks": ["Bass"], "mute": true })).unwrap();
     run(&mut session, "clip.move", json!({ "track": "Bass", "index": 1, "start": 4 })).unwrap();
 
     let p = session.project();
@@ -153,7 +155,7 @@ fn a_new_edit_clears_redo_and_no_op_edits_record_nothing() {
 /// Pans `track` as a drag does: the first value without `continue`, the rest with it.
 fn drag_pan(session: &mut Session, track: Value, values: &[f64]) {
     for (i, pan) in values.iter().enumerate() {
-        let params = json!({ "track": track, "pan": pan, "continue": i > 0 });
+        let params = json!({ "tracks": [track], "pan": pan, "continue": i > 0 });
         let result = run(session, "track.setPan", params);
         assert!(result.is_ok(), "{result:?}");
     }
@@ -173,9 +175,9 @@ fn the_calls_of_one_drag_make_one_undo_step() {
 
     // A track named rather than numbered is the same track.
     let mut session = Session::new(project());
-    run(&mut session, "track.setVolume", json!({ "track": 1, "db": -1 })).unwrap();
-    run(&mut session, "track.setVolume", json!({ "track": "Bass", "db": -2, "continue": true })).unwrap();
-    run(&mut session, "track.setVolume", json!({ "track": "bass", "db": "-inf", "continue": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": [1], "db": -1 })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Bass"], "db": -2, "continue": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": ["bass"], "db": "-inf", "continue": true })).unwrap();
     assert_eq!(session.project().channels[0].volume, 0.0);
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(session.project(), &project());
@@ -192,10 +194,10 @@ fn a_second_drag_or_anything_between_starts_a_new_step() {
     // Another track, another command, or another edit between: `continue` starts a new step.
     let mut session = Session::new(project());
     drag_pan(&mut session, json!(1), &[0.1]);
-    run(&mut session, "track.setPan", json!({ "track": 2, "pan": 0.7, "continue": true })).unwrap();
-    run(&mut session, "track.setVolume", json!({ "track": 2, "db": -3, "continue": true })).unwrap();
-    run(&mut session, "track.setMute", json!({ "track": 1, "mute": true })).unwrap();
-    run(&mut session, "track.setPan", json!({ "track": 1, "pan": 0.9, "continue": true })).unwrap();
+    run(&mut session, "track.setPan", json!({ "tracks": [2], "pan": 0.7, "continue": true })).unwrap();
+    run(&mut session, "track.setVolume", json!({ "tracks": [2], "db": -3, "continue": true })).unwrap();
+    run(&mut session, "track.setMute", json!({ "tracks": [1], "mute": true })).unwrap();
+    run(&mut session, "track.setPan", json!({ "tracks": [1], "pan": 0.9, "continue": true })).unwrap();
     for pan in [0.1, 0.1, 0.1, 0.1, 0.0] {
         run(&mut session, "edit.undo", json!({})).unwrap();
         assert_eq!(session.project().channels[0].pan, pan);
@@ -207,7 +209,7 @@ fn a_second_drag_or_anything_between_starts_a_new_step() {
     run(&mut session, "transport.setTempo", json!({ "bpm": 100 })).unwrap();
     drag_pan(&mut session, json!(1), &[0.1, 0.2]);
     run(&mut session, "edit.undo", json!({})).unwrap();
-    run(&mut session, "track.setPan", json!({ "track": 1, "pan": 0.3, "continue": true })).unwrap();
+    run(&mut session, "track.setPan", json!({ "tracks": [1], "pan": 0.3, "continue": true })).unwrap();
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(session.project().channels[0].pan, 0.0);
     assert_eq!(session.project().transport.tempo_bpm, 100.0);
@@ -227,8 +229,8 @@ fn a_drag_that_starts_without_a_change_does_not_join_the_last_one() {
 #[test]
 fn volume_accepts_silence() {
     let mut session = Session::new(project());
-    let result = run(&mut session, "track.setVolume", json!({ "track": "Bass", "db": "-inf" })).unwrap();
-    assert_eq!(result["volume_db"], Value::Null);
+    let result = run(&mut session, "track.setVolume", json!({ "tracks": ["Bass"], "db": "-inf" })).unwrap();
+    assert_eq!(result["volume_db"], json!([Value::Null]));
     assert_eq!(session.project().channels[0].volume, 0.0);
 }
 
@@ -306,17 +308,57 @@ fn a_clip_moves_to_another_track_that_takes_its_kind() {
 #[test]
 fn solo_is_an_edit_and_can_be_exclusive() {
     let mut session = Session::new(project());
-    run(&mut session, "track.setSolo", json!({ "track": "Bass", "solo": true })).unwrap();
-    run(&mut session, "track.setSolo", json!({ "track": "Lead", "solo": true })).unwrap();
+    run(&mut session, "track.setSolo", json!({ "tracks": ["Bass"], "solo": true })).unwrap();
+    run(&mut session, "track.setSolo", json!({ "tracks": ["Lead"], "solo": true })).unwrap();
     let solos = |s: &Session| s.project().channels.iter().map(|c| c.solo).collect::<Vec<_>>();
     assert_eq!(solos(&session), [true, true]);
 
-    run(&mut session, "track.setSolo", json!({ "track": "Lead", "solo": true, "exclusive": true })).unwrap();
+    run(&mut session, "track.setSolo", json!({ "tracks": ["Lead"], "solo": true, "exclusive": true })).unwrap();
     assert_eq!(solos(&session), [false, true]);
 
     run(&mut session, "edit.undo", json!({})).unwrap();
     assert_eq!(solos(&session), [true, true]);
-    assert!(run(&mut session, "track.setSolo", json!({ "track": "Bass", "solo": "yes" })).is_err());
+    assert!(run(&mut session, "track.setSolo", json!({ "tracks": ["Bass"], "solo": "yes" })).is_err());
+}
+
+#[test]
+fn a_selection_moves_in_proportion_and_mutes_together() {
+    let volume = |s: &Session| s.project().channels.iter().map(|c| c.volume).collect::<Vec<_>>();
+    let mut session = Session::new(project());
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Bass"], "db": -6.0 })).unwrap();
+    assert_eq!(
+        run(&mut session, "track.setVolume", json!({ "tracks": ["Bass", "Lead"], "db": 0.0 })).unwrap()["volume_db"],
+        json!([0.0, 0.0])
+    );
+
+    // Both are set to the same level, then moved by the same number of dB: what they had between
+    // them stays.
+    run(&mut session, "track.setVolume", json!({ "tracks": ["Bass"], "db": -6.0 })).unwrap();
+    let moved = run(&mut session, "track.adjustVolume", json!({ "tracks": ["Bass", "Lead"], "db": 3.0 })).unwrap();
+    assert_eq!(moved["volume_db"], json!([-3.0, 3.0]));
+    assert_eq!(moved["tracks"], json!([1, 2]));
+    assert!((volume(&session)[0] - 10f64.powf(-3.0 / 20.0)).abs() < 1e-9);
+
+    // Pan moves the same way and stops at full left and right.
+    run(&mut session, "track.setPan", json!({ "tracks": ["Bass"], "pan": -0.9 })).unwrap();
+    run(&mut session, "track.setPan", json!({ "tracks": ["Lead"], "pan": 0.5 })).unwrap();
+    let panned = run(&mut session, "track.adjustPan", json!({ "tracks": ["Bass", "Lead"], "pan": -0.5 })).unwrap();
+    assert_eq!(panned["pan"], json!([-1.0, 0.0]));
+    assert!(run(&mut session, "track.adjustPan", json!({ "tracks": ["Bass"], "pan": 2.0 })).is_err());
+    assert!(run(&mut session, "track.adjustVolume", json!({ "tracks": ["Bass"], "db": "loud" })).is_err());
+
+    // Mute and solo take the whole list, as one undo step.
+    run(&mut session, "track.setMute", json!({ "tracks": ["Bass", "Lead"], "mute": true })).unwrap();
+    assert!(session.project().channels.iter().all(|c| c.mute));
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert!(session.project().channels.iter().all(|c| !c.mute));
+    let soloed = run(&mut session, "track.setSolo", json!({ "tracks": ["Bass", "Lead"], "solo": true })).unwrap();
+    assert_eq!(soloed["tracks"], json!([1, 2]));
+    assert!(session.project().channels.iter().all(|c| c.solo));
+
+    // A list that names nothing, or a track with no mixer channel, is refused.
+    assert!(run(&mut session, "track.setMute", json!({ "tracks": [], "mute": true })).is_err());
+    assert!(run(&mut session, "track.setMute", json!({ "tracks": ["Nope"], "mute": true })).is_err());
 }
 
 #[test]
@@ -394,14 +436,14 @@ fn a_stacked_clip_leaves_the_others_alone() {
 fn a_stacked_paste_or_duplicate_leaves_the_others_alone() {
     // Without stack, a pasted copy of the clip at 0 placed at 6 shortens the clip at 4.
     let mut session = Session::new(lane_project());
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
     run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 6 })).unwrap();
     assert!(spans(&session).contains(&(4.0, 2.0, 0.0)), "{:?}", spans(&session));
 
     // With stack, every clip keeps its span and the copy lies over them.
     let mut session = Session::new(lane_project());
     let before = spans(&session);
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
     run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 6, "stack": true })).unwrap();
     assert_eq!(spans(&session).len(), before.len() + 1);
     assert!(before.iter().all(|s| spans(&session).contains(s)), "{:?}", spans(&session));
@@ -410,15 +452,20 @@ fn a_stacked_paste_or_duplicate_leaves_the_others_alone() {
 
     // A duplicate replaces the clip after it unless stacked.
     let mut session = Session::new(lane_project());
-    run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
     assert_eq!(spans(&session).len(), 4, "the copy replaces the clip at 4");
     let mut session = Session::new(lane_project());
     let before = spans(&session);
-    let copy = run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0, "stack": true })).unwrap();
-    assert_eq!(copy["start"], 4.0);
+    let copy =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": "Bass", "index": 0 }], "stack": true }))
+            .unwrap();
+    assert_eq!(copy["clips"][0]["start"], 4.0);
     assert_eq!(spans(&session).len(), before.len() + 1);
     assert!(before.iter().all(|s| spans(&session).contains(s)), "{:?}", spans(&session));
-    assert!(run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0, "stack": "yes" })).is_err());
+    assert!(
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": "Bass", "index": 0 }], "stack": "yes" }))
+            .is_err()
+    );
 }
 
 fn order(session: &Session) -> Vec<String> {
@@ -593,14 +640,78 @@ fn tracks_rename_colour_and_delete() {
 #[test]
 fn clips_delete_and_duplicate() {
     let mut session = Session::new(project());
-    let copy = run(&mut session, "clip.duplicate", json!({ "track": "Bass", "index": 0 })).unwrap();
-    assert_eq!(copy["start"], 4.0);
+    let copy = run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
+    assert_eq!(copy["clips"][0]["start"], 4.0);
     let starts: Vec<f64> = session.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect();
     assert_eq!(starts, [0.0, 4.0, 8.0]);
-    run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 1 })).unwrap();
+    run(&mut session, "clip.delete", json!({ "clips": [{ "track": "Bass", "index": 1 }] })).unwrap();
     let starts: Vec<f64> = session.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect();
     assert_eq!(starts, [0.0, 8.0]);
-    assert!(run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 5 })).is_err());
+    assert!(run(&mut session, "clip.delete", json!({ "clips": [{ "track": "Bass", "index": 5 }] })).is_err());
+}
+
+/// The clips named by `indexes` on Bass, as `clip.*` commands take them.
+fn bass_clips(indexes: &[u64]) -> Value {
+    json!({ "clips": indexes.iter().map(|index| json!({ "track": "Bass", "index": index })).collect::<Vec<Value>>() })
+}
+
+/// The start and the on/off state of every clip on Bass.
+fn bass_spans(session: &Session) -> Vec<(f64, bool)> {
+    session.project().arrangement.lanes[0].clips.iter().map(|c| (c.start, c.enabled)).collect()
+}
+
+#[test]
+fn several_clips_mute_and_delete_as_one_undo_step() {
+    let mut session = Session::new(project());
+    assert_eq!(bass_spans(&session), [(0.0, true), (8.0, true)]);
+
+    // Both clips off together: one step, and one undo brings both back.
+    let mut params = bass_clips(&[0, 1]);
+    params["enabled"] = json!(false);
+    run(&mut session, "clip.setEnabled", params).unwrap();
+    assert_eq!(bass_spans(&session), [(0.0, false), (8.0, false)]);
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(bass_spans(&session), [(0.0, true), (8.0, true)]);
+
+    // Both gone together, the indices still meaning the clips the project listed.
+    run(&mut session, "clip.delete", bass_clips(&[0, 1])).unwrap();
+    assert!(bass_spans(&session).is_empty());
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    assert_eq!(bass_spans(&session).len(), 2);
+
+    // A list that names nothing, a clip without an index, an unknown track and an index past the
+    // end are all refused, and so is a list given with a single clip beside it.
+    for bad in [
+        json!({ "clips": [] }),
+        json!({ "clips": [{ "track": "Bass" }] }),
+        json!({ "clips": [{ "track": "Nope", "index": 0 }] }),
+        json!({ "clips": [{ "track": "Bass", "index": 9 }] }),
+        json!({ "clips": "Bass" }),
+        json!({ "clips": [{ "track": "Bass", "index": 0 }], "track": "Bass", "index": 1 }),
+    ] {
+        assert!(run(&mut session, "clip.delete", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(bass_spans(&session).len(), 2, "a refused list changes nothing");
+
+    // One clip by track and index still works, as the Session view's form by scene does.
+    run(&mut session, "clip.delete", json!({ "track": "Bass", "index": 0 })).unwrap();
+    assert_eq!(bass_spans(&session), [(8.0, true)]);
+}
+
+#[test]
+fn copied_clips_paste_together_and_keep_their_places() {
+    let mut session = Session::new(project());
+    let copied = run(&mut session, "clip.copy", bass_clips(&[0, 1])).unwrap();
+    assert_eq!(copied["copied"], json!(["Riff", "Riff"]));
+    let pasted = run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 16, "stack": true })).unwrap();
+    assert_eq!(pasted["clips"].as_array().map(Vec::len), Some(2));
+    let starts: Vec<f64> = session.project().arrangement.lanes[0].clips.iter().map(|c| c.start).collect();
+    assert_eq!(
+        starts,
+        [0.0, 8.0, 16.0, 24.0],
+        "the earliest copy lands on the start, the others keep their distance from it"
+    );
+    assert_eq!(session.project().validate(), Ok(()));
 }
 
 /// The test project with its second Bass clip playing an audio content.
@@ -839,16 +950,16 @@ fn clips_shortened_or_split_by_a_move_keep_fades_that_fit() {
 fn clips_copy_cut_and_paste_with_their_own_content() {
     let mut session = Session::new(project());
     assert!(run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 0 })).is_err(), "nothing copied yet");
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
     let pasted = run(&mut session, "clip.paste", json!({ "track": "Lead", "start": 16 })).unwrap();
     let p = session.project();
     let lead = p.arrangement.lanes.iter().find(|l| l.track == Some(TrackId(2))).unwrap();
-    let copy = &lead.clips[usize::try_from(pasted["index"].as_u64().unwrap()).unwrap()];
+    let copy = &lead.clips[usize::try_from(pasted["clips"][0]["index"].as_u64().unwrap()).unwrap()];
     assert_eq!(copy.start, 16.0);
     assert_ne!(copy.content, ContentId(1), "the copy has its own content");
     assert_eq!(p.validate(), Ok(()));
 
-    run(&mut session, "clip.cut", json!({ "track": "Bass", "index": 1 })).unwrap();
+    run(&mut session, "clip.cut", json!({ "clips": [{ "track": "Bass", "index": 1 }] })).unwrap();
     assert_eq!(session.project().arrangement.lanes[0].clips.len(), 1);
     run(&mut session, "clip.paste", json!({ "track": "Bass", "start": 20 })).unwrap();
     assert_eq!(session.project().arrangement.lanes[0].clips.len(), 2);
@@ -1018,7 +1129,7 @@ fn launcher_project() -> Project {
 fn an_arrangement_clip_pastes_into_a_slot_with_everything_it_carries() {
     let mut session = Session::new(launcher_project());
     let arranged = session.project().arrangement.lanes[0].clips[1].clone();
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 1 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 1 }] })).unwrap();
     let pasted = run(&mut session, "clip.paste", json!({ "track": "Drums", "scene": 2 })).unwrap();
     assert_eq!(pasted, json!({ "track": 3, "scene": 2, "replaced": false }));
     let p = session.project();
@@ -1042,7 +1153,7 @@ fn an_arrangement_clip_pastes_into_a_slot_with_everything_it_carries() {
 fn a_paste_into_a_held_slot_replaces_its_clip() {
     let mut session = Session::new(launcher_project());
     let before = session.project().launcher.columns[1].slots[0].clone();
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 1 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 1 }] })).unwrap();
     let pasted = run(&mut session, "clip.paste", json!({ "track": 3, "scene": 1 })).unwrap();
     assert_eq!(pasted["replaced"], true);
     let after = &session.project().launcher.columns[1].slots[0];
@@ -1055,7 +1166,7 @@ fn a_slot_clip_copies_onto_the_arrangement() {
     let mut session = Session::new(launcher_project());
     run(&mut session, "clip.copy", json!({ "track": "Drums", "scene": 1 })).unwrap();
     let pasted = run(&mut session, "clip.paste", json!({ "track": "Drums", "start": 16 })).unwrap();
-    assert_eq!((pasted["track"].as_u64(), pasted["start"].as_f64()), (Some(3), Some(16.0)));
+    assert_eq!((pasted["clips"][0]["track"].as_u64(), pasted["clips"][0]["start"].as_f64()), (Some(3), Some(16.0)));
     let p = session.project();
     let lane = p.arrangement.lanes.iter().find(|l| l.track == Some(TrackId(3))).unwrap();
     let slot = p.launcher.columns[1].slots[0].clip.clone().unwrap();
@@ -1063,7 +1174,7 @@ fn a_slot_clip_copies_onto_the_arrangement() {
     assert_eq!(Clip { content: slot.content, start: 0.0, ..lane.clips[0].clone() }, slot);
     assert_eq!(p.validate(), Ok(()));
     // A MIDI clip from a slot goes to a MIDI track's slot too.
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
     run(&mut session, "clip.paste", json!({ "track": "Bass", "scene": 1 })).unwrap();
     run(&mut session, "clip.copy", json!({ "track": "Bass", "scene": 1 })).unwrap();
     run(&mut session, "clip.paste", json!({ "track": "Bass", "scene": 2 })).unwrap();
@@ -1092,7 +1203,7 @@ fn malformed_copies_and_pastes_into_slots_are_errors_that_record_nothing() {
         "cut is for the arrangement"
     );
 
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 1 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 1 }] })).unwrap();
     let before = session.project().clone();
     for params in [
         json!({ "track": "Drums" }),
@@ -1111,7 +1222,7 @@ fn malformed_copies_and_pastes_into_slots_are_errors_that_record_nothing() {
     }
     // Audio onto a MIDI track's slot, and MIDI onto an audio track's.
     assert!(run(&mut session, "clip.paste", json!({ "track": "Bass", "scene": 2 })).is_err());
-    run(&mut session, "clip.copy", json!({ "track": "Bass", "index": 0 })).unwrap();
+    run(&mut session, "clip.copy", json!({ "clips": [{ "track": "Bass", "index": 0 }] })).unwrap();
     assert!(run(&mut session, "clip.paste", json!({ "track": "Drums", "scene": 2 })).is_err());
     assert_eq!(session.project(), &before);
     assert!(run(&mut session, "edit.undo", json!({})).is_err(), "nothing was recorded");

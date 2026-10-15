@@ -2,7 +2,7 @@
 //! instrument device of a project (`plugin run-device`). The engine plays plug-ins in a track's
 //! chain itself once they are part of it; until then this reads the clips the way the engine's
 //! renderer does: each clip's window of its content, a loop range repeating until the clip ends,
-//! at the project's tempo.
+//! through the project's tempo map.
 
 use suhina_engine::model::*;
 use suhina_plugins::Event;
@@ -14,12 +14,8 @@ const MAX_NOTES: usize = 100_000;
 /// `frames` frames at `sample_rate`, sorted by frame. Frames count from `from_beat`.
 pub fn events(project: &Project, channel: ChannelId, from_beat: f64, frames: u64, sample_rate: u32) -> Vec<Event> {
     let Some(track) = project.tracks.iter().find(|t| t.channel == Some(channel)) else { return Vec::new() };
-    let tempo = if project.transport.tempo_bpm.is_finite() && project.transport.tempo_bpm > 0.0 {
-        project.transport.tempo_bpm
-    } else {
-        120.0
-    };
-    let frames_per_beat = f64::from(sample_rate) * 60.0 / tempo;
+    let map = project.transport.tempo_map(f64::from(sample_rate));
+    let from_frame = map.time_at(from_beat);
     let mut notes: Vec<(f64, f64, &Note)> = Vec::new();
     for lane in project.arrangement.lanes.iter().filter(|l| l.track == Some(track.id)) {
         for clip in lane.clips.iter().filter(|c| c.enabled) {
@@ -31,8 +27,8 @@ pub fn events(project: &Project, channel: ChannelId, from_beat: f64, frames: u64
             }
         }
     }
-    let end_beat = from_beat + frames as f64 / frames_per_beat;
-    let frame = |beat: f64| ((beat - from_beat).max(0.0) * frames_per_beat).round() as u32;
+    let end_beat = map.beat_at(from_frame + frames as f64);
+    let frame = |beat: f64| (map.time_at(beat.max(from_beat)) - from_frame).max(0.0).round() as u32;
     let mut events = Vec::new();
     for (start, end, note) in notes {
         if end <= from_beat || start >= end_beat {
@@ -139,7 +135,7 @@ mod tests {
     }
 
     fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.5, key, velocity: 0.75, release_velocity: 0.25, channel: 0 }
+        Note { time, duration: 0.5, key, velocity: 0.75, release_velocity: 0.25, channel: 0, muted: false }
     }
 
     fn summary(events: &[Event]) -> Vec<(u32, bool, u8)> {

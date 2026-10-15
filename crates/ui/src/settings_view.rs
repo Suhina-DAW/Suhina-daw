@@ -4,11 +4,12 @@
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use crate::keymap::{Keymap, Preset, Shortcut, actions};
+use crate::keymap::{Keymap, MouseSwitch, Preset, Shortcut, actions};
 use crate::motion;
 use crate::pick::PickField;
 use crate::settings::{
-    AtStart, DeviceLayout, EditorPlacement, Graphics, OnOpen, PianoRollTop, PlayFrom, Settings, Side, StopReturn,
+    AtStart, DeviceLayout, EditorPlacement, Graphics, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side,
+    StopReturn, ToolbarSize,
 };
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
@@ -190,7 +191,7 @@ pub struct PageState {
 }
 
 /// What the user did on the page this frame.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Outcome {
     pub changed: bool,
     pub close: bool,
@@ -199,7 +200,8 @@ pub struct Outcome {
     pub keymap_changed: bool,
     /// The most colour tags the browser may have, as chosen.
     pub tag_limit: Option<usize>,
-    /// The audio output was chosen anew: the app runs `audio.setOutput` with it.
+    /// The audio output was chosen anew: the app runs `audio.setOutput` with it, or
+    /// `output.setCuePair` or `output.setCueVolume` when only the cue changed.
     pub audio_output: Option<suhina_session::OutputChoice>,
     /// The audio devices should be listed again.
     pub audio_refresh: bool,
@@ -488,6 +490,41 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.piano_grid_follows = choice;
                 outcome.changed = true;
             }
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Toolbar size",
+                "The toolbar's box, its gaps and the icon strokes inside it, scaled together",
+            );
+            let options: Vec<(&str, ToolbarSize)> = ToolbarSize::ALL.iter().map(|s| (s.name(), *s)).collect();
+            if let Some(size) =
+                segmented(ui, &painter, control_rect(r, 3), "Toolbar size", &options, settings.toolbar_size)
+            {
+                settings.toolbar_size = size;
+                outcome.changed = true;
+            }
+            // The four mouse switches of the Mouse-first preset: their own rows, kept in the
+            // keymap rather than in the settings, so they are saved beside the keys.
+            for switch in MouseSwitch::ALL {
+                let r = row(&mut y);
+                label(&painter, r, switch.name(), "");
+                let options = [("Off", false), ("On", true)];
+                let current = keymap.mouse().get(switch);
+                if let Some(on) = segmented(ui, &painter, control_rect(r, 2), switch.name(), &options, current) {
+                    keymap.set_mouse(switch, on);
+                    outcome.keymap_changed = true;
+                }
+            }
+            let note = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), 14.0));
+            widgets::text_in(
+                &painter,
+                note,
+                Align2::LEFT_CENTER,
+                "Kept in keymap.json with the keys; turning one off leaves the preset's name",
+                theme::ui_font(theme::TEXT_SMALL),
+                theme::text_secondary(),
+            );
         }
         Page::Interface => {
             section(&mut y, "Interface");
@@ -623,6 +660,20 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 segmented(ui, &painter, control_rect(r, 2), "Allow MIDI stacking", &on_off, settings.midi_stacking)
             {
                 settings.midi_stacking = on;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(
+                &painter,
+                r,
+                "Mixer controls",
+                "A track's volume and pan as a field, or as a knob: the wheel over either changes it",
+            );
+            let options = [("Field", MixerControls::Field), ("Knob", MixerControls::Knob)];
+            if let Some(controls) =
+                segmented(ui, &painter, control_rect(r, 2), "Mixer controls", &options, settings.mixer_controls)
+            {
+                settings.mixer_controls = controls;
                 outcome.changed = true;
             }
         }
@@ -935,8 +986,9 @@ fn shortcuts_page(
         changed = true;
     }
 
-    // The preset: two sets of keys, one for drawing notes first and one for selecting first. A
-    // choice sets the keys it names; single keys can still be changed below.
+    // The preset: three sets of keys, one for drawing notes first, one for selecting first and
+    // one for working with the mouse. A choice sets the keys and the switches it names; single
+    // keys can still be changed below.
     let mut top = head.bottom() + 4.0;
     let preset_row = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 24.0));
     let preset_label = Rect::from_min_size(preset_row.min, Vec2::new(LABEL_WIDTH, 20.0));
@@ -949,8 +1001,11 @@ fn shortcuts_page(
         theme::text_primary(),
     );
     let current = keymap.preset();
-    let control =
-        Rect::from_min_size(Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()), Vec2::new(160.0, SEGMENT));
+    // 64 px a part, as the measurements give every segmented control in Settings.
+    let control = Rect::from_min_size(
+        Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()),
+        Vec2::new(64.0 * Preset::ALL.len() as f32, SEGMENT),
+    );
     let options: Vec<(&str, Preset)> = Preset::ALL.iter().map(|p| ((*p).name(), *p)).collect();
     if let Some(picked) = preset_segmented(ui, painter, control, &options, current) {
         keymap.set_preset(picked);
@@ -1136,8 +1191,8 @@ fn plugin_section(
 }
 
 /// Settings › Audio: host, device, sample rate and buffer size as dropdowns of what the driver
-/// allows, exclusive mode, and what plays now with its latency and underruns. Returns a new
-/// choice, and whether the devices should be listed again.
+/// allows, exclusive mode, the cue's output pair and volume, and what plays now with its
+/// latency and underruns. Returns a new choice, and whether the devices should be listed again.
 fn audio_page(
     ui: &mut Ui,
     painter: &egui::Painter,
@@ -1214,18 +1269,53 @@ fn audio_page(
     if let Some(rate) = choice_dropdown(ui, painter, r, "Sample rate", &options, &choice.sample_rate) {
         picked = choice.with_params(&serde_json::json!({ "sample_rate": rate.unwrap_or(0) })).ok();
     }
-    // Buffer size.
+    // The buffer row says what the number is, and it is the device's own buffer only where it is
+    // asked of the driver: ASIO (when its driver declared a size the engine can render in) and
+    // WASAPI exclusive mode. Everywhere else it is Suhina's render block alone: WASAPI shared
+    // mode plays the period Windows gives the device, whatever is asked, and a driver that
+    // declared no size Suhina can render in keeps its own (ADR 0006). The exclusive row below is
+    // WASAPI's alone.
+    let wasapi = host.is_some_and(|h| h.name == "WASAPI");
+    let sizes = device.map_or_else(Vec::new, |d| d.buffer_sizes.clone());
+    let declares = device.and_then(|d| d.buffer_range);
+    let exclusive = wasapi && choice.exclusive && device.is_some_and(|d| d.exclusive);
+    // The number is the device's own only where one of its declared sizes is asked of it.
+    let device_sets = exclusive || (!wasapi && declares.is_some() && !sizes.is_empty());
+    // The period Windows gives the device is a duration, but WASAPI reports it in frames at the
+    // device's own rate, so it is said in milliseconds: the same duration at any rate.
+    let period_ms = device
+        .and_then(|d| Some((d.buffer_range?, d.default_sample_rate?)))
+        .filter(|((min, max), _)| min == max)
+        .map(|((min, _), rate)| f64::from(min) * 1000.0 / f64::from(rate.max(1)));
     let r = row(y);
     let rate = f64::from(choice.sample_rate.or(default_rate).unwrap_or(48_000));
-    label(painter, r, "Buffer size", "The engine renders in blocks of it; smaller is quicker, larger is safer");
+    let (name, note) = if exclusive {
+        ("Buffer size", "The device's own buffer; Windows asks the device for it".to_string())
+    } else if device_sets {
+        let note = match declares {
+            Some((min, max)) if min < max => {
+                format!("The device's own buffer, from its driver: {min} to {max} frames")
+            }
+            Some((min, _)) => format!("The device's own buffer; its driver allows {min} frames only"),
+            None => "The device's own buffer; its driver sets the size".to_string(),
+        };
+        ("Buffer size", note)
+    } else if wasapi {
+        let note = match period_ms {
+            Some(ms) => format!("Suhina's render block; Windows plays this device in {ms:.1} ms periods"),
+            None => "Suhina's render block; Windows sets the device's buffer".to_string(),
+        };
+        ("Engine block", note)
+    } else {
+        ("Engine block", "Suhina's render block; the driver keeps its own buffer size".to_string())
+    };
+    label(painter, r, name, &note);
     let mut options: Vec<(String, Option<u32>)> = vec![("Default (1024 frames)".to_string(), None)];
-    let sizes = device.map_or_else(Vec::new, |d| d.buffer_sizes.clone());
     options.extend(sizes.iter().map(|n| (format!("{n} frames ({:.1} ms)", f64::from(*n) * 1000.0 / rate), Some(*n))));
-    if let Some(frames) = choice_dropdown(ui, painter, r, "Buffer size", &options, &choice.buffer_frames) {
+    if let Some(frames) = choice_dropdown(ui, painter, r, name, &options, &choice.buffer_frames) {
         picked = choice.with_params(&serde_json::json!({ "buffer_frames": frames.unwrap_or(0) })).ok();
     }
     // Exclusive mode, WASAPI only.
-    let wasapi = host.is_some_and(|h| h.name == "WASAPI");
     let r = row(y);
     let note = if !wasapi {
         "WASAPI only; ASIO always has the device to itself"
@@ -1263,6 +1353,42 @@ fn audio_page(
     }));
     if let Some(input) = choice_dropdown(ui, painter, r, "Input", &options, &choice.input) {
         picked = choice.with_params(&serde_json::json!({ "input": input.as_text() })).ok();
+    }
+
+    *y += 8.0;
+    section(y, "Cue");
+    // The cue's output pair: the device's pairs after the main output's.
+    let r = row(y);
+    let channels = device.map_or(2, |d| d.channels);
+    let note = match choice.cue_pair {
+        Some(pair) if choice.check_cue_pair(device.map(|d| d.channels)).is_err() => {
+            let (first, second) = suhina_session::audio::cue_channels(pair);
+            format!("The device has no {first}/{second}; the cue plays with the main output")
+        }
+        _ if channels < 4 => "The device has two outputs: previews play with the main output".to_string(),
+        _ => "Where previews and cued tracks (C) play, such as headphones".to_string(),
+    };
+    label(painter, r, "Cue output", &note);
+    let mut options: Vec<(String, Option<u16>)> = vec![("Same as main (1/2)".to_string(), None)];
+    let pairs = (channels / 2).saturating_sub(1).min(suhina_session::audio::MAX_CUE_PAIR);
+    options.extend((1..=pairs).map(|pair| {
+        let (first, second) = suhina_session::audio::cue_channels(pair);
+        (format!("Outputs {first}/{second}"), Some(pair))
+    }));
+    if let Some(pair) = choice.cue_pair.filter(|p| *p > pairs) {
+        let (first, second) = suhina_session::audio::cue_channels(pair);
+        options.push((format!("Outputs {first}/{second} (not there)"), Some(pair)));
+    }
+    if let Some(pair) = choice_dropdown(ui, painter, r, "Cue output", &options, &choice.cue_pair) {
+        picked = choice.with_params(&serde_json::json!({ "cue_pair": pair.unwrap_or(0) })).ok();
+    }
+    // The cue volume.
+    let r = row(y);
+    label(painter, r, "Cue volume", "How loud the cue plays; the main output does not change");
+    let options = [("-12 dB", -12), ("-6 dB", -6), ("0 dB", 0), ("+6 dB", 6)];
+    let db = settings.audio_cue_volume;
+    if let Some(db) = segmented(ui, painter, control_rect(r, 4), "Cue volume", &options, db) {
+        picked = choice.with_cue_volume(&serde_json::json!({ "db": db })).ok();
     }
 
     *y += 8.0;
@@ -1327,7 +1453,7 @@ fn audio_page(
     (picked, response.clicked())
 }
 
-/// A segmented control for the keymap preset: the two sets of keys, with the chosen one lit.
+/// A segmented control for the keymap preset: the sets of keys, with the chosen one lit.
 /// Returns the preset clicked, if it is not the current one.
 fn preset_segmented(
     ui: &Ui,

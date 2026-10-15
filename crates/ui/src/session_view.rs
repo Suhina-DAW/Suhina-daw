@@ -22,10 +22,12 @@ const PITCH: f32 = ROW + 1.0;
 /// Width of a group header's fold arrow.
 const FOLD_ARROW: f32 = 12.0;
 /// Mark sizes inside a slot.
-const CLIP_MARK: f32 = 6.0;
+const CLIP_MARK: f32 = 10.0;
 /// The part of a clip's slot that launches it: the mark and the padding around it.
 const LAUNCH_WIDTH: f32 = PAD + CLIP_MARK + PAD;
 const EMPTY_MARK: f32 = 3.0;
+/// The play and stop glyph size in a scene row, where the glyph sits on the row's fill.
+const SLOT_GLYPH: f32 = 4.5;
 /// How dim a muted track's lane is.
 const MUTED_ALPHA: f32 = 0.55;
 /// Volume range of the mixer's value, in dB.
@@ -59,6 +61,12 @@ pub struct SessionViewState {
     /// Group tracks folded shut: their tracks' columns are hidden. The arrangement view's,
     /// copied in while this view shows.
     pub folded: BTreeSet<TrackId>,
+    /// Where the mixer strip's pan and volume controls were drawn last frame: the wheel over one
+    /// changes its value instead of scrolling the view.
+    value_areas: Vec<Rect>,
+    /// The volume as a knob beside the pan knob instead of a plain value
+    /// (Settings › Interface › Arrangement › Mixer controls).
+    pub knobs: bool,
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).
     pub drop: Option<DropProbe>,
@@ -150,7 +158,8 @@ pub fn show(
     let tracks_clip = Rect::from_min_max(area.min, Pos2::new(returns_x - 1.0, area.bottom()));
     let returns_clip = Rect::from_min_max(Pos2::new(returns_x, area.top()), Pos2::new(scenes_x - 1.0, area.bottom()));
 
-    // Scrolling: the body scrolls both ways; header and mixer follow the tracks sideways.
+    // Scrolling: the body scrolls both ways; header and mixer follow the tracks sideways. The
+    // wheel over a mixer value is that value's, so the view leaves it alone.
     // The tracks in their groups, and those a folded group hides.
     let places: Vec<Place> = grid.columns.iter().filter(|c| c.kind != ColumnKind::Return).map(Column::place).collect();
     let hidden = nesting::hidden(&places, &state.folded);
@@ -161,9 +170,14 @@ pub fn show(
         .map(|c| column_width(c) + 1.0)
         .sum();
     let content_height = (grid.scenes.len() as f32 + 1.0) * PITCH;
+    let fields = std::mem::take(&mut state.value_areas);
     if ui.rect_contains_pointer(area) {
-        let delta = ui.input(|i| i.smooth_scroll_delta());
-        state.scroll -= delta;
+        let over_field =
+            ui.ctx().pointer_hover_pos().is_some_and(|pointer| fields.iter().any(|rect| rect.contains(pointer)));
+        if !over_field {
+            let delta = ui.input(|i| i.smooth_scroll_delta());
+            state.scroll -= delta;
+        }
     }
     state.scroll.x = state.scroll.x.clamp(0.0, (content_width - tracks_clip.width()).max(0.0));
     state.scroll.y = state.scroll.y.clamp(0.0, (content_height - body.height()).max(0.0));
@@ -553,7 +567,8 @@ fn column_body(
                 format!("Stop {} (scene {number})", column.name),
             )),
             _ => {
-                let label = format!("Launch {name} on {} (scene {number})", column.name);
+                let verb = if slot.state == SlotState::Playing { "Stop" } else { "Launch" };
+                let label = format!("{verb} {name} on {} (scene {number})", column.name);
                 let response = ui.interact(launch_rect.intersect(clip), id.with(scene), sense);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
                 Some(response)
@@ -569,10 +584,18 @@ fn column_body(
         let hover = [&launch, &select].into_iter().flatten().map(|r| widgets::hover(ui, r)).fold(0.0, f32::max);
         let pulse = if slot.state == SlotState::Queued { motion::pulse(ui.ctx()) } else { 1.0 };
         // The launch button launches as the pointer goes down, and releases a gate or repeat
-        // clip as it goes up.
+        // clip as it goes up. A playing trigger clip's press stops it instead.
         if slot.state != SlotState::Empty
             && let Some(response) = &launch
-            && crate::slot_launch::press_and_release(ui, response, column.track, number, slot.launch, actions)
+            && crate::slot_launch::press_and_release(
+                ui,
+                response,
+                column.track,
+                number,
+                slot.launch,
+                slot.state == SlotState::Playing,
+                actions,
+            )
             && selectable
             && !state.keep_selection_on_launch
         {
@@ -580,6 +603,8 @@ fn column_body(
         }
         if !has_clip && column.notes && launch.as_ref().is_some_and(Response::double_clicked) {
             actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
+            // The new clip is selected, so the detail area opens its piano roll.
+            state.select_slot(column.track, scene);
         }
         if select.as_ref().is_some_and(Response::clicked) {
             state.select_slot(column.track, scene);
@@ -700,14 +725,30 @@ fn slot_cell(
                 painter.rect_stroke(mark_rect(CLIP_MARK), 0.0, theme::hairline(accent), StrokeKind::Outside);
                 painter.rect_stroke(rect, 0.0, theme::hairline(accent), StrokeKind::Inside);
             } else {
-                painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(mark, column.mute));
+                // The mark is the shape its click does: a play triangle while stopped.
+                let box_rect = mark_rect(CLIP_MARK);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        box_rect.center() + Vec2::new(-3.0, -5.0),
+                        box_rect.center() + Vec2::new(5.0, 0.0),
+                        box_rect.center() + Vec2::new(-3.0, 5.0),
+                    ],
+                    lane(mark, column.mute),
+                    egui::Stroke::NONE,
+                ));
             }
             let text = if column.mute { theme::text_hint() } else { text };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
         }
         SlotState::Playing => {
             painter.rect_filled(rect, 0.0, lane(theme::control_playing(), column.mute));
-            painter.rect_filled(mark_rect(CLIP_MARK), 0.0, lane(track_color, column.mute));
+            // The mark is the shape its click does: a stop square while playing. A stopped
+            // clip's mark is the play triangle the same way, for its click's launch.
+            painter.rect_filled(
+                Rect::from_center_size(mark_rect(CLIP_MARK).center(), Vec2::splat(CLIP_MARK - 2.0)),
+                0.0,
+                lane(track_color, column.mute),
+            );
             let text = if column.mute { theme::text_hint() } else { theme::text_playing() };
             widgets::text_in(painter, name_rect, Align2::LEFT_CENTER, &slot.name, font, text);
             let done = progress.unwrap_or(1.0).clamp(0.0, 1.0);
@@ -744,6 +785,7 @@ fn mixer_strip(
         _ => column.pan,
     };
     let knob_rect = Rect::from_min_size(inner.min, Vec2::splat(theme::KNOB));
+    state.value_areas.push(knob_rect);
     let pan_response = widgets::value_area(
         ui,
         knob_rect,
@@ -762,10 +804,10 @@ fn mixer_strip(
     let set_pan = |v: f64| {
         Action::new(
             "track.setPan",
-            json!({ "track": track.0, "pan": (v * 100.0).round() / 100.0, "continue": continued }),
+            json!({ "tracks": [track.0], "pan": (v * 100.0).round() / 100.0, "continue": continued }),
         )
     };
-    match widgets::drag_value(ui, &pan_response, &mut preview, column.pan, 0.01, (-1.0, 1.0), 0.0) {
+    match widgets::drag_value(ui, &pan_response, &mut preview, column.pan, 0.01, 0.02, (-1.0, 1.0), 0.0) {
         Drag::Moving(v) => {
             state.drag = Some((track, Control::Pan, v));
             actions.push(set_pan(v));
@@ -802,6 +844,7 @@ fn mixer_strip(
     let volume_top = if column.sends.is_empty() { inner.top() } else { values.top() };
     let volume_rect =
         Rect::from_min_max(Pos2::new(inner.center().x, volume_top), Pos2::new(inner.right(), values.bottom()));
+    state.value_areas.push(volume_rect);
     let volume_response = widgets::value_area(
         ui,
         volume_rect,
@@ -817,9 +860,9 @@ fn mixer_strip(
     let continued = preview.is_some();
     let set_volume = |v: f64| {
         let db = if v <= VOLUME_RANGE.0 { json!("-inf") } else { json!((v * 10.0).round() / 10.0) };
-        Action::new("track.setVolume", json!({ "track": track.0, "db": db, "continue": continued }))
+        Action::new("track.setVolume", json!({ "tracks": [track.0], "db": db, "continue": continued }))
     };
-    match widgets::drag_value(ui, &volume_response, &mut preview, column.volume_db, 0.25, VOLUME_RANGE, 0.0) {
+    match widgets::drag_value(ui, &volume_response, &mut preview, column.volume_db, 0.25, 1.0, VOLUME_RANGE, 0.0) {
         Drag::Moving(v) => {
             state.drag = Some((track, Control::Volume, v));
             actions.push(set_volume(v));
@@ -837,6 +880,12 @@ fn mixer_strip(
     };
     let volume_color = motion::mix(theme::text_value(), theme::text_primary(), widgets::hover(ui, &volume_response));
     widgets::text_in(painter, values, Align2::RIGHT_CENTER, &widgets::format_db(volume_shown), mono, volume_color);
+    // With knobs asked for, the volume gets one of its own beside the pan knob.
+    if state.knobs {
+        let center = Pos2::new(knob_rect.right() + 6.0 + theme::KNOB / 2.0, knob_rect.center().y);
+        let position = crate::arrangement_view::volume_position(volume_shown);
+        widgets::knob(painter, center, theme::KNOB, position, volume_color);
+    }
 
     // Toggle row: track on, showing the track number.
     let toggle = Rect::from_min_size(
@@ -844,9 +893,9 @@ fn mixer_strip(
         Vec2::new(inner.width(), theme::TOGGLE),
     );
     let label = if column.mute { format!("Turn {} on", column.name) } else { format!("Turn {} off", column.name) };
-    // Track on takes two thirds and solo one; on a track that can be armed, solo and arm take a
-    // quarter each.
-    let small = if column.armable { (toggle.width() - 4.0) / 4.0 } else { (toggle.width() - 2.0) / 3.0 };
+    // Track on takes what solo and cue leave (a quarter each); on a track that can be armed,
+    // solo, cue and arm take a fifth each. 2 px apart.
+    let small = if column.armable { (toggle.width() - 6.0) / 5.0 } else { (toggle.width() - 4.0) / 4.0 };
     let toggle = if column.armable {
         let arm = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
         if let Some(action) = widgets::arm_button(
@@ -865,14 +914,23 @@ fn mixer_strip(
     } else {
         toggle
     };
-    let solo = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
+    let cue = Rect::from_min_max(Pos2::new(toggle.right() - small, toggle.top()), toggle.max);
+    let solo = Rect::from_min_max(
+        Pos2::new(cue.left() - 2.0 - small, toggle.top()),
+        Pos2::new(cue.left() - 2.0, toggle.bottom()),
+    );
     let toggle = Rect::from_min_max(toggle.min, Pos2::new(solo.left() - 2.0, toggle.bottom()));
-    if let Some(action) = widgets::solo_button(ui, painter, solo, id.with("solo"), track.0, &column.name, column.solo) {
+    if let Some(action) =
+        widgets::solo_button(ui, painter, solo, id.with("solo"), &[track.0], &column.name, column.solo)
+    {
+        actions.push(action);
+    }
+    if let Some(action) = widgets::cue_button(ui, painter, cue, id.with("cue"), track.0, &column.name, column.cue) {
         actions.push(action);
     }
     let response = widgets::button_area(ui, toggle, id.with("on"), label);
     if response.clicked() {
-        actions.push(Action::new("track.setMute", json!({ "track": track.0, "mute": !column.mute })));
+        actions.push(Action::new("track.setMute", json!({ "tracks": [track.0], "mute": !column.mute })));
     }
     let (fill, text) = widgets::toggle_colors(ui, &response, !column.mute);
     painter.rect_filled(toggle, 0.0, fill);
@@ -923,7 +981,7 @@ fn send_knobs(
         };
         let level = if send.level_db.is_finite() { send.level_db } else { VOLUME_RANGE.0 };
         let mut committed = None;
-        match widgets::drag_value(ui, &response, &mut preview, level, 0.25, VOLUME_RANGE, VOLUME_RANGE.0) {
+        match widgets::drag_value(ui, &response, &mut preview, level, 0.25, 1.0, VOLUME_RANGE, VOLUME_RANGE.0) {
             Drag::Moving(v) => state.drag = Some((track, control, v)),
             Drag::Done(v) => {
                 state.drag = None;
@@ -985,15 +1043,18 @@ fn scene_column(
             continue;
         }
         let label = if scene.name.is_empty() {
-            format!("Launch scene {}", scene.number)
+            format!("{} scene {}", if scene.playing { "Stop" } else { "Launch" }, scene.number)
         } else {
-            format!("Launch scene {} {}", scene.number, scene.name)
+            format!("{} scene {} {}", if scene.playing { "Stop" } else { "Launch" }, scene.number, scene.name)
         };
         let response = widgets::button_area(ui, rect.intersect(clip), Id::new(("scene", scene.number)), label);
         let target = MappingTarget::Scene { scene: scene.number.saturating_sub(1) };
         if response.clicked() {
             if keys.mode.on {
                 keys.pick(target);
+            } else if scene.playing {
+                // A playing row's click stops its clips; anything else launches.
+                actions.push(Action::new("scene.stop", json!({ "scene": scene.number })));
             } else {
                 actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
             }
@@ -1006,6 +1067,19 @@ fn scene_column(
         let playing = motion::toward(ui.ctx(), response.id.with("playing"), scene.playing, motion::VALUE);
         let fill = motion::mix(hover, theme::control_playing(), playing);
         painter.rect_filled(rect, 0.0, fill);
+        // The row's glyph: the play arrow while its clips wait for a launch, the stop square
+        // while the row plays — the click does what the glyph says.
+        let glyph = Rect::from_min_size(
+            Pos2::new(rect.left() + PAD, rect.center().y - SLOT_GLYPH / 2.0),
+            Vec2::splat(SLOT_GLYPH),
+        );
+        crate::browser_view::play_glyph(
+            painter,
+            glyph.center(),
+            scene.playing,
+            motion::mix(theme::text_secondary(), theme::text_primary(), widgets::hover(ui, &response).max(playing)),
+            SLOT_GLYPH,
+        );
         let inner = rect.shrink2(Vec2::new(PAD, 0.0));
         let mut name = scene.name.clone();
         if let Some(tempo) = scene.tempo_bpm {
@@ -1023,7 +1097,10 @@ fn scene_column(
             theme::mono_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
-        let name_rect = Rect::from_min_max(inner.min, Pos2::new(inner.right() - 18.0, inner.bottom()));
+        let name_rect = Rect::from_min_max(
+            Pos2::new(glyph.right() + PAD, inner.top()),
+            Pos2::new(inner.right() - 18.0, inner.bottom()),
+        );
         widgets::text_in(
             painter,
             name_rect,

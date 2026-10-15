@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 157
+COMMANDS = 183
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -38,7 +38,7 @@ CHAPTERS = [
     (1, "Welcome to Live", 1, None, "n/a", "Front matter."),
     (2, "First Steps (installation, Learn/Info view, Settings)", 11, 0.52, "partial",
      "Release and nightly packages for Windows, macOS and Linux; Help > About names the build "
-     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive; "
+     "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue; "
      "a change or a device back after unplugging keeps playback and launched clips going; "
      "input device, MIDI inputs on/off), "
      "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
@@ -59,16 +59,18 @@ CHAPTERS = [
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.49, "partial",
+    (6, "Arrangement View", 22, 0.59, "partial",
      "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
      "overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to "
      "triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades "
      "and ruler clicks (Alt for off the grid), nested groups folded and unfolded, "
      "tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live "
      "Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps "
-     "sample-accurately; imported from Live Sets). A clip's loop range is read and drawn but no "
-     "command sets it. Missing previous/next marker, punch in/out, time-signature changes, split, "
-     "consolidate, crop, crossfades, linked-track editing, the time commands."),
+     "sample-accurately; imported from Live Sets), split at the playhead or a clicked beat, consolidate "
+     "(MIDI joined, audio rendered to a file), time-signature changes (commands; the ruler counts bars "
+     "through them and marks them). A clip's loop range is read and drawn but no "
+     "command sets it. Missing previous/next marker, punch in/out, editing signature changes on the ruler, "
+     "time selections, crop, crossfades, linked-track editing, the time commands."),
     (7, "Session View", 13, 0.62, "partial",
      "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
      "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
@@ -76,29 +78,38 @@ CHAPTERS = [
      "scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature "
      "each. A launched clip is selected and the detail area shows its follow-action controls. "
      "Missing capture-and-insert scene, moving clips between slots, select-on-launch options."),
-    (8, "Clip View", 34, 0.15, "started",
+    (8, "Clip View", 34, 0.18, "started",
      "Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll "
      "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of "
-     "tool icons with the note clipboard, and the quantise controls in the clip column. No loop "
+     "tool icons with the note clipboard and a toolbar size, a MIDI tools column beside the notes, "
+     "and the selection described in the clip column (count, span, pitch and velocity range). No loop "
      "or marker editing, no clip panels, no sample editor, no groove/scale panels."),
-    (9, "Audio Clips, Tempo, and Warping", 18, 0.35, "partial",
+    (9, "Audio Clips, Tempo, and Warping", 18, 0.38, "partial",
      "Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, "
      "six warp modes in the model, tempo detect for the browser. One stretch algorithm serves "
      "every mode except Re-pitch, so the mode names are not yet different algorithms, and rates "
-     "outside 0.25x-4x fall back to Re-pitch. Missing tap tempo, tempo follower/leader, auto-warp "
-     "of long samples, warp-marker editing, quantise audio, tempo automation."),
-    (10, "Editing MIDI", 41, 0.33, "started",
+     "outside 0.25x-4x fall back to Re-pitch. Tempo changes over the song (steps and ramps, a tempo "
+     "map every clip follows, read from a set's tempo envelope; a scene tempo overrides it until "
+     "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
+     "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
+     "automation envelope."),
+    (10, "Editing MIDI", 41, 0.37, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
-     "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase and Slice "
-     "tools (keys 1 to 5, the wheel with the right button held steps through them) and "
+     "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute "
+     "tools (keys 1 to 6, the wheel with the right button held steps through them) and "
      "its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, "
      "splits them at a drawn cut line (note.split splits every note the line crosses), plays keys "
-     "through the track's instrument, "
-     "quantises them (Ctrl+U, and grid, amount and ends in the clip column) and edits velocity in a lane, "
+     "through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is "
+     "never played, in the model, the project file and an imported Live Set), "
+     "quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, "
      "through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty "
      "MIDI clip is made with a double-click on a slot or a lane (clip.create). No "
-     "transpose tools, fold, scales, chords, deactivated notes, probability or MPE lanes."),
-    (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
+     "fold, scales, chords, probability or MPE lanes."),
+    (11, "MIDI Tools", 37, 0.12, "started",
+     "A MIDI tools column runs quantise, transpose, humanise, fit to scale, invert, reverse, legato, "
+     "x2 and /2 and the velocity randomise and ramp over the selection or the whole clip, each one "
+     "note.* command with undo and a seed for the random ones. No chord/strum/arpeggiate tools, no "
+     "generative or shape-based tools."),
     (12, "Editing MPE", 10, 0.00, "absent", "No MPE data, editing or MPE-aware devices."),
     (13, "Converting Audio to MIDI", 5, 0.05, "planned",
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),
@@ -106,7 +117,8 @@ CHAPTERS = [
     (15, "Using Tuning Systems", 9, 0.00, "absent", "No .scl/.ascl tuning systems."),
     (16, "Launching Clips", 12, 0.77, "partial",
      "Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time "
-     "signature), stop, loop, back to arrangement, warped launched clips, follow actions (A/B by "
+     "signature), stop, loop, back to arrangement (the arrangement's dimmed lanes and the ruler's "
+     "button), warped launched clips, follow actions (A/B by "
      "chance, linked or timed, jump to a slot; by command and in the detail area), samples looping "
      "in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop), "
      "launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch "
@@ -117,14 +129,14 @@ CHAPTERS = [
      "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
      "with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No "
      "MIDI out, external instrument, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.52, "partial",
+    (18, "Mixing", 18, 0.57, "partial",
      "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
      "sends pre or post fader into return tracks that run their device chains (track.setSend, "
-     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), and level "
-     "meters (peak, RMS, clip) per track, group, return and main, also over MCP; return tracks "
-     "imported and drawn. Missing crossfader, cue, track delay, send fields in the Arrangement "
-     "headers."),
+     "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level "
+     "meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output "
+     "on a second pair of the device (previews, per-track cue, cue volume); return tracks "
+     "imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers."),
     (19, "Recording New Clips", 13, 0.00, "absent",
      "Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI "
      "recording, no overdub, no count-in, no capture MIDI."),

@@ -4,11 +4,14 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, FadeCurve, FadeShape, LaneData, LoopRange, MAX_GROUP_DEPTH,
-    Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, FadeCurve, FadeShape, LaneData, LoopRange,
+    MAX_GROUP_DEPTH, Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
-use crate::{CommandError, Session, automation, devices, files, follow, launch, mapping, meters, notes, preview};
+use crate::{
+    CommandError, Session, automation, devices, editing, files, follow, launch, mapping, meters, note_tools, notes,
+    preview, tempo,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -53,6 +56,7 @@ impl ParamType {
             Self::Integers => "integers",
             Self::Notes => "notes",
             Self::Numbers => "numbers",
+            Self::Clips => "clips",
         }
     }
 }
@@ -96,6 +100,8 @@ pub enum ParamType {
     Notes,
     /// A list of numbers.
     Numbers,
+    /// A list of arrangement clips, each `{ "track": …, "index": n }`.
+    Clips,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -122,6 +128,7 @@ const CONTINUE: Param = optional(
     "true adds the change to the undo step of the previous call of this command on this track, \
      when no other edit came between (one drag, one step)",
 );
+const TRACKS: Param = param("tracks", ParamType::Tracks, "the tracks to act on (ids or names), at least one");
 const DEVICE: Param = param("device", ParamType::Integer, "device index on the track, from 0, as in track.devices");
 const RETURN: Param = param("return", ParamType::Track, "return track id or name, from project.tracks");
 const SCENE: Param = param("scene", ParamType::Integer, "scene number, from 1, as in project.launcher");
@@ -131,6 +138,9 @@ const CLIP_INDEX: Param =
 const CLIP_SCENE: Param =
     optional("scene", ParamType::Integer, "instead of index: the clip in the track's slot of this scene, from 1");
 const NOTES: Param = param("notes", ParamType::Integers, "note indices, from note.list; at most 10000");
+/// The notes a MIDI tool acts on: the named ones, or every note of the clip.
+const NOTE_SELECTION: Param =
+    optional("notes", ParamType::Integers, "note indices, from note.list; every note when left out");
 const AUTOMATED: Param = param(
     "param",
     ParamType::Text,
@@ -149,6 +159,20 @@ const CURVE: Param = optional(
     "shape of the segment to the next point, -1 to 1: 0 a straight line (the default), above 0 fast first, below 0 slow first",
 );
 const MARKER: Param = param("index", ParamType::Integer, "marker index, from 0, as in project.markers");
+/// `clip.delete` takes a list of arrangement clips, or one clip by `track` with `index` or `scene`.
+const DELETE_CLIPS: Param = optional(
+    "clips",
+    ParamType::Clips,
+    "arrangement clips, each { \"track\": id or name, \"index\": n } as project.clips lists them; \
+     instead of track with index or scene",
+);
+const DELETE_TRACK: Param =
+    optional("track", ParamType::Track, "with index or scene instead of clips: the clip's track, id or name");
+const CLIPS: Param = param(
+    "clips",
+    ParamType::Clips,
+    "the clips to act on, each { \"track\": id or name, \"index\": n } as project.clips lists them; at least one",
+);
 
 pub struct CommandSpec<T: 'static = Session> {
     /// Stable id in `area.verb` form; part of the public interface for agents.
@@ -167,7 +191,12 @@ impl<T> CommandSpec<T> {
         for p in self.params {
             if matches!(
                 p.ty,
-                ParamType::Tracks | ParamType::Texts | ParamType::Integers | ParamType::Notes | ParamType::Numbers
+                ParamType::Tracks
+                    | ParamType::Texts
+                    | ParamType::Integers
+                    | ParamType::Notes
+                    | ParamType::Numbers
+                    | ParamType::Clips
             ) {
                 let items = match p.ty {
                     ParamType::Tracks => json!({ "type": ["integer", "string"] }),
@@ -184,15 +213,27 @@ impl<T> CommandSpec<T> {
                         "additionalProperties": false,
                     }),
                     ParamType::Numbers => json!({ "type": "number" }),
+                    ParamType::Clips => json!({
+                        "type": "object",
+                        "properties": {
+                            "track": { "type": ["integer", "string"] },
+                            "index": { "type": "integer" },
+                        },
+                        "required": ["track", "index"],
+                        "additionalProperties": false,
+                    }),
                     _ => json!({ "type": "string" }),
                 };
                 properties.insert(p.name.to_string(), json!({ "type": "array", "items": items, "description": p.doc }));
                 continue;
             }
             let ty = match p.ty {
-                ParamType::Tracks | ParamType::Texts | ParamType::Integers | ParamType::Notes | ParamType::Numbers => {
-                    json!("array")
-                }
+                ParamType::Tracks
+                | ParamType::Texts
+                | ParamType::Integers
+                | ParamType::Notes
+                | ParamType::Numbers
+                | ParamType::Clips => json!("array"),
                 ParamType::Number => json!("number"),
                 ParamType::Integer => json!("integer"),
                 ParamType::Bool => json!("boolean"),
@@ -301,10 +342,81 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_loop_enabled,
     },
     CommandSpec {
-        id: "track.setVolume",
-        label: "Set a track's volume",
+        id: "tempo.points",
+        label: "List the tempo map: the start tempo and every tempo change (numbered from 1), the start time signature and every time-signature change",
+        params: &[],
+        kind: CommandKind::Read,
+        run: tempo::points,
+    },
+    CommandSpec {
+        id: "tempo.addPoint",
+        label: "Add a tempo change at a beat: a step, or a ramp that glides from the tempo before it (one already on that beat is replaced)",
         params: &[
-            TRACK,
+            param("beat", ParamType::Number, "where the change is, in beats from the start, after 0"),
+            param("bpm", ParamType::Number, "the tempo from there, 20 to 999"),
+            optional(
+                "ramp",
+                ParamType::Bool,
+                "glide from the tempo before to this one, reaching it at the beat (default false: a step)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::add_point,
+    },
+    CommandSpec {
+        id: "tempo.movePoint",
+        label: "Move a tempo change to another beat, or change its tempo or whether it ramps",
+        params: &[
+            param("point", ParamType::Integer, "tempo point number, from 1, as in tempo.points"),
+            optional("beat", ParamType::Number, "the new beat, after 0"),
+            optional("bpm", ParamType::Number, "the new tempo, 20 to 999"),
+            optional("ramp", ParamType::Bool, "whether it glides from the tempo before"),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::move_point,
+    },
+    CommandSpec {
+        id: "tempo.deletePoint",
+        label: "Remove a tempo change",
+        params: &[param("point", ParamType::Integer, "tempo point number, from 1, as in tempo.points")],
+        kind: CommandKind::Edit,
+        run: tempo::delete_point,
+    },
+    CommandSpec {
+        id: "timeSignature.add",
+        label: "Change the time signature from the start of a bar (one already at that bar is replaced)",
+        params: &[
+            param("bar", ParamType::Integer, "bar number, from 2 (bar 1 has the start signature)"),
+            param("numerator", ParamType::Integer, "beats in a bar, 1 to 99"),
+            param("denominator", ParamType::Integer, "the note value of a beat: 1, 2, 4, 8, 16, 32 or 64"),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::add_signature,
+    },
+    CommandSpec {
+        id: "timeSignature.move",
+        label: "Move a time-signature change to another bar, or change its signature",
+        params: &[
+            param("bar", ParamType::Integer, "the bar the change is at, from 2"),
+            optional("to", ParamType::Integer, "the bar to move it to, from 2"),
+            optional("numerator", ParamType::Integer, "beats in a bar, 1 to 99"),
+            optional("denominator", ParamType::Integer, "1, 2, 4, 8, 16, 32 or 64"),
+        ],
+        kind: CommandKind::Edit,
+        run: tempo::move_signature,
+    },
+    CommandSpec {
+        id: "timeSignature.delete",
+        label: "Remove a time-signature change",
+        params: &[param("bar", ParamType::Integer, "the bar the change is at, from 2")],
+        kind: CommandKind::Edit,
+        run: tempo::delete_signature,
+    },
+    CommandSpec {
+        id: "track.setVolume",
+        label: "Set the volume of each named track",
+        params: &[
+            TRACKS,
             param("db", ParamType::Decibels, "level in dB, at most +6; \"-inf\" or below -150 is silence"),
             CONTINUE,
         ],
@@ -312,16 +424,30 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_volume,
     },
     CommandSpec {
+        id: "track.adjustVolume",
+        label: "Move the volume of each named track by the same number of decibels, keeping their differences",
+        params: &[TRACKS, param("db", ParamType::Number, "how far to move it, in dB; positive is louder")],
+        kind: CommandKind::Edit,
+        run: adjust_volume,
+    },
+    CommandSpec {
         id: "track.setPan",
-        label: "Set a track's pan",
-        params: &[TRACK, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right"), CONTINUE],
+        label: "Set the pan of each named track",
+        params: &[TRACKS, param("pan", ParamType::Number, "-1 is full left, 0 centre, 1 full right"), CONTINUE],
         kind: CommandKind::Edit,
         run: set_pan,
     },
     CommandSpec {
+        id: "track.adjustPan",
+        label: "Move the pan of each named track by the same amount, keeping their differences",
+        params: &[TRACKS, param("pan", ParamType::Number, "how far to move it, -1 … +1; positive is right")],
+        kind: CommandKind::Edit,
+        run: adjust_pan,
+    },
+    CommandSpec {
         id: "track.setMute",
-        label: "Mute or unmute a track",
-        params: &[TRACK, param("mute", ParamType::Bool, "true mutes the track")],
+        label: "Mute or unmute each named track",
+        params: &[TRACKS, param("mute", ParamType::Bool, "true mutes the tracks")],
         kind: CommandKind::Edit,
         run: set_mute,
     },
@@ -387,10 +513,10 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.delete",
-        label: "Delete an arrangement clip",
-        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        label: "Delete arrangement clips as one undo step, or the clip in a track's slot of a scene",
+        params: &[DELETE_CLIPS, DELETE_TRACK, CLIP_INDEX, CLIP_SCENE],
         kind: CommandKind::Edit,
-        run: delete_clip,
+        run: delete_clips,
     },
     CommandSpec {
         id: "clip.setGain",
@@ -434,25 +560,29 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.copy",
-        label: "Copy a clip, with what it plays, for clip.paste: an arrangement clip by index, or a clip slot's by scene",
+        label: "Copy clips, with what they play, for clip.paste: arrangement clips by clips, or a clip slot's by track and scene",
         params: &[
-            TRACK,
-            optional("index", ParamType::Integer, "arrangement clip index on the track, from project.clips"),
+            optional(
+                "clips",
+                ParamType::Clips,
+                "the arrangement clips to copy, each { \"track\": id or name, \"index\": n } as project.clips lists them",
+            ),
+            optional("track", ParamType::Track, "instead of clips, with scene: the track whose clip slot to copy"),
             optional(
                 "scene",
                 ParamType::Integer,
-                "instead of index: the clip in this scene's slot, from 1, as in project.launcher",
+                "with track: the clip in this scene's slot, from 1, as in project.launcher",
             ),
         ],
         kind: CommandKind::Read,
-        run: copy_clip,
+        run: copy_clips,
     },
     CommandSpec {
         id: "clip.cut",
-        label: "Copy an arrangement clip for clip.paste and delete it",
-        params: &[TRACK, param("index", ParamType::Integer, "clip index on the track, from project.clips")],
+        label: "Copy arrangement clips for clip.paste and delete them, as one undo step",
+        params: &[CLIPS],
         kind: CommandKind::Edit,
-        run: cut_clip,
+        run: cut_clips,
     },
     CommandSpec {
         id: "clip.paste",
@@ -476,18 +606,46 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.duplicate",
-        label: "Place a copy of an arrangement clip right after it, replacing what the copy covers unless stacked",
+        label: "Place a copy of each arrangement clip right after it, replacing what the copies cover unless stacked",
         params: &[
-            TRACK,
-            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            CLIPS,
             optional(
                 "stack",
                 ParamType::Bool,
-                "true leaves clips under the copy as they are; false (default) shortens, splits or removes them",
+                "true leaves clips under the copies as they are; false (default) shortens, splits or removes them",
             ),
         ],
         kind: CommandKind::Edit,
-        run: duplicate_clip,
+        run: duplicate_clips,
+    },
+    CommandSpec {
+        id: "clip.setEnabled",
+        label: "Turn arrangement clips on or off: a clip that is off is drawn dimmed and plays nothing",
+        params: &[CLIPS, param("enabled", ParamType::Bool, "true plays the clips, false silences them")],
+        kind: CommandKind::Edit,
+        run: set_clip_enabled,
+    },
+    CommandSpec {
+        id: "clip.split",
+        label: "Cut an arrangement clip in two at a song position; the second part plays on from where the clip was",
+        params: &[
+            TRACK,
+            param("index", ParamType::Integer, "clip index on the track, from project.clips"),
+            param("at", ParamType::Number, "where to cut, in beats from the beginning of the song, inside the clip"),
+        ],
+        kind: CommandKind::Edit,
+        run: editing::split_clip,
+    },
+    CommandSpec {
+        id: "clip.consolidate",
+        label: "Turn a range of one track into one clip: MIDI clips by joining their notes, audio clips by rendering them (no devices) to a new file next to the project",
+        params: &[
+            TRACK,
+            param("start", ParamType::Number, "where the range starts, in beats from the beginning, at least 0"),
+            param("end", ParamType::Number, "where the range ends, in beats, after start"),
+        ],
+        kind: CommandKind::Edit,
+        run: editing::consolidate,
     },
     CommandSpec {
         id: "track.setOutput",
@@ -498,14 +656,21 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "track.setSolo",
-        label: "Solo a track or end its solo: while any track is soloed, only soloed tracks, the groups they play into and return tracks are heard",
+        label: "Solo the named tracks or end their solo: while any track is soloed, only soloed tracks, the groups they play into and return tracks are heard",
         params: &[
-            TRACK,
-            param("solo", ParamType::Bool, "true solos the track"),
+            TRACKS,
+            param("solo", ParamType::Bool, "true solos the tracks"),
             optional("exclusive", ParamType::Bool, "true also ends every other solo (false by default)"),
         ],
         kind: CommandKind::Edit,
         run: set_solo,
+    },
+    CommandSpec {
+        id: "track.setCue",
+        label: "Turn a track's cue on or off: a cued track is also heard on the cue output (headphones, output.setCuePair), after its own volume and pan, while the main mix stays as it is",
+        params: &[TRACK, param("cue", ParamType::Bool, "true cues the track")],
+        kind: CommandKind::Edit,
+        run: set_cue,
     },
     CommandSpec {
         id: "clip.move",
@@ -621,6 +786,13 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_position,
     },
     CommandSpec {
+        id: "transport.followTempoMap",
+        label: "Play the arrangement's tempo and time signature again after a launched scene's tempo or time signature took over; starting the transport does the same",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: follow_tempo_map,
+    },
+    CommandSpec {
         id: "transport.setMetronome",
         label: "Turn the metronome on or off: a click on every beat while playing, higher on the bar",
         params: &[
@@ -712,6 +884,13 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[SCENE],
         kind: CommandKind::Transport,
         run: launch_scene,
+    },
+    CommandSpec {
+        id: "scene.stop",
+        label: "Stop a scene's row: every track whose slot in that row has a clip stops at the next quantisation boundary",
+        params: &[SCENE],
+        kind: CommandKind::Transport,
+        run: stop_scene,
     },
     CommandSpec {
         id: "scene.insert",
@@ -1321,7 +1500,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "note.list",
-        label: "List a MIDI clip's notes: index, time and length in beats, key (60 is C3), velocity 1 to 127",
+        label: "List a MIDI clip's notes: index, time and length in beats, key (60 is C3), velocity 1 to 127 and whether it is muted",
         params: &[TRACK, CLIP_INDEX, CLIP_SCENE],
         kind: CommandKind::Read,
         run: notes::list,
@@ -1451,6 +1630,126 @@ static COMMANDS: &[CommandSpec] = &[
         ],
         kind: CommandKind::Edit,
         run: notes::split,
+    },
+    CommandSpec {
+        id: "note.setMuted",
+        label: "Mute or unmute notes of a MIDI clip; with muted left out each named note is flipped; the result gives the state of each",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            optional("muted", ParamType::Bool, "true mutes them, false unmutes them; left out flips each note"),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::set_muted,
+    },
+    CommandSpec {
+        id: "note.humanize",
+        label: "Move the starts and velocities of notes of a MIDI clip by a random draw; the same seed gives the same result, and the result gives the seed",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            optional("time", ParamType::Number, "how far a start may move, in beats, 0 to 1 (default 0.02)"),
+            optional("velocity", ParamType::Number, "how far a velocity may move, in MIDI steps, 0 to 127 (default 8)"),
+            optional(
+                "seed",
+                ParamType::Integer,
+                "the draw to repeat, 0 or more; left out, a fresh one is used and returned",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::humanize,
+    },
+    CommandSpec {
+        id: "note.fitToScale",
+        label: "Move notes of a MIDI clip to the nearest key of a scale over a root; a tie goes to the lower key",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            optional(
+                "root",
+                ParamType::Text,
+                "the key the scale starts on: a name such as C, F# or Bb, or 0 to 11 (default C)",
+            ),
+            optional(
+                "scale",
+                ParamType::Text,
+                "major, minor, harmonicMinor, melodicMinor, dorian, phrygian, lydian, mixolydian, locrian, majorPentatonic, minorPentatonic or blues (default major)",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::fit_to_scale,
+    },
+    CommandSpec {
+        id: "note.invert",
+        label: "Mirror the keys of notes of a MIDI clip around the middle of the range they cover, each kept within 0 to 127",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTE_SELECTION],
+        kind: CommandKind::Edit,
+        run: note_tools::invert,
+    },
+    CommandSpec {
+        id: "note.reverse",
+        label: "Turn notes of a MIDI clip round in time inside their own span (the earliest start to the latest end), lengths unchanged",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTE_SELECTION],
+        kind: CommandKind::Edit,
+        run: note_tools::reverse,
+    },
+    CommandSpec {
+        id: "note.legato",
+        label: "Make each note of a MIDI clip last until the next note of its key starts, at least a hundredth of a beat; the last of a key keeps its length",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTE_SELECTION],
+        kind: CommandKind::Edit,
+        run: note_tools::legato,
+    },
+    CommandSpec {
+        id: "note.stretch",
+        label: "Stretch notes of a MIDI clip in time about the earliest of their starts; 2 is twice as long, 0.5 half of it",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            param("factor", ParamType::Number, "how much longer or shorter, 0.01 to 100"),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::stretch,
+    },
+    CommandSpec {
+        id: "note.randomizeVelocity",
+        label: "Move the velocities of notes of a MIDI clip by a random draw, each kept within 1 to 127; the same seed gives the same result",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            optional("amount", ParamType::Number, "how far a velocity may move, in MIDI steps, 0 to 127 (default 16)"),
+            optional(
+                "seed",
+                ParamType::Integer,
+                "the draw to repeat, 0 or more; left out, a fresh one is used and returned",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::randomize_velocity,
+    },
+    CommandSpec {
+        id: "note.rampVelocity",
+        label: "Spread the velocities of notes of a MIDI clip evenly from one value to another in time order; one note takes the last value",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTE_SELECTION,
+            param("from", ParamType::Integer, "the velocity of the first note in time order, 1 to 127"),
+            param("to", ParamType::Integer, "the velocity of the last note in time order, 1 to 127"),
+        ],
+        kind: CommandKind::Edit,
+        run: note_tools::ramp_velocity,
     },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
@@ -1644,14 +1943,35 @@ fn set_loop_enabled(session: &mut Session, params: &Value) -> Result<Value, Comm
 
 fn set_volume(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let db = number_or_neg_infinity(params, "db")?;
-    if db > 6.0 {
-        return Err(format!("db must be at most +6, got {db}").into());
+    if db > MAX_VOLUME_DB {
+        return Err(format!("db must be at most +{MAX_VOLUME_DB}, got {db}").into());
     }
-    let gain = if db < -150.0 { 0.0 } else { 10f64.powf(db / 20.0) };
-    let channel = channel_param(session, params)?;
-    channel.volume = gain;
-    let off = automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::VOLUME);
-    Ok(with_override(json!({ "volume_db": to_db(gain) }), off))
+    let channels = channel_ids(&session.project, params)?;
+    let gain = gain_of_db(db);
+    let mut off = false;
+    for (_, id) in &channels {
+        if let Some(channel) = session.project.channels.iter_mut().find(|c| c.id == *id) {
+            channel.volume = gain;
+            off |= automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::VOLUME);
+        }
+    }
+    Ok(with_override(json!({ "tracks": track_ids(&channels), "volume_db": vec![to_db(gain); channels.len()] }), off))
+}
+
+fn adjust_volume(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let db = number(params, "db")?;
+    let channels = channel_ids(&session.project, params)?;
+    let mut volumes = Vec::with_capacity(channels.len());
+    let mut off = false;
+    for (_, id) in &channels {
+        let Some(channel) = session.project.channels.iter_mut().find(|c| c.id == *id) else { continue };
+        let now = to_db(channel.volume).unwrap_or(f64::NEG_INFINITY);
+        let next = (now + db).clamp(MIN_VOLUME_DB, MAX_VOLUME_DB);
+        channel.volume = gain_of_db(next);
+        off |= automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::VOLUME);
+        volumes.push(to_db(channel.volume));
+    }
+    Ok(with_override(json!({ "tracks": track_ids(&channels), "volume_db": volumes }), off))
 }
 
 fn set_pan(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -1659,18 +1979,45 @@ fn set_pan(session: &mut Session, params: &Value) -> Result<Value, CommandError>
     if !(-1.0..=1.0).contains(&pan) {
         return Err(format!("pan must be between -1 and 1, got {pan}").into());
     }
-    let channel = channel_param(session, params)?;
-    channel.pan = pan;
-    let off = automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::PAN);
-    Ok(with_override(json!({ "pan": pan }), off))
+    let channels = channel_ids(&session.project, params)?;
+    let mut off = false;
+    for (_, id) in &channels {
+        if let Some(channel) = session.project.channels.iter_mut().find(|c| c.id == *id) {
+            channel.pan = pan;
+            off |= automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::PAN);
+        }
+    }
+    Ok(with_override(json!({ "tracks": track_ids(&channels), "pan": vec![pan; channels.len()] }), off))
+}
+
+fn adjust_pan(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let pan = number(params, "pan")?;
+    if !(-1.0..=1.0).contains(&pan) {
+        return Err(format!("pan must be between -1 and 1, got {pan}").into());
+    }
+    let channels = channel_ids(&session.project, params)?;
+    let mut pans = Vec::with_capacity(channels.len());
+    let mut off = false;
+    for (_, id) in &channels {
+        let Some(channel) = session.project.channels.iter_mut().find(|c| c.id == *id) else { continue };
+        channel.pan = (channel.pan + pan).clamp(-1.0, 1.0);
+        off |= automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::PAN);
+        pans.push(channel.pan);
+    }
+    Ok(with_override(json!({ "tracks": track_ids(&channels), "pan": pans }), off))
 }
 
 fn set_mute(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let mute = params.get("mute").and_then(Value::as_bool).ok_or("mute must be true or false")?;
-    let channel = channel_param(session, params)?;
-    channel.mute = mute;
-    let off = automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::MUTE);
-    Ok(with_override(json!({ "mute": mute }), off))
+    let channels = channel_ids(&session.project, params)?;
+    let mut off = false;
+    for (_, id) in &channels {
+        if let Some(channel) = session.project.channels.iter_mut().find(|c| c.id == *id) {
+            channel.mute = mute;
+            off |= automation::override_lane(&mut channel.automation, |l| l.param == suhina_model::automation::MUTE);
+        }
+    }
+    Ok(with_override(json!({ "tracks": track_ids(&channels), "mute": mute }), off))
 }
 
 /// A set command's answer, saying `"automation": "off"` when the change turned the parameter's
@@ -1682,8 +2029,34 @@ pub(crate) fn with_override(mut answer: Value, off: bool) -> Value {
     answer
 }
 
+/// The loudest a track's volume can be, in dB, and the floor `track.adjustVolume` stops at
+/// (silence starts below it).
+const MAX_VOLUME_DB: f64 = 6.0;
+const MIN_VOLUME_DB: f64 = -150.0;
+
+/// A volume in dB as a linear gain: silence at or below [`MIN_VOLUME_DB`].
+fn gain_of_db(db: f64) -> f64 {
+    if db < MIN_VOLUME_DB { 0.0 } else { 10f64.powf(db / 20.0) }
+}
+
+/// The mixer channel of every track `params.tracks` names, in that order, checked.
+fn channel_ids(p: &Project, params: &Value) -> Result<Vec<(TrackId, ChannelId)>, CommandError> {
+    let mut out = Vec::new();
+    for track in track_list(p, params)? {
+        let found = p.tracks.iter().find(|t| t.id == track).ok_or("the track is missing")?;
+        let channel = found.channel.ok_or_else(|| format!("track {:?} has no mixer channel", found.name))?;
+        out.push((track, channel));
+    }
+    Ok(out)
+}
+
+/// The track ids of [`channel_ids`], for a command's result.
+fn track_ids(channels: &[(TrackId, ChannelId)]) -> Vec<u32> {
+    channels.iter().map(|(track, _)| track.0).collect()
+}
+
 /// The ids in `params.tracks`, each resolved like a track parameter.
-fn track_list(p: &Project, params: &Value) -> Result<Vec<TrackId>, CommandError> {
+pub(crate) fn track_list(p: &Project, params: &Value) -> Result<Vec<TrackId>, CommandError> {
     let list = params.get("tracks").and_then(Value::as_array).ok_or("tracks must be a list of track ids or names")?;
     let mut ids = Vec::new();
     for value in list {
@@ -1731,6 +2104,7 @@ pub(crate) fn group_tracks(session: &mut Session, params: &Value) -> Result<Valu
         pan: 0.0,
         mute: false,
         solo: false,
+        cue: false,
         output,
         sends: Vec::new(),
         devices: Vec::new(),
@@ -1943,8 +2317,37 @@ fn delete_track(session: &mut Session, params: &Value) -> Result<Value, CommandE
     Ok(json!({ "deleted": track.0 }))
 }
 
+/// The clips `params.clips` names, each `{ "track": …, "index": n }` as `project.clips` lists
+/// them: at least one, without duplicates, every one of them there.
+fn clip_list(p: &Project, params: &Value) -> Result<Vec<(TrackId, usize)>, CommandError> {
+    let list = params.get("clips").and_then(Value::as_array).ok_or("clips must be a list of {track, index}")?;
+    let mut out: Vec<(TrackId, usize)> = Vec::new();
+    for entry in list {
+        let track = track_at(p, entry, "track")?;
+        let index = entry.get("index").and_then(Value::as_u64).ok_or("each clip needs an index from project.clips")?;
+        let lane = p
+            .arrangement
+            .lanes
+            .iter()
+            .position(|l| l.track == Some(track))
+            .ok_or("the track has no arrangement lane")?;
+        let count = p.arrangement.lanes.get(lane).map_or(0, |l| l.clips.len());
+        let index = usize::try_from(index)
+            .ok()
+            .filter(|i| *i < count)
+            .ok_or_else(|| format!("clip index {index} does not exist; the track has {count} arrangement clips"))?;
+        if !out.contains(&(track, index)) {
+            out.push((track, index));
+        }
+    }
+    if out.is_empty() {
+        return Err("clips must name at least one clip".into());
+    }
+    Ok(out)
+}
+
 /// The lane of `params.track` and the clip index in it, checked.
-fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), CommandError> {
+pub(crate) fn lane_and_index(p: &Project, params: &Value) -> Result<(usize, usize), CommandError> {
     let track = track_id(p, params)?;
     let index = params.get("index").and_then(Value::as_u64).ok_or("index must be a whole number from project.clips")?;
     let lane =
@@ -2119,39 +2522,65 @@ fn set_clip_fades(session: &mut Session, params: &Value) -> Result<Value, Comman
     Ok(result)
 }
 
-fn copy_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+fn copy_clips(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let p = &session.project;
-    let clip = match (params.get("index"), params.get("scene")) {
+    let mut copied: Vec<(Clip, ClipContent)> = Vec::new();
+    match (params.get("clips"), params.get("scene")) {
         (Some(_), None) => {
-            let (lane, index) = lane_and_index(p, params)?;
-            p.arrangement.lanes.get(lane).and_then(|l| l.clips.get(index)).cloned().ok_or("the clip is missing")?
+            if params.get("track").is_some() {
+                return Err("track goes with scene (a clip slot); clips names arrangement clips".into());
+            }
+            for (track, index) in clip_list(p, params)? {
+                let clip = p
+                    .arrangement
+                    .lanes
+                    .iter()
+                    .find(|l| l.track == Some(track))
+                    .and_then(|l| l.clips.get(index))
+                    .cloned()
+                    .ok_or("the clip is missing")?;
+                let content = p.content(clip.content).cloned().ok_or("the clip's content is missing")?;
+                copied.push((clip, content));
+            }
         }
         (None, Some(_)) => {
             let (column, scene) = (column_index(p, params)?, scene_index(p, params)?);
             let slot = p.launcher.columns.get(column).and_then(|c| c.slots.get(scene));
-            slot.and_then(|s| s.clip.clone()).ok_or_else(|| format!("the slot in scene {} is empty", scene + 1))?
+            let clip =
+                slot.and_then(|s| s.clip.clone()).ok_or_else(|| format!("the slot in scene {} is empty", scene + 1))?;
+            let content = p.content(clip.content).cloned().ok_or("the clip's content is missing")?;
+            copied.push((clip, content));
         }
-        _ => return Err("give either index (an arrangement clip) or scene (a clip slot)".into()),
-    };
-    let content = p.content(clip.content).cloned().ok_or("the clip's content is missing")?;
-    let name = content.name.clone();
-    session.clipboard = Some((clip, content));
-    Ok(json!({ "copied": name }))
+        _ => return Err("give either clips (arrangement clips) or track and scene (a clip slot)".into()),
+    }
+    let names: Vec<String> = copied.iter().map(|(_, content)| content.name.clone()).collect();
+    session.clipboard = copied;
+    Ok(json!({ "copied": names }))
 }
 
-fn cut_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    copy_clip(session, params)?;
-    delete_clip(session, params)
+/// An id no clip content of `p` has yet.
+fn new_content_id(p: &Project) -> Result<suhina_model::ContentId, CommandError> {
+    let id = p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?;
+    Ok(suhina_model::ContentId(id))
+}
+
+fn cut_clips(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let copied = copy_clips(session, params)?;
+    delete_clips(session, params)?;
+    Ok(copied)
 }
 
 /// Where `clip.paste` puts the copy: an arrangement beat, or a clip slot (scene from 0).
+#[derive(Clone, Copy)]
 enum PasteAt {
     Beat(f64),
     Slot(usize),
 }
 
 fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let (clip, content) = session.clipboard.clone().ok_or("nothing has been copied")?;
+    if session.clipboard.is_empty() {
+        return Err("nothing has been copied".into());
+    }
     let at = match (params.get("start"), params.get("scene")) {
         (Some(_), None) => {
             let start = number(params, "start")?;
@@ -2173,37 +2602,50 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
         Some(v) => v.as_bool().ok_or("stack must be true or false")?,
     };
     let track = track_id(&session.project, params)?;
-    let p = &mut session.project;
-    let target = p.tracks.iter().find(|t| t.id == track).ok_or("the track is missing")?;
-    let notes = content.lanes.iter().any(|l| matches!(l.data, LaneData::Notes(_)));
-    let audio = content.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)));
-    if (notes && !target.content.notes) || (audio && !target.content.audio) {
-        let what = if audio { "an audio clip" } else { "a MIDI clip" };
-        return Err(format!("track {:?} cannot hold {what}", target.name).into());
+    {
+        let p = &session.project;
+        let target = p.tracks.iter().find(|t| t.id == track).ok_or("the track is missing")?;
+        for (_, content) in &session.clipboard {
+            let notes = content.lanes.iter().any(|l| matches!(l.data, LaneData::Notes(_)));
+            let audio = content.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_)));
+            if (notes && !target.content.notes) || (audio && !target.content.audio) {
+                let what = if audio { "an audio clip" } else { "a MIDI clip" };
+                return Err(format!("track {:?} cannot hold {what}", target.name).into());
+            }
+        }
     }
     let column = match at {
-        PasteAt::Slot(_) => Some(column_index(p, params)?),
+        PasteAt::Slot(_) => Some(column_index(&session.project, params)?),
         PasteAt::Beat(_) => None,
     };
-    // The copy plays its own content, so editing one does not change the other.
-    let id = p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?;
-    let id = suhina_model::ContentId(id);
-    p.contents.push(suhina_model::ClipContent { id, ..content });
-    let start = match at {
-        PasteAt::Beat(start) => start,
-        PasteAt::Slot(_) => 0.0,
-    };
-    // Gain, warp and the loop travel with the content and the clip; fades are fitted, as when
-    // a clip is shortened, so a clip with odd fades still makes a valid project.
-    let mut placed = Clip { content: id, start, ..clip };
-    placed.fit_fades();
     if let (PasteAt::Slot(scene), Some(column)) = (at, column) {
+        let [(clip, content)] = session
+            .clipboard
+            .clone()
+            .try_into()
+            .map_err(|copied: Vec<_>| format!("a clip slot holds one clip, and {} are copied", copied.len()))?;
+        let p = &mut session.project;
+        let id = new_content_id(p)?;
+        p.contents.push(suhina_model::ClipContent { id, ..content });
+        // Gain, warp and the loop travel with the content and the clip; fades are fitted, as when
+        // a clip is shortened, so a clip with odd fades still makes a valid project.
+        let mut placed = Clip { content: id, start: 0.0, ..clip };
+        placed.fit_fades();
         let slot =
             p.launcher.columns.get_mut(column).and_then(|c| c.slots.get_mut(scene)).ok_or("the slot is missing")?;
         let replaced = slot.clip.is_some();
         slot.clip = Some(placed);
         return Ok(json!({ "track": track.0, "scene": scene + 1, "replaced": replaced }));
     }
+    let start = match at {
+        PasteAt::Beat(start) => start,
+        PasteAt::Slot(_) => 0.0,
+    };
+    // The earliest copied clip lands on `start`; the others keep their places relative to it.
+    let earliest = session.clipboard.iter().map(|(clip, _)| clip.start).fold(f64::INFINITY, f64::min);
+    let offset = if earliest.is_finite() { start - earliest } else { 0.0 };
+    let copied = session.clipboard.clone();
+    let p = &mut session.project;
     let lane = match p.arrangement.lanes.iter().position(|l| l.track == Some(track)) {
         Some(lane) => lane,
         None => {
@@ -2212,40 +2654,149 @@ fn paste_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErr
             p.arrangement.lanes.len() - 1
         }
     };
-    let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
-    if !stack {
-        make_room(&mut lane.clips, start, start + placed.length);
+    let mut placed: Vec<Value> = Vec::with_capacity(copied.len());
+    for (clip, content) in copied {
+        // The copy plays its own content, so editing one does not change the other.
+        let id = new_content_id(p)?;
+        p.contents.push(suhina_model::ClipContent { id, ..content });
+        let at = clip.start + offset;
+        let mut copy = Clip { content: id, start: at, ..clip };
+        copy.fit_fades();
+        let lane = p.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
+        if !stack {
+            make_room(&mut lane.clips, at, at + copy.length);
+        }
+        lane.clips.push(copy.clone());
+        lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = lane.clips.iter().position(|c| *c == copy).unwrap_or_default();
+        placed.push(json!({ "track": track.0, "index": index, "start": at }));
     }
-    lane.clips.push(placed.clone());
-    lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-    let index = lane.clips.iter().position(|c| *c == placed).unwrap_or_default();
-    Ok(json!({ "track": track.0, "index": index, "start": start }))
+    Ok(json!({ "clips": placed }))
 }
 
-fn delete_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let (lane, index) = lane_and_index(&session.project, params)?;
-    if let Some(lane) = session.project.arrangement.lanes.get_mut(lane) {
-        lane.clips.remove(index);
+fn delete_clips(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    // A list of arrangement clips goes as one; otherwise a launcher slot's clip is named by
+    // `scene`, an arrangement clip by `index`, the way the note commands name the clip they edit.
+    if params.get("clips").is_some_and(|v| !v.is_null()) {
+        if ["track", "index", "scene"].iter().any(|k| params.get(*k).is_some_and(|v| !v.is_null())) {
+            return Err("give clips, or track with index or scene, not both".into());
+        }
+        let clips = clip_list(&session.project, params)?;
+        let deleted = remove_clips(&mut session.project, &clips);
+        return Ok(json!({ "deleted": deleted }));
     }
-    Ok(json!({ "deleted": index }))
+    let whole = |key: &str| -> Result<Option<u64>, CommandError> {
+        match params.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v.as_u64().map(Some).ok_or_else(|| format!("{key} must be a whole number").into()),
+        }
+    };
+    match (whole("index")?, whole("scene")?) {
+        (Some(_), Some(_)) => Err("give index or scene, not both".into()),
+        (None, None) => Err("give clips, or track with index (an arrangement clip) or scene (a launcher clip)".into()),
+        (Some(_), None) => {
+            let (lane, index) = lane_and_index(&session.project, params)?;
+            if let Some(lane) = session.project.arrangement.lanes.get_mut(lane) {
+                lane.clips.remove(index);
+            }
+            Ok(json!({ "deleted": index }))
+        }
+        (None, Some(scene)) => {
+            let column = column_index(session.project(), params)?;
+            let s = scene_index(session.project(), params)?;
+            let slot = session
+                .project
+                .launcher
+                .columns
+                .get_mut(column)
+                .and_then(|c| c.slots.get_mut(s))
+                .ok_or("the slot is missing")?;
+            if slot.clip.is_none() {
+                return Err(format!("the slot of scene {scene} is empty").into());
+            }
+            slot.clip = None;
+            Ok(json!({ "deleted": scene }))
+        }
+    }
 }
 
-fn duplicate_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+/// Removes the clips named by `clips`, which must exist; returns how many went. Indices are read
+/// against the project as it was, so a lane loses all its clips at once.
+fn remove_clips(p: &mut Project, clips: &[(TrackId, usize)]) -> usize {
+    let mut deleted = 0;
+    for (track, indexes) in clips_by_track(clips) {
+        let Some(lane) = p.arrangement.lanes.iter_mut().find(|l| l.track == Some(track)) else { continue };
+        let before = lane.clips.len();
+        let mut at = 0usize;
+        lane.clips.retain(|_| {
+            let keep = !indexes.contains(&at);
+            at += 1;
+            keep
+        });
+        deleted += before - lane.clips.len();
+    }
+    deleted
+}
+
+/// The clip indexes of `clips`, gathered by the track they are on.
+fn clips_by_track(clips: &[(TrackId, usize)]) -> Vec<(TrackId, Vec<usize>)> {
+    let mut out: Vec<(TrackId, Vec<usize>)> = Vec::new();
+    for (track, index) in clips {
+        match out.iter_mut().find(|(t, _)| t == track) {
+            Some((_, list)) => list.push(*index),
+            None => out.push((*track, vec![*index])),
+        }
+    }
+    out
+}
+
+fn duplicate_clips(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let stack = match params.get("stack") {
         None => false,
         Some(v) => v.as_bool().ok_or("stack must be true or false")?,
     };
-    let (lane, index) = lane_and_index(&session.project, params)?;
-    let lane = session.project.arrangement.lanes.get_mut(lane).ok_or("the lane is missing")?;
-    let mut copy = lane.clips.get(index).cloned().ok_or("the clip is missing")?;
-    copy.start += copy.length;
-    if !stack {
-        make_room(&mut lane.clips, copy.start, copy.start + copy.length);
+    let clips = clip_list(&session.project, params)?;
+    let p = &mut session.project;
+    let mut made: Vec<Value> = Vec::new();
+    for (track, indexes) in clips_by_track(&clips) {
+        // The copies, worked out before the lane changes under them.
+        let copies: Vec<Clip> = match p.arrangement.lanes.iter().find(|l| l.track == Some(track)) {
+            Some(lane) => indexes
+                .iter()
+                .filter_map(|i| lane.clips.get(*i))
+                .map(|c| Clip { start: c.start + c.length, ..c.clone() })
+                .collect(),
+            None => continue,
+        };
+        let Some(lane) = p.arrangement.lanes.iter_mut().find(|l| l.track == Some(track)) else { continue };
+        for copy in copies {
+            if !stack {
+                make_room(&mut lane.clips, copy.start, copy.start + copy.length);
+            }
+            lane.clips.push(copy.clone());
+            lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+            let index = lane.clips.iter().position(|c| *c == copy).unwrap_or_default();
+            made.push(json!({ "track": track.0, "index": index, "start": copy.start }));
+        }
     }
-    lane.clips.push(copy.clone());
-    lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-    let new_index = lane.clips.iter().position(|c| *c == copy).unwrap_or_default();
-    Ok(json!({ "index": new_index, "start": copy.start }))
+    Ok(json!({ "clips": made }))
+}
+
+fn set_clip_enabled(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let enabled = params.get("enabled").and_then(Value::as_bool).ok_or("enabled must be true or false")?;
+    let clips = clip_list(&session.project, params)?;
+    let p = &mut session.project;
+    let mut changed = 0;
+    for (track, indexes) in clips_by_track(&clips) {
+        let Some(lane) = p.arrangement.lanes.iter_mut().find(|l| l.track == Some(track)) else { continue };
+        for index in indexes {
+            if let Some(clip) = lane.clips.get_mut(index) {
+                clip.enabled = enabled;
+                changed += 1;
+            }
+        }
+    }
+    Ok(json!({ "enabled": enabled, "clips": changed }))
 }
 
 fn set_output(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -2294,15 +2845,22 @@ fn set_solo(session: &mut Session, params: &Value) -> Result<Value, CommandError
         None => false,
         Some(v) => v.as_bool().ok_or("exclusive must be true or false")?,
     };
-    let id = channel_param(session, params)?.id;
+    let channels = channel_ids(&session.project, params)?;
+    let ids: Vec<ChannelId> = channels.iter().map(|(_, id)| *id).collect();
     for channel in &mut session.project.channels {
-        if channel.id == id {
+        if ids.contains(&channel.id) {
             channel.solo = solo;
         } else if exclusive {
             channel.solo = false;
         }
     }
-    Ok(json!({ "solo": solo }))
+    Ok(json!({ "tracks": track_ids(&channels), "solo": solo }))
+}
+
+fn set_cue(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let cue = params.get("cue").and_then(Value::as_bool).ok_or("cue must be true or false")?;
+    channel_param(session, params)?.cue = cue;
+    Ok(json!({ "cue": cue }))
 }
 
 fn set_midi_input(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
@@ -2517,7 +3075,7 @@ pub(crate) fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
             kept.push(first);
         }
         if end > to {
-            let offset = content_at(&clip, to - start);
+            let offset = content_at(&clip, to - start, 1.0);
             let mut second = Clip { start: to, length: end - to, offset, ..clip };
             if split {
                 second.fade_in = 0.0;
@@ -2529,11 +3087,18 @@ pub(crate) fn make_room(clips: &mut Vec<Clip>, from: f64, to: f64) {
     *clips = kept;
 }
 
-/// Where in its content a clip is `beats` after it starts, following its loop.
-fn content_at(clip: &Clip, beats: f64) -> f64 {
-    let at = clip.offset + beats;
-    match clip.loop_range {
-        Some(r) if r.end > r.start && at >= r.end => r.start + (at - r.start).rem_euclid(r.end - r.start),
+/// Where in its content a clip is `beats` after it starts, moving `rate` content beats per beat
+/// and following its loop, as the engine plays it: a start marker at or past the loop end starts
+/// at the loop start.
+pub(crate) fn content_at(clip: &Clip, beats: f64, rate: f64) -> f64 {
+    let loop_range = clip.loop_range.filter(|r| r.start.is_finite() && r.end.is_finite() && r.end > r.start);
+    let from = match loop_range {
+        Some(r) if clip.offset >= r.end => r.start,
+        _ => clip.offset,
+    };
+    let at = from + beats * rate;
+    match loop_range {
+        Some(r) if at >= r.end => r.start + (at - r.end).rem_euclid(r.end - r.start),
         _ => at,
     }
 }
@@ -2690,6 +3255,7 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
     let meter = monitor.meter();
     let statuses: Vec<Option<ColumnStatus>> = (0..monitor.columns()).map(|i| monitor.column(i)).collect();
     let p = session.project();
+    let project_meter = p.transport.meter();
     let tracks: Vec<Value> = p
         .launcher
         .columns
@@ -2720,15 +3286,19 @@ fn launcher_state(session: &mut Session, _: &Value) -> Result<Value, CommandErro
         .collect();
     // Rounded once, so the beat and the position agree.
     let beat = if beat.is_finite() { (beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 };
-    let (bar, into_bar) = meter.locate(beat);
+    // Bars through the time-signature changes while the clock follows the tempo map, or
+    // through the time signature a scene set (`docs/spec/tempo-map.md`).
+    let (bar, into_bar) = meter.locate(beat, &project_meter);
     let position = format!("{bar}.{}", into_bar.floor() as u64 + 1);
+    let signature = if meter.follows_map { project_meter.position(beat).time_signature } else { meter.time_signature };
     Ok(json!({
         "running": running,
         "metronome": monitor_metronome,
         "tempo_bpm": tempo,
         "beat": beat,
-        "time_signature": signature_text(meter.time_signature),
+        "time_signature": signature_text(signature),
         "position": position,
+        "follows_tempo_map": meter.follows_map,
         "start_beat": if start_beat.is_finite() { (start_beat.max(0.0) * 1000.0).round() / 1000.0 } else { 0.0 },
         "tracks": tracks,
         "preview": preview_state,
@@ -2832,6 +3402,12 @@ fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandE
     let scene = scene_index(session.project(), params)?;
     send(session, LaunchCommand::LaunchScene { scene })?;
     Ok(json!({ "scene": scene + 1, "queued": "launch" }))
+}
+
+fn stop_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(session.project(), params)?;
+    send(session, LaunchCommand::StopScene { scene })?;
+    Ok(json!({ "scene": scene + 1, "queued": "stop" }))
 }
 
 /// Scenes a project can have; inserting stops there.
@@ -2998,6 +3574,11 @@ fn set_quantization(session: &mut Session, params: &Value) -> Result<Value, Comm
     let quantization = parse_quantization(text)?;
     session.set_quantization(quantization)?;
     Ok(json!({ "quantization": text.trim() }))
+}
+
+fn follow_tempo_map(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
+    send(session, LaunchCommand::FollowTempoMap)?;
+    Ok(json!({ "follows_tempo_map": true }))
 }
 
 fn back_to_arrangement(session: &mut Session, _: &Value) -> Result<Value, CommandError> {

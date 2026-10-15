@@ -40,7 +40,8 @@ fn env() -> Arc<PluginEnv> {
 /// after them, with no saved state (its default gain), playing a note at beat 0 in the
 /// arrangement.
 fn project() -> Project {
-    let note = Note { time: 0.0, duration: 0.5, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0 };
+    let note =
+        Note { time: 0.0, duration: 0.5, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false };
     Project {
         tracks: vec![Track {
             id: TrackId(1),
@@ -61,6 +62,7 @@ fn project() -> Project {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices: vec![Device {

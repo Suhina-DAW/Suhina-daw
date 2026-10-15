@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split
+read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
 type: system
 status: current
 last_verified: 2026-10-15
@@ -73,13 +73,33 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   default output and the result's `notice` says so. The choice is kept: while the default plays
   in its place, Suhina looks every few seconds whether the chosen device is back and moves the
   output there, the same way. The engine renders in blocks of
-  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. `audio.info` says what plays
+  `buffer_frames` (64 to 4096), which sets the plug-ins' deadline. A size is fitted to what the
+  device's driver declared, and a driver is never asked for one outside that range: a range
+  holding no size the engine renders in leaves the driver its own size, and `notice` says which
+  size plays. On WASAPI shared mode Windows sets the device's buffer, so there `buffer_frames` is
+  the engine's block alone and `buffer_sizes` the engine's own sizes. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
   `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `live` (a track is
   armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (the longest a
   key on a MIDI controller takes to be heard), `underruns`, `failed` and `fallback` (it plays in
-  place of a chosen host or device that is not there). Without `--audio`, `audio.devices`
-  returns an error.
+  place of a chosen host or device that is not there), `channels` (opened) and `cue_pair`.
+  Without `--audio`, `audio.devices` returns an error.
+
+- **The cue (headphones).** `output.setCuePair {pair}` plays previews and the tracks whose cue
+  is on (`track.setCue {track, cue}`, an edit) on another pair of the same device's outputs
+  (1 is outputs 3/4; 0 plays them with the main output), reopening the output like
+  `audio.setOutput`; a pair the device lacks is refused. `output.setCueVolume {db}` sets their
+  level without reopening. `suhina-cli render --cue cue.wav` writes the cue beside the main mix
+  ([spec](spec/cue-output.md)).
+
+- **Tempo map.** `tempo.points` lists the start tempo, the tempo changes and the time-signature
+  changes; `tempo.addPoint {beat, bpm, ramp?}`, `tempo.movePoint` and `tempo.deletePoint` edit the
+  tempo changes (numbered from 1), `timeSignature.add {bar, numerator, denominator}`,
+  `timeSignature.move` and `timeSignature.delete` the signature changes (bars from 1). Renders and
+  the playing engine follow them ([tempo map](spec/tempo-map.md)). A launched scene's tempo or
+  time signature overrides the map for the launcher clock (`launcher.state` reports
+  `follows_tempo_map: false`) until `transport.followTempoMap`, the next `transport.play` after a
+  stop, or an edit to the map ([scenes and the tempo map](spec/tempo-map.md#scenes-and-the-tempo-map)).
 
 - **MIDI controllers.** With `--audio`, the server also opens every MIDI input port
   ([ADR 0017](decisions/0017-inputs-and-latency.md)). `midi.inputs` lists them with `enabled`,
@@ -133,6 +153,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([clip launching](spec/clip-launching.md)). `clip.create {track, scene? | start?, length?,
   stack?}` makes an empty MIDI clip, a bar long by default, in an empty slot or at a beat
   ([arrangement editing](spec/arrangement-editing.md#making-an-empty-midi-clip)).
+  `clip.split {track, index, at}` cuts a clip in two at a song position; `clip.consolidate
+  {track, start, end}` turns a range of one track into one clip (audio is rendered to a file next
+  to the project, which must have been saved).
 
 - **Slot loops.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot: on,
   it repeats its whole length; off, it plays once. A file placed in a slot with `clip.addFiles`
@@ -140,7 +163,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   decisions).
 
 - **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
-  in beats, key with 60 as C3, velocity 1 to 127); `note.add {..., notes: [{time, length, key,
+  in beats, key with 60 as C3, velocity 1 to 127, and `muted`); `note.add {..., notes: [{time, length, key,
   velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
   semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
   `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
@@ -148,11 +171,29 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
   other clips also play (a duplicate) first gives that clip its own copy of the content, so the
   others do not change; the result's indices are the same.
+- **Muting notes.** `note.setMuted {track, index | scene, notes, muted?}` sets the named notes'
+  mute (`true` mutes, `false` unmutes); with `muted` left out each named note is flipped, which is
+  what a click with the piano roll's Mute tool does. A muted note keeps its place, length, key and
+  velocity and is never played (the arrangement, the launcher and an offline render all skip it);
+  it is saved as `"muted": true` in the project file and survives a save and reopen. One undo step;
+  it returns the notes' indices and their state.
 - **Quantise.** `note.quantize {track, index | scene, notes?, grid, amount?, ends?}` moves the
   starts of the given notes, or of every note, towards the nearest line of `grid` (`"1/16"`,
   `"1/8T"`, `"1 bar"`, as `launcher.setQuantization` takes it) by `amount` percent (default 100,
   onto the line); with `ends: true` the ends move too. One undo step; a bad grid, an amount
   outside 0 to 100 or a note that does not exist fails and changes nothing.
+- **MIDI tools.** The piano roll's MIDI tools column runs the same commands an agent can:
+  `note.humanize {notes?, time?, velocity?, seed?}` moves each start and velocity a small random
+  amount, `note.fitToScale {notes?, root?, scale?}` moves each note to the nearest key of a scale
+  (a key name such as `"C"` or `"F#"`, and `major`, `minor`, `dorian`, `blues` and the rest),
+  `note.invert {notes?}` mirrors the pitches, `note.reverse {notes?}` turns them round in time,
+  `note.legato {notes?}` makes each note last until the next of its key, `note.stretch {notes?,
+  factor}` stretches them in time (`2` is the **×2** button, `0.5` **÷2**),
+  `note.randomizeVelocity {notes?, amount?, seed?}` and `note.rampVelocity {notes?, from, to}`
+  change velocities. `notes` left out means every note of the clip. The two random tools take a
+  `seed`, so the same call gives the same result twice and a script can repeat it; the result says
+  which seed it used when none was given. Each is one undo step and fails as a whole, and none of
+  them changes a note's mute.
 - **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
   changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
   adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
@@ -287,7 +328,7 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 | `project_open` | Open a Suhina project (`.suhina`, or `.locr` from before) or a `.als` Live Set below the read root as a new, active project; returns its `project` id, a summary and import warnings. |
 | `project_inspect` | Summary, tracks (volume, pan, mute, devices) and arrangement clips as JSON; optional `project`. |
 | `command_list` | Command ids with description, kind (`read`, `edit`, `history`, `transport`, `projects`, `plugins`, `plugin`, `library`, `audio`) and parameter schema; optional `filter`. |
-| `command_run` | Run one command: `{"id": "track.setPan", "params": {"track": "Bass", "pan": -1}}`; optional `project`. |
+| `command_run` | Run one command: `{"id": "track.setPan", "params": {"tracks": ["Bass"], "pan": -1}}`; optional `project`. |
 | `command_batch` | Run `steps` in order; each editing command is its own undo step; `stop_on_error` (default true); optional `project` for every step. |
 | `project_render` | Render the active project (or `project`): the arrangement, or `scene` (1-based), to a WAV below the write root. Audio files are loaded from the opened set's folder; missing ones are listed in `warnings`. Its plug-ins start with the state the project's running plug-ins have now (what their editors changed included), as `project.save` writes it. With `launches` (and `seconds`), render a launch script instead: transport commands run at times in seconds from a stopped transport, e.g. `[{"at": 0, "id": "scene.launch", "params": {"scene": 1}}, {"at": 4, "id": "track.stop", "params": {"track": "Bass"}}]`; each step's result is returned. |
 

@@ -6,12 +6,13 @@ mod track_notes;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use suhina_automation::{SuhinaMcp, Workspace, render_wav, scene_as_arrangement};
+use suhina_automation::{SuhinaMcp, Workspace, render_wavs, scene_as_arrangement};
 use suhina_engine::AudioPool;
 use suhina_engine::model::*;
 
 const USAGE: &str = "\
-usage: suhina-cli render (<project.als> | --demo) -o <out.wav> [--scene <n>] [--sample-rate <hz>] [<fm>]
+usage: suhina-cli render (<project.als> | --demo) -o <out.wav> [--cue <cue.wav>] [--scene <n>] [--sample-rate <hz>]
+                         [<fm>]
        suhina-cli play (<project.als> | --demo) [--scene <n> | --launcher] [<fm>] [<output>]
        suhina-cli fm-synth voices <file.syx>
        suhina-cli commands [--markdown]
@@ -60,6 +61,8 @@ options:
   <project.als>      a Live Set to import, or a Suhina project (.suhina, or .locr from before) to open
   --demo             use the built-in demo project instead
   -o, --output       output WAV path (render only)
+  --cue <cue.wav>    render only: also write the cue (the tracks whose cue is on, after their
+                     own volume and pan) to this WAV file, as long as the main one
   --scene <n>        use scene n (1-based) of the clip launcher instead of the arrangement
   --launcher         play only: start stopped and read launcher commands (scene 2, clip Bass 1,
                      stop Bass, quit, help) from standard input
@@ -81,6 +84,8 @@ enum Source {
 struct Args {
     source: Source,
     output: Option<PathBuf>,
+    /// `render --cue`: where the cue bus goes.
+    cue: Option<PathBuf>,
     scene: Option<usize>,
     launcher: bool,
     sample_rate: u32,
@@ -212,6 +217,7 @@ fn list_commands(args: &[String]) -> Result<(), String> {
 
 fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
     let mut output = None;
+    let mut cue = None;
     let mut sample_rate = 48_000;
     let mut scene = None;
     let mut launcher = false;
@@ -224,6 +230,10 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
             "--demo" => Some(Source::Demo),
             "-o" | "--output" => {
                 output = Some(PathBuf::from(it.next().ok_or("--output needs a path")?));
+                None
+            }
+            "--cue" => {
+                cue = Some(PathBuf::from(it.next().ok_or("--cue needs a path")?));
                 None
             }
             "--sample-rate" => {
@@ -292,12 +302,16 @@ fn parse_args(args: &[String], command: Command) -> Result<Args, String> {
         (Command::Play, Some(_)) => return Err(format!("play does not write a file; use render\n\n{USAGE}")),
         _ => {}
     }
+    if cue.is_some() && command != Command::Render {
+        return Err(format!("--cue works with render\n\n{USAGE}"));
+    }
     if launcher && (command != Command::Play || scene.is_some()) {
         return Err(format!("--launcher works with play, without --scene\n\n{USAGE}"));
     }
     Ok(Args {
         source: source.ok_or(format!("missing project: give a .suhina or .als file, or --demo\n\n{USAGE}"))?,
         output,
+        cue,
         scene,
         launcher,
         sample_rate,
@@ -416,11 +430,14 @@ fn render(args: &Args) -> Result<(), String> {
     let (project, audio) = load_project(args)?;
     let mut library = suhina_plugins::library::Library::default();
     let env = suhina_session::PluginEnv::from_library(&mut library);
-    let summary = render_wav(&project, &audio, path, args.sample_rate, Some(&env))?;
+    let summary = render_wavs(&project, &audio, path, args.cue.as_deref(), args.sample_rate, Some(&env))?;
     for notice in &summary.plugins {
         eprintln!("plug-ins: {notice}");
     }
     println!("wrote {} ({:.2} s, {} Hz)", path.display(), summary.seconds, summary.sample_rate);
+    if let Some(cue) = &args.cue {
+        println!("wrote the cue to {}", cue.display());
+    }
     Ok(())
 }
 
@@ -542,7 +559,7 @@ fn plugin(args: &[String]) -> Result<(), String> {
     let events = match &device_source {
         Some((session, channel)) => {
             let project = session.project();
-            let beats_per_bar = f64::from(project.transport.time_signature.numerator.max(1));
+            let meter = project.transport.meter();
             let first_clip = || {
                 let track = project.tracks.iter().find(|t| t.channel == Some(*channel))?;
                 project
@@ -556,13 +573,21 @@ fn plugin(args: &[String]) -> Result<(), String> {
                     .min_by(f64::total_cmp)
             };
             let from_beat = match from_bar {
-                Some(bar) => (bar - 1.0).max(0.0) * beats_per_bar,
+                // Bars through the time-signature changes, counted from 1; a fraction is part of
+                // that bar.
+                Some(bar) => {
+                    let bars = (bar - 1.0).clamp(0.0, f64::from(u32::MAX));
+                    let start = meter.bar_start(bars.floor() as u32);
+                    start + bars.fract() * meter.position(start).bar_beats
+                }
                 None => first_clip().unwrap_or(0.0),
             };
             let frames = (stereo.len() / 2) as u64;
             let events = track_notes::events(project, *channel, from_beat, frames, audio.sample_rate);
             if !events.is_empty() {
-                eprintln!("{} note events from bar {:.1}", events.len(), from_beat / beats_per_bar + 1.0);
+                let here = meter.position(from_beat);
+                let bar = f64::from(here.bar) + 1.0 + (from_beat - here.bar_start) / here.bar_beats.max(1e-9);
+                eprintln!("{} note events from bar {bar:.1}", events.len());
             }
             events
         }
@@ -826,6 +851,7 @@ fn demo_project() -> Project {
         velocity,
         release_velocity: 0.5,
         channel: 0,
+        muted: false,
     };
     let track = |id: u32, name: &str| Track {
         id: TrackId(id),
@@ -846,6 +872,7 @@ fn demo_project() -> Project {
         pan,
         mute: false,
         solo: false,
+        cue: false,
         output: None,
         sends: Vec::new(),
         devices: Vec::new(),
@@ -931,6 +958,11 @@ mod tests {
         assert_eq!(ok.sample_rate, 44_100);
         assert_eq!(ok.scene, Some(1));
         assert!(matches!(ok.source, Source::Als(_)));
+        assert_eq!(ok.cue, None);
+        let cued = parse_render(&args(&["--demo", "-o", "x.wav", "--cue", "cue.wav"])).unwrap();
+        assert_eq!(cued.cue, Some(PathBuf::from("cue.wav")));
+        assert!(parse_render(&args(&["--demo", "-o", "x.wav", "--cue"])).is_err());
+        assert!(parse_args(&args(&["--demo", "--cue", "cue.wav"]), Command::Play).is_err());
     }
 
     #[test]

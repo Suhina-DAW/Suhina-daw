@@ -10,7 +10,7 @@ const SR: u32 = 48_000;
 const BEAT: usize = SR as usize / 2;
 
 fn note(time: f64, key: u8) -> Note {
-    Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
+    Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 /// A slot clip of `length` beats playing `notes`, looping or once, with `follow`.
@@ -57,6 +57,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
             pan: 0.0,
             mute: false,
             solo: false,
+            cue: false,
             output: None,
             sends: Vec::new(),
             devices: Vec::new(),

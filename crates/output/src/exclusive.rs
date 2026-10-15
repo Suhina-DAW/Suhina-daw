@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use wasapi::{Direction, SampleType, StreamMode, WaveFormat};
 
-use crate::{Progress, Ring, measure_latency, read_ring};
+use crate::{Progress, RING_CHANNELS, Ring, channel_sample, cue_channel, measure_latency, read_ring};
 
 /// How long the loop waits for the device before checking whether it should stop, in ms.
 const WAIT_MS: u32 = 100;
@@ -54,23 +54,19 @@ impl Encoding {
     }
 }
 
-/// Writes interleaved stereo into `out` as the device's frames: `channels` samples each in
-/// `encoding`, little-endian; mono gets the average, further channels silence. `out` holds
-/// whole frames; frames past the end of `stereo` are left alone.
-pub(crate) fn encode(encoding: Encoding, stereo: &[f32], channels: usize, out: &mut [u8]) {
+/// Writes ring frames (main left and right, cue left and right) into `out` as the device's
+/// frames: `channels` samples each in `encoding`, little-endian, mapped as
+/// [`channel_sample`] maps them (the cue on its pair from channel `cue`). `out` holds whole
+/// frames; frames past the end of `ringed` are left alone.
+pub(crate) fn encode(encoding: Encoding, ringed: &[f32], channels: usize, cue: Option<usize>, out: &mut [u8]) {
     let size = encoding.bytes();
     let frame_bytes = size * channels;
     if frame_bytes == 0 {
         return;
     }
-    for (frame, [left, right]) in out.chunks_exact_mut(frame_bytes).zip(stereo.as_chunks::<2>().0) {
+    for (frame, ring_frame) in out.chunks_exact_mut(frame_bytes).zip(ringed.as_chunks::<RING_CHANNELS>().0) {
         for (channel, sample) in frame.chunks_exact_mut(size).enumerate() {
-            let value = match (channels, channel) {
-                (1, _) => (left + right) * 0.5,
-                (_, 0) => *left,
-                (_, 1) => *right,
-                _ => 0.0,
-            };
+            let value = channel_sample(ring_frame, channels, channel, cue);
             let value = if value.is_finite() { value.clamp(-1.0, 1.0) } else { 0.0 };
             match encoding {
                 Encoding::F32 => sample.copy_from_slice(&value.to_le_bytes()),
@@ -128,10 +124,17 @@ struct Ready {
 /// Opens `device` (by its name; the default output when `None`) for Suhina alone at
 /// `sample_rate`, with a buffer near `buffer_frames` (the device's default period when `None`),
 /// reading from `ring`.
+///
+/// WASAPI tells us the device's minimum and default period, never the largest one its driver
+/// takes, so a period past what the device does cannot be fitted here: the device refuses it in
+/// `IAudioClient::Initialize`, [`reason`] says why in words, and the output plays shared instead
+/// (`crate::open_fitting`). A buffer the device cannot align is the documented exception: it
+/// says the size it wants and the client is set up again with that.
 pub(crate) fn open(
     device: Option<String>,
     sample_rate: u32,
     buffer_frames: Option<u32>,
+    cue_pair: Option<u16>,
     ring: Ring,
     progress: &Arc<Progress>,
 ) -> Result<ExclusiveStream, String> {
@@ -141,7 +144,10 @@ pub(crate) fn open(
     let (stopping, going, progress) = (Arc::clone(&stop), Arc::clone(&go), Arc::clone(progress));
     let thread = std::thread::Builder::new()
         .name("suhina-wasapi".into())
-        .spawn(move || run(device, sample_rate, buffer_frames, ring, &progress, &stopping, &going, &ready_tx))
+        .spawn(move || {
+            let format = Format { sample_rate, buffer_frames, cue_pair };
+            run(device, format, ring, &progress, &stopping, &going, &ready_tx);
+        })
         .map_err(|e| format!("could not start the exclusive-mode thread: {e}"))?;
     let mut stream = ExclusiveStream { stop, go, thread: Some(thread), buffer_frames: 0, channels: 0 };
     // A panic inside the driver's wrapper ends the thread: the sender goes, and so does this
@@ -182,17 +188,24 @@ pub(crate) fn capable_devices() -> Vec<String> {
     probe.ok().and_then(|t| t.join().ok()).unwrap_or_default()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run(
-    device: Option<String>,
+/// What an exclusive stream is opened with.
+struct Format {
     sample_rate: u32,
     buffer_frames: Option<u32>,
+    /// The chosen cue pair, written when the device has it.
+    cue_pair: Option<u16>,
+}
+
+fn run(
+    device: Option<String>,
+    format: Format,
     mut ring: Ring,
     progress: &Progress,
     stop: &AtomicBool,
     go: &AtomicBool,
     ready: &mpsc::Sender<Result<Ready, String>>,
 ) {
+    let Format { sample_rate, buffer_frames, cue_pair } = format;
     let set_up = match set_up(device.as_deref(), sample_rate, buffer_frames) {
         Ok(set_up) => set_up,
         Err(e) => {
@@ -204,7 +217,8 @@ fn run(
     let channels_n = usize::from(channels);
     let frame_bytes = encoding.bytes() * channels_n;
     let mut bytes = vec![0u8; frames * frame_bytes];
-    let mut stereo = vec![0.0f32; frames * 2];
+    let cue = cue_channel(cue_pair, channels);
+    let mut ringed = vec![0.0f32; frames * RING_CHANNELS];
     // A buffer of silence before starting, so the first period has something to play.
     if render.write_to_device(frames, &bytes, None).is_err() || client.start_stream().is_err() {
         let _unheard = ready.send(Err("the device would not start in exclusive mode".into()));
@@ -229,9 +243,9 @@ fn run(
         if space == 0 {
             continue;
         }
-        let Some(out) = stereo.get_mut(..space * 2) else { continue };
+        let Some(out) = ringed.get_mut(..space * RING_CHANNELS) else { continue };
         if go.load(Ordering::Acquire) {
-            let queued = ring.slots() / 2;
+            let queued = ring.slots() / RING_CHANNELS;
             read_ring(&mut ring, out, progress);
             progress.set_latency(measure_latency(queued, period, sample_rate));
         } else {
@@ -239,7 +253,7 @@ fn run(
         }
         progress.set_callback_frames(space);
         let Some(data) = bytes.get_mut(..space * frame_bytes) else { continue };
-        encode(encoding, out, channels_n, data);
+        encode(encoding, out, channels_n, cue, data);
         if render.write_to_device(space, data, None).is_err() {
             progress.fail();
             break;
@@ -346,27 +360,42 @@ fn set_up(name: Option<&str>, sample_rate: u32, buffer_frames: Option<u32>) -> R
 mod tests {
     use super::*;
 
+    /// Stereo frames as ring frames with a silent cue.
+    fn quad(stereo: &[f32]) -> Vec<f32> {
+        stereo.as_chunks::<2>().0.iter().flat_map(|[l, r]| [*l, *r, 0.0, 0.0]).collect()
+    }
+
+    #[test]
+    fn the_cue_encodes_onto_its_pair() {
+        // Six channels, the cue on 5/6: main on 1/2, silence on 3/4.
+        let ringed = [0.5f32, -0.5, 0.25, -0.25];
+        let mut six = [9u8; 24];
+        encode(Encoding::F32, &ringed, 6, Some(4), &mut six);
+        let at = |i: usize| f32::from_le_bytes([six[i * 4], six[i * 4 + 1], six[i * 4 + 2], six[i * 4 + 3]]);
+        assert_eq!([at(0), at(1), at(2), at(3), at(4), at(5)], [0.5, -0.5, 0.0, 0.0, 0.25, -0.25]);
+    }
+
     #[test]
     fn stereo_encodes_into_each_layout() {
         let stereo = [1.0f32, -1.0, 0.5, 0.0];
 
         let mut f32s = [0u8; 16];
-        encode(Encoding::F32, &stereo, 2, &mut f32s);
+        encode(Encoding::F32, &quad(&stereo), 2, None, &mut f32s);
         assert_eq!(f32::from_le_bytes([f32s[0], f32s[1], f32s[2], f32s[3]]), 1.0);
         assert_eq!(f32::from_le_bytes([f32s[8], f32s[9], f32s[10], f32s[11]]), 0.5);
 
         let mut i16s = [0u8; 8];
-        encode(Encoding::I16, &stereo, 2, &mut i16s);
+        encode(Encoding::I16, &quad(&stereo), 2, None, &mut i16s);
         assert_eq!(i16::from_le_bytes([i16s[0], i16s[1]]), i16::MAX);
         assert_eq!(i16::from_le_bytes([i16s[2], i16s[3]]), -i16::MAX);
 
         let mut i24s = [0u8; 12];
-        encode(Encoding::I24, &stereo, 2, &mut i24s);
+        encode(Encoding::I24, &quad(&stereo), 2, None, &mut i24s);
         assert_eq!(&i24s[..3], &[0xff, 0xff, 0x7f]);
         assert_eq!(&i24s[3..6], &[0x01, 0x00, 0x80]);
 
         let mut i32s = [0u8; 16];
-        encode(Encoding::I32 { valid: 24 }, &stereo, 2, &mut i32s);
+        encode(Encoding::I32 { valid: 24 }, &quad(&stereo), 2, None, &mut i32s);
         assert_eq!(i32::from_le_bytes([i32s[0], i32s[1], i32s[2], i32s[3]]), i32::MAX);
     }
 
@@ -374,21 +403,21 @@ mod tests {
     fn encoding_maps_channels_and_refuses_nonsense() {
         // Mono averages; four channels get silence past the first two.
         let mut mono = [0u8; 8];
-        encode(Encoding::F32, &[1.0, 0.0, 0.5, 0.5], 1, &mut mono);
+        encode(Encoding::F32, &quad(&[1.0, 0.0, 0.5, 0.5]), 1, None, &mut mono);
         assert_eq!(f32::from_le_bytes([mono[0], mono[1], mono[2], mono[3]]), 0.5);
         let mut four = [9u8; 16];
-        encode(Encoding::I16, &[0.5, 0.5, 0.5, 0.5], 4, &mut four);
+        encode(Encoding::I16, &quad(&[0.5, 0.5, 0.5, 0.5]), 4, None, &mut four);
         assert_eq!(&four[4..8], &[0, 0, 0, 0]);
         assert_eq!(&four[12..16], &[0, 0, 0, 0]);
         // Out of range and not a number: clamped and silenced, never wrapped.
         let mut loud = [0u8; 8];
-        encode(Encoding::I16, &[4.0, f32::NAN, -4.0, f32::INFINITY], 2, &mut loud);
+        encode(Encoding::I16, &quad(&[4.0, f32::NAN, -4.0, f32::INFINITY]), 2, None, &mut loud);
         assert_eq!(i16::from_le_bytes([loud[0], loud[1]]), i16::MAX);
         assert_eq!(i16::from_le_bytes([loud[2], loud[3]]), 0);
         assert_eq!(i16::from_le_bytes([loud[4], loud[5]]), -i16::MAX);
         // No channels: nothing written.
         let mut none = [7u8; 4];
-        encode(Encoding::F32, &[1.0, 1.0], 0, &mut none);
+        encode(Encoding::F32, &quad(&[1.0, 1.0]), 0, None, &mut none);
         assert_eq!(none, [7; 4]);
     }
 

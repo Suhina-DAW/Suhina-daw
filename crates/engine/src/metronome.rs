@@ -1,6 +1,7 @@
 //! The metronome: a short click on every beat while the transport runs, higher on the first beat
 //! of a bar. It follows the launcher's beat clock, so it keeps time through tempo changes, scene
-//! tempos and graph swaps. It is off until [`crate::LaunchCommand::SetMetronome`] turns it on.
+//! tempos and graph swaps, and the meter's bars through time-signature changes. It is off until
+//! [`crate::LaunchCommand::SetMetronome`] turns it on.
 
 /// Click pitch on an ordinary beat and on the first beat of a bar, in Hz.
 const BEAT_HZ: f64 = 1_000.0;
@@ -55,16 +56,15 @@ impl Metronome {
         }
     }
 
-    /// The click's sample for a frame at launcher beat `beat` (`bar_beats` beats to a bar, bars
-    /// counted from beat `bar_origin`, where the time signature last changed).
-    pub(crate) fn frame(&mut self, running: bool, beat: f64, bar_beats: f64, bar_origin: f64) -> f32 {
+    /// The click's sample for a frame at launcher beat `beat`; `starts_bar` says whether a beat
+    /// number starts a bar (asked once a beat).
+    pub(crate) fn frame(&mut self, running: bool, beat: f64, starts_bar: impl Fn(i64) -> bool) -> f32 {
         if running && beat.is_finite() {
             let index = beat.floor() as i64;
             if self.last_beat != Some(index) {
                 self.last_beat = Some(index);
                 if self.on {
-                    let into_bar = (index as f64 - bar_origin).rem_euclid(bar_beats);
-                    let bar_start = bar_beats > 0.0 && (into_bar < 1e-9 || bar_beats - into_bar < 1e-9);
+                    let bar_start = starts_bar(index);
                     let hz = if bar_start { BAR_HZ } else { BEAT_HZ };
                     self.sounding = Some((0.0, hz / self.sample_rate));
                 }

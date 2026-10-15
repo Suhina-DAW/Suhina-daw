@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use suhina_engine::LauncherMonitor;
 
-use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Project, Rgb, TrackId};
+use suhina_engine::model::{ChannelRole, Clip, ClipContent, FadeCurve, LaneData, Meter, Project, Rgb, TrackId};
 
 use crate::grid::{ColumnKind, default_track_colour, gain_to_db};
 use crate::waveform::Waveforms;
@@ -99,6 +99,8 @@ pub struct Lane {
     pub position: usize,
     pub mute: bool,
     pub solo: bool,
+    /// Also heard on the cue output (`track.setCue`).
+    pub cue: bool,
     /// The track plays notes, so it can be armed (ADR 0017), and whether it is: the session
     /// knows, not the project, so [`Timeline::build`] leaves it false.
     pub armable: bool,
@@ -113,6 +115,10 @@ pub struct Lane {
     pub pan: f64,
     /// The group track this track plays into; `None` is the main output.
     pub output: Option<TrackId>,
+    /// The track's column in the launcher, for the engine's per-track state.
+    pub column: Option<usize>,
+    /// The track plays launched clips instead of its arrangement clips.
+    pub overrides: bool,
     pub clips: Vec<ClipBox>,
 }
 
@@ -147,6 +153,11 @@ pub struct Timeline {
     /// Where the last clip ends, in beats.
     pub end: f64,
     pub bar_beats: f64,
+    /// Bars through the time-signature changes; the ruler numbers bars with it.
+    pub meter: Meter,
+    /// Tempo and time-signature changes, as the ruler marks them (`docs/spec/tempo-map.md` ›
+    /// The Arrangement).
+    pub marks: Vec<RulerMark>,
     pub running: bool,
     /// The playhead, in beats from the start.
     pub beat: f64,
@@ -156,6 +167,9 @@ pub struct Timeline {
     pub markers: Vec<MarkerFlag>,
     /// The loop region, when the project has one (on or off).
     pub loop_brace: Option<LoopBrace>,
+    /// Any lane's track plays launched clips instead of its arrangement clips: the
+    /// arrangement view dims its lanes and shows Back to arrangement.
+    pub overrides: bool,
     /// Waveforms of the project's audio files, set by the app once they are decoded.
     pub waveforms: Arc<Waveforms>,
     /// The parameters each track's automation lanes can show, with their points.
@@ -175,11 +189,49 @@ impl Lane {
     }
 }
 
+/// A change marked on the ruler: where it is and what it says ("140 bpm", "→ 140 bpm" for a ramp,
+/// "3/4"); a tempo and a signature change on one beat share one mark.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RulerMark {
+    pub beat: f64,
+    pub text: String,
+}
+
+/// The ruler's marks for `project`'s tempo and time-signature changes, in beat order.
+fn ruler_marks(project: &Project, meter: &Meter) -> Vec<RulerMark> {
+    let bpm = |bpm: f64| {
+        let rounded = (bpm * 100.0).round() / 100.0;
+        if rounded.fract() == 0.0 { format!("{rounded:.0} bpm") } else { format!("{rounded} bpm") }
+    };
+    let tempo = project
+        .transport
+        .tempo_changes
+        .iter()
+        .filter(|p| p.beat.is_finite() && p.beat > 0.0)
+        .map(|p| (p.beat, if p.ramp { format!("→ {}", bpm(p.bpm)) } else { bpm(p.bpm) }));
+    let signatures = meter.changes().map(|(_, beat, ts)| (beat, format!("{}/{}", ts.numerator, ts.denominator)));
+    let mut all: Vec<(f64, String)> = tempo.chain(signatures).collect();
+    all.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut marks: Vec<RulerMark> = Vec::new();
+    for (beat, text) in all {
+        match marks.last_mut() {
+            Some(last) if last.beat == beat => {
+                last.text.push_str("  ");
+                last.text.push_str(&text);
+            }
+            _ => marks.push(RulerMark { beat, text }),
+        }
+    }
+    marks
+}
+
 impl Timeline {
     pub fn build(project: &Project, monitor: Option<&LauncherMonitor>) -> Self {
         let ts = project.transport.time_signature;
         let bar_beats =
             if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
+        let meter = project.transport.meter();
+        let marks = ruler_marks(project, &meter);
         let mut lanes = Vec::new();
         let mut returns = Vec::new();
         for (position, track) in project.tracks.iter().enumerate() {
@@ -234,6 +286,7 @@ impl Timeline {
                 position,
                 mute: channel.is_some_and(|c| c.mute),
                 solo: channel.is_some_and(|c| c.solo),
+                cue: channel.is_some_and(|c| c.cue),
                 armable: kind == ColumnKind::Track && (track.content.notes || track.content.audio),
                 armed: false,
                 midi_input: track.midi_input.clone(),
@@ -246,6 +299,8 @@ impl Timeline {
                     .and_then(|c| c.output)
                     .and_then(|id| project.tracks.iter().find(|t| t.channel == Some(id)))
                     .map(|t| t.id),
+                column: project.launcher.columns.iter().position(|c| c.track == track.id),
+                overrides: false,
                 clips,
             };
             if kind == ColumnKind::Return { returns.push(lane) } else { lanes.push(lane) }
@@ -282,11 +337,14 @@ impl Timeline {
             main_volume_db,
             end,
             bar_beats,
+            meter,
+            marks,
             running: false,
             beat: 0.0,
             start_beat: 0.0,
             markers,
             loop_brace,
+            overrides: false,
             waveforms: Arc::default(),
             automation: crate::automation_lanes::Params::build(project),
         };
@@ -302,7 +360,118 @@ impl Timeline {
         self.running = running;
         self.beat = beats(beat);
         self.start_beat = beats(start);
+        // Which tracks play launched clips instead of their arrangement clips: their lanes
+        // dim, and the arrangement shows Back to arrangement while any does.
+        for lane in &mut self.lanes {
+            lane.overrides = lane
+                .column
+                .and_then(|column| monitor.and_then(|m| m.column(column)))
+                .is_some_and(|s| s.overrides_arrangement);
+        }
+        self.overrides = self.lanes.iter().any(|l| l.overrides);
     }
+}
+
+/// Which groups the Arrangement view has folded, and the track each folded group's row stands in
+/// for (`docs/spec/arrangement-editing.md` › Folded groups). View state: a project does not keep
+/// it, so opening a project shows every group open.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Folds {
+    /// The groups whose tracks are folded away.
+    folded: Vec<TrackId>,
+    /// What each of them shows, in the same order: the track whose clips and colour its row
+    /// takes. Worked out by [`Folds::reconcile`], never set by a click.
+    shown: Vec<(TrackId, TrackId)>,
+}
+
+impl Folds {
+    /// Whether `group`'s tracks are folded away.
+    pub fn is_folded(&self, group: TrackId) -> bool {
+        self.folded.contains(&group)
+    }
+
+    /// The track the folded `group`'s row shows; `None` while the group is open.
+    pub fn shown(&self, group: TrackId) -> Option<TrackId> {
+        self.shown.iter().find(|(g, _)| *g == group).map(|(_, track)| *track)
+    }
+
+    /// Folds `group`'s tracks away, or opens the group again.
+    pub fn toggle(&mut self, group: TrackId) {
+        match self.folded.iter().position(|g| *g == group) {
+            Some(at) => {
+                self.folded.remove(at);
+            }
+            None => self.folded.push(group),
+        }
+    }
+
+    /// The folded groups as a set, for the views that share them (the Session view's columns,
+    /// the track list's drop targets).
+    pub fn groups(&self) -> std::collections::BTreeSet<TrackId> {
+        self.folded.iter().copied().collect()
+    }
+
+    /// Folds exactly `groups`: what another view folded or opened. Groups folded already keep
+    /// their place; what each shows is worked out again by [`Folds::reconcile`].
+    pub fn set_groups(&mut self, groups: &std::collections::BTreeSet<TrackId>) {
+        self.folded.retain(|g| groups.contains(g));
+        for group in groups {
+            self.fold(*group);
+        }
+    }
+
+    /// Folds `group`'s tracks away, as the group a Stems file arrives in does.
+    pub fn fold(&mut self, group: TrackId) {
+        if !self.is_folded(group) {
+            self.folded.push(group);
+        }
+    }
+
+    /// Brings the folds in line with the project: groups it no longer has are forgotten (a group
+    /// whose tracks are all gone stops being folded), and every folded group shows `targeted`
+    /// while that is one of its own tracks, else the first track inside it.
+    pub fn reconcile(&mut self, project: &Project, targeted: Option<TrackId>) {
+        self.folded.retain(|group| first_inside(project, *group).is_some());
+        self.shown = self
+            .folded
+            .iter()
+            .filter_map(|group| {
+                let first = first_inside(project, *group)?;
+                let show = targeted.filter(|track| holds(project, *group, *track)).unwrap_or(first);
+                Some((*group, show))
+            })
+            .collect();
+    }
+}
+
+/// The first track inside `group` in project order, when the project has one.
+fn first_inside(project: &Project, group: TrackId) -> Option<TrackId> {
+    project.tracks.iter().find(|t| t.parent == Some(group)).map(|t| t.id)
+}
+
+/// Whether `track` is inside `group`: one of its own tracks, or of a group inside it. A broken
+/// parent chain stops the walk.
+fn holds(project: &Project, group: TrackId, track: TrackId) -> bool {
+    let mut parent = project.tracks.iter().find(|t| t.id == track).and_then(|t| t.parent);
+    let mut hops = 0;
+    while let Some(id) = parent {
+        if id == group {
+            return true;
+        }
+        hops += 1;
+        if hops > project.tracks.len() {
+            break;
+        }
+        parent = project.tracks.iter().find(|t| t.id == id).and_then(|t| t.parent);
+    }
+    false
+}
+
+/// How many lanes follow the lane at `index` inside it. A project keeps a group's tracks next to
+/// the group, so that run is its family.
+pub(crate) fn inside_lanes<T: std::borrow::Borrow<Lane>>(lanes: &[T], index: usize) -> usize {
+    let depth = lanes.get(index).map_or(0, |l| l.borrow().depth);
+    lanes.iter().skip(index.saturating_add(1)).take_while(|l| l.borrow().depth > depth).count()
 }
 
 /// What an audio clip needs to draw its waveform: the engine's mapping from beats to the file.
@@ -420,6 +589,22 @@ mod tests {
     use crate::demo::demo_project;
 
     #[test]
+    fn the_ruler_marks_tempo_and_time_signature_changes() {
+        use suhina_engine::model::{TempoPoint, TimeSignature, TimeSignatureChange};
+        let mut project = demo_project();
+        project.transport.tempo_changes =
+            vec![TempoPoint { beat: 16.0, bpm: 140.0, ramp: false }, TempoPoint { beat: 32.0, bpm: 97.5, ramp: true }];
+        project.transport.time_signature_changes =
+            vec![TimeSignatureChange { bar: 4, time_signature: TimeSignature { numerator: 7, denominator: 8 } }];
+        let timeline = Timeline::build(&project, None);
+        let marks: Vec<(f64, &str)> = timeline.marks.iter().map(|m| (m.beat, m.text.as_str())).collect();
+        // Bar 5 (counted from 1) starts on beat 16, where the tempo changes too.
+        assert_eq!(marks, [(16.0, "140 bpm  7/8"), (32.0, "→ 97.5 bpm")]);
+        assert_eq!(timeline.meter.bar_start(5), 19.5);
+        assert!(Timeline::build(&demo_project(), None).marks.is_empty());
+    }
+
+    #[test]
     fn lanes_follow_the_tracks_with_returns_last() {
         let timeline = Timeline::build(&demo_project(), None);
         let names: Vec<&str> = timeline.lanes.iter().map(|l| l.name.as_str()).collect();
@@ -485,5 +670,63 @@ mod tests {
         let content = project.content(clip.content).unwrap();
         let starts: Vec<f64> = note_marks(content, &clip).iter().map(|m| m.start).collect();
         assert_eq!(starts, [0.0, 1.0]);
+    }
+
+    /// The demo project with Drums and Bass inside a group, "Group", in front of them, as
+    /// `track.group` leaves them.
+    fn grouped_project() -> Project {
+        crate::demo::grouped_project()
+    }
+
+    #[test]
+    fn a_folded_group_shows_its_first_track_and_follows_the_one_being_worked_on() {
+        let project = grouped_project();
+        let group = TrackId(50);
+        let (drums, bass) = (TrackId(1), TrackId(2));
+        let mut folds = Folds::default();
+        assert!(!folds.is_folded(group));
+        assert_eq!(folds.shown(group), None);
+
+        folds.toggle(group);
+        folds.reconcile(&project, None);
+        assert!(folds.is_folded(group));
+        assert_eq!(folds.shown(group), Some(drums), "the first track inside the group");
+
+        // Working on a track of the group's own: the row follows it.
+        folds.reconcile(&project, Some(bass));
+        assert_eq!(folds.shown(group), Some(bass));
+        // A track outside it leaves the row on the first one, and a click opens the group again.
+        folds.reconcile(&project, Some(TrackId(3)));
+        assert_eq!(folds.shown(group), Some(drums));
+        folds.toggle(group);
+        folds.reconcile(&project, None);
+        assert!(!folds.is_folded(group));
+        assert_eq!(folds.shown(group), None);
+    }
+
+    #[test]
+    fn a_fold_forgets_groups_the_project_no_longer_has() {
+        let mut project = grouped_project();
+        let group = TrackId(50);
+        let mut folds = Folds::default();
+        folds.fold(group);
+        folds.reconcile(&project, None);
+        assert!(folds.is_folded(group));
+        // The group's tracks are gone: the fold goes with them.
+        project.tracks.retain(|t| t.parent != Some(group));
+        folds.reconcile(&project, None);
+        assert!(!folds.is_folded(group));
+        assert_eq!(folds.shown(group), None);
+    }
+
+    #[test]
+    fn inside_lanes_counts_the_tracks_a_group_holds() {
+        let timeline = Timeline::build(&grouped_project(), None);
+        let lanes: Vec<&Lane> = timeline.lanes.iter().collect();
+        let group = lanes.iter().position(|l| l.track == TrackId(50)).unwrap();
+        assert_eq!(inside_lanes(&lanes, group), 2);
+        // A track holds nothing, and the last lane has nothing after it.
+        assert_eq!(inside_lanes(&lanes, group + 1), 0);
+        assert_eq!(inside_lanes(&lanes, lanes.len() + 5), 0);
     }
 }

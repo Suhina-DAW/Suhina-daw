@@ -1,12 +1,15 @@
 ---
-description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar icons and tools, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, duplicate key
+description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key
 type: spec
 status: draft
 last_verified: 2026-10-15
 covers:
   - crates/ui/src/piano_roll.rs
+  - crates/ui/src/midi_tools.rs
+  - crates/ui/src/detail_view.rs
   - crates/session/src/notes.rs
+  - crates/session/src/note_tools.rs
   - crates/session/src/preview.rs
 ---
 
@@ -61,28 +64,49 @@ lane, the grid and zoom, and the `note.*` commands.
 
 ## Layout
 
-From left to right: the clip properties column (exists), the MIDI tools column (later), the editor.
-The editor, top to bottom:
+From left to right: the clip properties column (exists), the MIDI tools column (built,
+[#460](https://github.com/suhina-daw/suhina-daw/issues/460)), the editor. The editor, top to
+bottom:
 
 1. **Toolbar** (built, [#442](https://github.com/suhina-daw/suhina-daw/issues/442), icons
-   [#443](https://github.com/suhina-daw/suhina-daw/issues/443)): the tools, then the note
-   clipboard, and at the right end the piano roll's grid value (› Grid and snapping). **Later:**
-   tabs for Notes, Envelopes and Expression; Fold; Scale with the scale name.
+   [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
+   [#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the tools, then the note
+   clipboard, then the MIDI tools column's toggle, and at the right end the piano roll's grid
+   value (› Grid and snapping). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale
+   with the scale name.
 
-   The tools are **Select**, **Draw**, **Paint**, **Erase** and **Slice** (› Drawing notes), each an
+   The tools are **Select**, **Draw**, **Paint**, **Erase**, **Slice** and **Mute** (› Drawing
+   notes, › Muting), each an
    icon button: the shape is drawn in code with our own strokes ([`crates/ui/src/browser_view.rs`](../../crates/ui/src/browser_view.rs)
    › `icon` does the same for the browser), on a 14 px box, 1.1 px wide, in `text.secondary`; the
    chosen tool's is `text.primary` on `control.activeBackground`. A click chooses the tool; the
-   number keys **1** to **5** do too, after a click in the piano roll (› Shortcuts). The pointer
+   number keys **1** to **6** do too, after a click in the piano roll (› Shortcuts). The pointer
    over a button shows its name and its current key, such as "Draw (2)", and the button has that
    name as its accessible label, so a reader and a test find it by name.
+
+   The six tool shapes are drawn as an outline (the pointer is a filled arrow with a stem, the
+   pencil and the brush a tip and a body, the eraser a slanted block with a lighter rubbing end,
+   the blade a handle over a line, the mute tool a speaker with a cross beside it), so they are
+   told apart at 14 px and at the larger toolbar sizes below. The pointer over the grid takes the
+   tool's own shape where the window can show one: a crosshair for Draw and Paint, an **eraser**
+   for Erase (the shape of the eraser button, not the no-entry sign it used before), a text cursor
+   for Slice, an arrow for Select and Mute.
+
+   **Toolbar size** is a setting, Settings › General › Piano roll › **Toolbar size**: **Normal**
+   (100 %), **Large** (125 %, the default) and **Larger** (150 %). It scales the toolbar's height,
+   every button's box and the icon strokes inside it together, so the icons stay 1.1 px at Normal
+   and grow with the box; the rest of the editor (grid, notes, ruler) does not change with it. The
+   toolbar's height is its tallest control either way, and a size too large for the toolbar's
+   room is shown at the largest that fits, never clipped.
 
    After a divider, **Cut**, **Copy**, **Paste** and **Duplicate** icon buttons run what
    Ctrl+X, Ctrl+C, Ctrl+V and the duplicate key run (› Copy, cut, paste and duplicate) on the
    selected notes; they are greyed out (a `text.hint` shape, no highlight, no action) when there
    is nothing to act on: no note selected for Cut, Copy and Duplicate, nothing copied for Paste.
-   The grid value stays at the right end of the toolbar; the quantise controls are in the clip's
-   properties column (› Quantise).
+   The **MIDI tools** icon (three horizontal sliders) shows and hides the MIDI tools column
+   (› Other note tools); it is highlighted while the column shows, and a click on it is window
+   state only, not a command. The grid value stays at the right end of the toolbar; the quantise
+   controls are in the clip's properties column (› Quantise).
 2. **Ruler** (built): bar numbers and bar lines. **Later ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)):** the
    clip's loop region with draggable start and end, the clip's start and end markers.
 3. **Key column and note grid** (built): one row per key, black-key rows darker than white-key
@@ -154,7 +178,7 @@ pull up.
   zoomed so the whole clip fits the width.
 - **Built:** while the **right** mouse button is held down over the grid, each wheel step chooses
   the next tool, or with the wheel turned the other way the previous one, in the order Select →
-  Draw → Paint → Erase → Slice, stopping at the first and the last tool (no wrapping round)
+  Draw → Paint → Erase → Slice → Mute, stopping at the first and the last tool (no wrapping round)
   (› Drawing notes for the tools). The wheel never scrolls or zooms while the right button is
   held, nor afterwards with what is left of the wheel's smoothed movement: scrolling comes back
   once the button is up and the wheel has stopped.
@@ -198,13 +222,22 @@ pull up.
     line is). A cut that lands on a note's start or end leaves that note alone; a vertical drag
     that crosses no note does nothing. The whole stroke is one `note.split`, one undo step, and
     the notes the cut made are selected. A click (no drag) does nothing.
+  - **Mute** (built,
+    [#460](https://github.com/suhina-daw/suhina-daw/issues/460)): a click on a note mutes it, or
+    unmutes it when it is already muted; pressing and dragging sets every note the pointer passes
+    over to the state the first note the stroke touched takes, so a stroke that starts on a muted
+    note unmutes the run. The stroke is one `note.setMuted`, one undo step (› Muting). A click or
+    drag on an empty spot does nothing. The tool works on the note under the
+    pointer whatever the selection is, and never changes the selection, so a run can be muted
+    without losing what was selected.
   - **B** (`pianoRoll.draw`, after a click in the piano roll) switches between Select and Draw. The
-    number keys **1** to **5** (`pianoRoll.tool1` … `pianoRoll.tool5`) choose Select, Draw, Paint,
-    Erase and Slice, read only while the piano roll has the keyboard, so the number keys keep
+    number keys **1** to **6** (`pianoRoll.tool1` … `pianoRoll.tool6`) choose Select, Draw, Paint,
+    Erase, Slice and Mute, read only while the piano roll has the keyboard, so the number keys keep
     their meaning elsewhere in the window.
   - A new note takes the length and velocity of the note last drawn or clicked (one grid step and
-    100 until then), so repeated drawing keeps one feel. The cursor shows the tool: a crosshair to
-    draw or paint, a no-entry sign to erase, a text cursor to slice.
+    100 until then), so repeated drawing keeps one feel. The cursor shows the tool (› Layout): a
+    crosshair to draw or paint, an eraser to erase, a text cursor to slice, an arrow for Select and
+    Mute.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** dragging up or down while
   drawing sets the length.
 
@@ -278,9 +311,36 @@ pull up.
   it) deletes the selected notes, one undo step. Without a note selected, those keys keep doing
   what they do elsewhere (delete the selected clip). A double-click on a note deletes it.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** a drag with the right
-  button deletes notes. A **right-click** on a note deletes it in the Draw and Paint tools when the
-  **Draw-first** keymap preset is chosen (› Keymap presets); with **Select-first**, the default,
-  it does nothing there.
+  button deletes notes. A **right-click** on a note deletes it in the Draw and Paint tools when
+  the **Draw-first** keymap preset is chosen (› Keymap presets), and in every tool when the
+  **Mouse-first** preset's **Right click deletes a note** switch is on; otherwise it does nothing.
+
+## Muting
+
+- **Built ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)):** a muted note stays in
+  the clip and does not play: the engine emits no voice for it, exactly as if the note were not
+  there, through the arrangement, the launcher and an offline render. It keeps its time, length,
+  key and velocity.
+- The **Mute** tool (key **6**) mutes and unmutes the note under the pointer (› Drawing notes); a
+  click toggles one note, and a drag sets every note it passes over to the state the first note the
+  stroke touched takes, so a run is muted in one go without each note flipping on its own. The drag
+  is one stroke, so it is one `note.setMuted`, one undo step: Ctrl+Z (Cmd+Z on macOS) puts the whole
+  stroke back at once.
+- A muted note is drawn as the note it is, with a faded body, a dashed edge and no velocity stem
+  in the lane standing out (its stem is drawn faint), so it is clearly still there and clearly not
+  playing. The note's name and its position on the grid are unchanged.
+- Mute is part of the project ([ADR 0001](../decisions/0001-daw-neutral-model.md) › Amendment:
+  muted notes): saving writes `"muted": true` on those notes only, so a project without muted
+  notes is written as before, and reading a file from before this reads its notes as unmuted. A
+  muted note stays muted after the project is saved and opened again, and a Live Set's note marked
+  `IsEnabled="false"` is read as a muted note instead of being dropped
+  ([.als format](als-format.md) › Notes).
+- Copying, cutting, pasting and duplicating a note carries its mute with it; `note.setMuted` is the
+  only command that changes it. The MIDI tools that change notes (transpose, reverse and the rest,
+  › Other note tools) keep each note's mute, and act on muted notes as they do on the others, so a
+  part can be muted, moved and unmuted without the mute being lost.
+- **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** per-note probability and
+  velocity range; muting a whole clip or a time range of the grid.
 
 ## Copy, cut, paste and duplicate
 
@@ -325,15 +385,15 @@ pull up.
 ## Quantise
 
 - **Built ([#345](https://github.com/suhina-daw/suhina-daw/issues/345), in the clip column
-  [#443](https://github.com/suhina-daw/suhina-daw/issues/443)):** Ctrl+U quantises the
+  [#443](https://github.com/suhina-daw/suhina-daw/issues/443), moved to the MIDI tools column
+  [#460](https://github.com/suhina-daw/suhina-daw/issues/460)):** Ctrl+U quantises the
   selected notes, or every note of the clip when none is selected, with the last settings, at
-  once. The quantise **icon button**, the first of the toolbar's second group, opens the quantise
-  controls **in the clip's properties column** on the left of the detail area (› Clip column,
-  below): the column takes a **Quantise** block at its top with **Grid** (1/32 to 8 bars,
+  once. The quantise controls are the **Quantise** block at the top of the MIDI tools column
+  (› Other note tools), on the left of the note grid: **Grid** (1/32 to 8 bars,
   triplets too; 1/16 at first), **Amount** (0 to 100 %, 100 at first) and **Move ends too** (off
   at first), and the buttons **Quantise notes** (quantises now) and **Close**. The clip's own
-  properties (Track, Start, Length, Loop, Notes) move down under the block. Nothing floats over the
-  note grid.
+  properties (Track, Start, Length, Loop, Notes) stay in the properties column beside it. Nothing
+  floats over the note grid.
 - Escape and **Close** close the block, and the properties move back up. A press outside it does
   not close it (the block is part of the column, not a pop-up). The block's settings are kept for
   Ctrl+U until Suhina closes.
@@ -353,12 +413,28 @@ pull up.
   column is the same column in every layout: Track, Start, Length, Loop and (for a MIDI clip)
   Notes, or the audio clip's Gain and fades. With the detail area stacked (a column at the right of
   the window) it is a block at the top and the piano roll sits under it, as before.
+- **Built ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)):** the **Notes** row reads
+  **"N of M"** while notes are selected, where N is how many are selected and M how many the clip
+  has, and just **M** with nothing selected. Under it, while a selection exists, come the rows that
+  describe it, in this order and only when they say something:
+  - **From** and **To**: the selection's span in the clip's beats, as the ruler writes them (bar
+    and beat, such as `2.1` and `2.3`), from the earliest start to the latest end. They describe
+    the notes as they are on the grid, so a drag shows the values it would land on only when it is
+    let go.
+  - **Pitch**: the range of the selection's keys, by name, such as `C3` for one key or `C3–G3` for
+    several (the lowest and the highest, in that order).
+  - **Velocity**: the range of the selection's velocities as 1 to 127, such as `64` or `64–127`.
+  - A selection of muted notes says how many are muted in the Notes row, such as `2 of 4, 1 muted`,
+    so a run muted with the Mute tool is visible in the column as well as on the grid.
 - When the quantise block is open it takes the column's top: its title **Quantise**, then Grid,
   Amount, the checkbox and the two buttons, and the clip's own properties are drawn under it. The
   space the block needs is given to the column for that frame; closing the block gives it back.
-- **Later:** the MIDI tools column ([#349](https://github.com/suhina-daw/suhina-daw/issues/349))
-  joins these blocks in the same column; other detail-area work adds a block of its own rather than
-  changing the column's shape.
+- The selection rows are window state, like the selection itself: not part of the project, not an
+  undo step, and gone when the selection is cleared or another clip is shown (› Selecting).
+- **Built ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)):** the MIDI tools are their
+  own column beside this one (› Other note tools), drawn between the properties and the editor; a
+  later detail-area block takes its place in this column's list of blocks rather than changing its
+  shape.
 - **Later:** swing; quantise while recording (record quantisation) belongs to recording, which has
   its own issue.
 
@@ -397,9 +473,51 @@ pull up.
 
 ## Other note tools (MIDI tools column)
 
-- **Later ([#349](https://github.com/suhina-daw/suhina-daw/issues/349)):** transpose by a number of semitones (a field), ×2 and ÷2 (stretch the selection or the
-  clip in time), reverse, invert (mirror pitches), humanise (small random moves of start and
-  velocity), set length. Each is a command over the selection, one undo step.
+- **Built ([#460](https://github.com/suhina-daw/suhina-daw/issues/460), the column itself
+  [#349](https://github.com/suhina-daw/suhina-daw/issues/349)):** the editor has a **MIDI tools
+  column** between the clip properties column and the note grid, shown while a MIDI clip is open
+  and hidden by a click on the **MIDI tools** icon in the toolbar (› Layout). Showing or hiding it
+  is window state: it is not a command, not saved with the project and not an undo step, and
+  hiding it never changes the notes or the selection. The column is narrower than the properties
+  column and scrolls on its own when the detail area is short.
+- Its head says what the tools act on: **Selected notes** while notes are selected, otherwise
+  **Whole clip**, with the count under it (`4 notes` or `12 of 12 notes`). The tools with a
+  setting of their own (Transpose's semitones, Humanise's **Time** and **Velocity**, the scale's
+  root and mode, the velocity tools) keep what was last typed until Suhina closes, as the quantise
+  block's settings do.
+- Each tool is a button that runs one command over the notes the head names, one undo step, so the
+  same edit runs from the CLI and MCP (› Commands):
+
+  | Tool | Does | Command |
+  |---|---|---|
+  | **Quantise** | Moves the starts (with **Move ends too**, the ends) towards the grid by **Amount** | `note.quantize` |
+  | **Transpose** | Moves the notes by the semitones in its field, −24 to +24 | `note.move` with `semitones` |
+  | **Humanise** | Moves each start by up to **Time** beats and each velocity by up to **Velocity** steps, a fresh draw each time, so pressing it twice gives two different results | `note.humanize` |
+  | **Fit to scale** | Moves each note to the nearest key of the chosen root and mode | `note.fitToScale` |
+  | **Invert** | Mirrors the pitches around the middle of the selection's range | `note.invert` |
+  | **Reverse** | Turns the selection round in time, inside its own span | `note.reverse` |
+  | **Legato** | Makes each note last until the next one starts, at most | `note.legato` |
+  | **×2**, **÷2** | Stretches or squeezes the selection in time, its starts and its lengths | `note.stretch` |
+  | **Velocity: Randomise** | Changes every velocity by a random amount up to **Amount** | `note.randomizeVelocity` |
+  | **Velocity: Ramp** | Draws the velocities from **From** to **To** across the notes in time | `note.rampVelocity` |
+
+- The quantise controls live here, at the top of the column with the rest: the **Quantise** block
+  of the clip column (Grid, Amount, **Move ends too**, the **Quantise notes** button and **Close**)
+  moved into this column, and Ctrl+U keeps running the same command with the same settings while
+  the column is hidden. With the detail area stacked (a column at the right of the window) the
+  MIDI tools column has no room and is not drawn, whatever the toolbar icon says; Ctrl+U and the
+  keymap's tools still work there.
+- **Invert** mirrors each note's key around the middle of the range the tool acts on: the lowest
+  and highest key named (the selection's, or the clip's), so `C3` and `C5` swap and `C4` stays.
+  **Reverse** puts the last note first inside the span from the earliest start to the latest end,
+  each note keeping its length, so a rising line becomes a falling one at the same place in the
+  clip. **×2** and **÷2** stretch relative to the earliest start, keeping the first note where it
+  is. **Legato** moves each note's end to the next note's start (never making a note longer than
+  the gap to the next, never shorter than a hundredth of a beat), in time order per key, so a chord
+  stays together as far as the next note of its own key.
+- **Later ([#350](https://github.com/suhina-daw/suhina-daw/issues/350)):** the chord tool, strum
+  and arpeggiate, inversions; a length field (`note.resize`) and a legato mode that also moves
+  starts.
 
 ## Shortcuts
 
@@ -428,7 +546,7 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 | Ctrl+wheel; Ctrl+Shift+wheel or Alt+wheel | Zoom time; zoom key height |
 | Right button held + wheel | Chooses the next or previous tool, stopping at the first and last |
 | Shift+drag with Draw | Draws notes back to back, the last note's length each |
-| 1, 2, 3, 4, 5 | Chooses Select, Draw, Paint, Erase, Slice (after a click in the piano roll) |
+| 1, 2, 3, 4, 5, 6 | Chooses Select, Draw, Paint, Erase, Slice, Mute (after a click in the piano roll) |
 | B | Switches between the Select and Draw tools (after a click in the piano roll) |
 | Click, drag in the key column | Plays the key, through the track's instrument |
 | Ctrl+click, Ctrl+drag in the key column | Selects the notes of that pitch, of those pitches |
@@ -437,7 +555,7 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 The keys after a click in the piano roll are keymap actions ([`docs/shortcuts.md`](../shortcuts.md)):
 the `selection.*` ones the window has anyway, and `pianoRoll.selectAll`, `.deselect`, `.earlier`,
 `.later`, `.up`, `.down`, `.octaveUp`, `.octaveDown`, `.shorter`, `.longer`, `.draw` and
-`.tool1` … `.tool5`, which are read only
+`.tool1` … `.tool6`, which are read only
 while the piano roll has the keyboard, so they can be changed like the rest. `pianoRoll.quantize`
 (Ctrl+U) means nothing elsewhere, so it works whenever the piano roll shows a clip.
 
@@ -446,13 +564,40 @@ selection), added to the keymap when built.
 
 ## Keymap presets
 
-- **Built ([#443](https://github.com/suhina-daw/suhina-daw/issues/443)):** Settings › Shortcuts has
-  a **Preset** menu with two choices, which set the keys of a few actions at once:
+- **Built ([#443](https://github.com/suhina-daw/suhina-daw/issues/443), Mouse-first
+  [#460](https://github.com/suhina-daw/suhina-daw/issues/460)):** Settings › Shortcuts has
+  a **Preset** menu with three choices, which set the keys of a few actions and the mouse's
+  behaviour at once:
 
   | Preset | What it sets | Where it differs |
   |---|---|---|
   | **Select-first** (default) | the keys Suhina has today | duplicate is **Ctrl+D**; a right-click on a note does nothing |
   | **Draw-first** | the same, with the keys of someone who draws notes first | duplicate is **Ctrl+B**; in the Draw and Paint tools a right-click on a note deletes it |
+  | **Mouse-first** | the clicks of someone who works with the mouse: every switch below on, and the left button draws in the **Select** tool | duplicate is **Ctrl+D**; the four switches are on |
+
+- **Mouse-first gives the mouse the four jobs a pen and modifier keys would do**, each a switch of
+  its own under Settings › General › Piano roll, so any of them can be turned off and the rest
+  kept:
+  - **Left click draws** (on by default with Mouse-first): in the **Select** tool, a press on an
+    empty spot of the grid draws a note there and dragging sets its length, as the Draw tool does,
+    and a press on a note moves it, as Select does. Off, the left button selects as Select-first
+    does.
+  - **Right click deletes a note** (on): a right-click on a note deletes it; dragging with the
+    right button held deletes every note the pointer passes over, one `note.delete`, one undo
+    step, in every tool.
+  - **Shift+right click splits** (on): a right-click with Shift held slices the notes under a
+    short drag the way the Slice tool does, one `note.split`, one undo step.
+  - **Alt+right plays from the point** (on): while the right button is held with **Alt** (Option
+    on macOS), the clip plays from the spot under the pointer, and it stops when the button is let
+    go. It is the transport preview of › Playing the keys, for the whole clip: nothing is added to
+    the project and it is not an undo step. Held with the wheel, the right button still chooses the
+    tool (› Zoom and scroll).
+- A switch turned off by hand leaves the preset's name in the file, so the four switches say what
+  the mouse does and the preset name says where the keys and the switches started; choosing
+  **Mouse-first** again turns them all back on. The switches are kept with the keymap in
+  `keymap.json`, under `"mouseLeftDraws"`, `"mouseRightDeletes"`, `"mouseShiftRightSplits"` and
+  `"mouseAltRightPlays"`, each `true` or `false`; a file without them takes Select-first's (all
+  off), and a value that is not a boolean is ignored with a warning, as an unknown key is.
 
 - Choosing a preset sets the defaults of the keys it names; every other key keeps what it has, and
   single keys can still be changed afterwards, as today (› Settings in
@@ -484,6 +629,15 @@ nothing when it fails.
 | `note.resize` | clip, `notes`, `length?` or `by?` | Sets their length, or changes it by `by` beats |
 | `note.setVelocity` | clip, `notes`, `velocity?` or `by?` | Sets their velocity, or changes it by `by` (each kept within 1 to 127) |
 | `note.quantize` | clip, `notes?`, `grid`, `amount?`, `ends?` | Moves the starts (with `ends: true` the ends too) of the notes, or of every note when `notes` is left out, towards the nearest line of `grid` (as `launcher.setQuantization` takes it, such as `"1/16"` or `"1/8T"`; not `none`) by `amount` percent, 0 to 100 (default 100); returns the indices and how many moved |
+| `note.setMuted` | clip, `notes`, `muted?` | Mutes them (`muted: true`) or unmutes them (`false`); with `muted` left out each note is flipped. Returns the indices and their state |
+| `note.humanize` | clip, `notes?`, `time?`, `velocity?`, `seed?` | Moves each note's start by up to `time` beats (0 to 1, default 0.02) and its velocity by up to `velocity` MIDI steps (0 to 127, default 8), each a fresh random draw; `seed` makes the same call repeatable; returns the indices |
+| `note.fitToScale` | clip, `notes?`, `root?`, `scale?` | Moves each note to the nearest key of `scale` (`major`, `minor`, `harmonicMinor`, `melodicMinor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `majorPentatonic`, `minorPentatonic`, `blues`; default `major`) over `root` (a key name such as `"C"`, `"F#"`, or 0 to 11; default `"C"`); a tie goes to the lower key; returns the indices and how many moved |
+| `note.invert` | clip, `notes?` | Mirrors the keys around the middle of the range the notes cover (the lowest key plus the highest, halved, rounded down); returns the indices |
+| `note.reverse` | clip, `notes?` | Turns the notes round in time inside their own span (the earliest start to the latest end): each note's start becomes `span end − its end`, its length unchanged; returns the indices |
+| `note.legato` | clip, `notes?` | Makes each note last until the next note **of its own key** starts, or leaves it when nothing follows; never shorter than a hundredth of a beat; returns the indices and how many changed |
+| `note.stretch` | clip, `notes?`, `factor` | Stretches the notes in time about the earliest of their starts (`0.01` to `100`): starts and lengths are multiplied, the first start unchanged. `2` is the **×2** button, `0.5` the **÷2** one; returns the indices |
+| `note.randomizeVelocity` | clip, `notes?`, `amount?`, `seed?` | Moves each velocity by up to `amount` MIDI steps (0 to 127, default 16), each kept within 1 to 127; `seed` makes the same call repeatable; returns the indices |
+| `note.rampVelocity` | clip, `notes?`, `from`, `to` | Sets the velocities from `from` to `to` (1 to 127) across the notes in time order, evenly spaced; one note takes `to`; returns the indices |
 | `note.copy` | clip, `notes` | Copies them to the note clipboard; changes nothing and is no undo step |
 | `note.cut` | clip, `notes` | Copies them and deletes them |
 | `note.paste` | clip, `time?` | Adds the copied notes, the first at `time` (default: right after the copied notes); returns their indices |
@@ -506,10 +660,17 @@ never grow a clip past the 100 000 notes it holds; `at` is a beat from 0 to 120 
   note's velocity (every selected note when the note under the pointer is selected) and over the
   empty grid it keeps zooming the rows, as the Arrangement view's clip gain does. Not built: the
   maintainer decides ([#443](https://github.com/suhina-daw/suhina-daw/issues/443)).
-- **The fifth tool:** Slice, as built. If the maintainer wants another tool there, only the mapping
-  of `pianoRoll.tool5` and the icon change.
-- **The preset names** (**Select-first** and **Draw-first**) describe the habit; the maintainer may
-  rename them ([#443](https://github.com/suhina-daw/suhina-daw/issues/443)).
+- **The toolbar size default: Large (125 %), as built.** Normal (100 %) was considered, and the
+  maintainer decides ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)); changing it is
+  one constant and the default in Settings, and an existing `settings.json` keeps the value it
+  stored.
+- **Mute is the sixth tool**, after Slice, with the number key **6**. Another order (Mute before
+  Slice) changes the labels of `pianoRoll.tool5` and `pianoRoll.tool6` and the icons; the
+  maintainer decides ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)).
+- **The preset names** (**Select-first**, **Draw-first** and **Mouse-first**) describe the habit;
+  the maintainer may
+  rename them ([#443](https://github.com/suhina-daw/suhina-daw/issues/443),
+  [#460](https://github.com/suhina-daw/suhina-daw/issues/460)).
 - Envelopes and Expression tabs (per-note pitch bend, pressure, timbre; clip automation): a
   separate spec.
 - Audio clip editor (sample view, warp markers): a separate spec.

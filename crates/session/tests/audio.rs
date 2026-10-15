@@ -127,7 +127,7 @@ fn with_stand(missing: Option<&str>) -> (Projects, Arc<Stand>) {
 #[test]
 fn audio_commands_are_listed_with_their_kind() {
     let ids: Vec<&str> = audio_commands().iter().map(|c| c.id).collect();
-    assert_eq!(ids, ["audio.devices", "audio.setOutput", "audio.info"]);
+    assert_eq!(ids, ["audio.devices", "audio.setOutput", "output.setCuePair", "output.setCueVolume", "audio.info"]);
     assert!(audio_commands().iter().all(|c| c.kind == CommandKind::Audio));
     let listed = suhina_session::all_commands();
     assert!(listed.as_array().unwrap().iter().any(|c| c["id"] == "audio.setOutput"));
@@ -323,8 +323,15 @@ fn a_choice_is_found_by_its_host_and_device() {
 /// A project with two tracks whose first launcher slots hold looping clips.
 fn launcher_project() -> Project {
     let mut p = project();
-    let note =
-        suhina_model::Note { time: 0.0, duration: 0.25, key: 60, velocity: 1.0, release_velocity: 0.5, channel: 0 };
+    let note = suhina_model::Note {
+        time: 0.0,
+        duration: 0.25,
+        key: 60,
+        velocity: 1.0,
+        release_velocity: 0.5,
+        channel: 0,
+        muted: false,
+    };
     p.contents.push(suhina_model::ClipContent {
         id: suhina_model::ContentId(900),
         name: "loop".into(),

@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use suhina_als::{AlsError, read_gzip, read_xml};
-use suhina_model::{ChannelRole, LaneData, LoopRange};
+use suhina_model::{ChannelRole, LaneData, LoopRange, TempoPoint, TimeSignature, TimeSignatureChange};
 
 fn mixer(volume: &str, pan: &str, on: &str, sends: &[&str]) -> String {
     let sends: String = sends
@@ -134,6 +134,29 @@ fn reads_arrangement_clip_and_notes() {
     assert_eq!(notes.len(), 1);
     assert_eq!((notes[0].key, notes[0].time, notes[0].duration), (64, 1.0, 2.0));
     assert!((notes[0].velocity - 0.5).abs() < 1e-6);
+}
+
+/// A clip with one enabled note and one deactivated note (`IsEnabled="false"`): the deactivated
+/// note is kept and read as muted, not dropped (`docs/spec/als-format.md` › Notes).
+#[test]
+fn a_deactivated_note_is_read_as_muted() {
+    let events = concat!(
+        r#"<MidiNoteEvent Time="0" Duration="1" Velocity="100" OffVelocity="64" NoteId="1"/>"#,
+        r#"<MidiNoteEvent Time="1" Duration="1" Velocity="100" OffVelocity="64" NoteId="2" IsEnabled="false"/>"#,
+    );
+    let clip = midi_clip("0", "0", "4", "false", "4", &key_track(60, events));
+    let xml = format!(
+        r#"<Ableton><LiveSet><Tracks><MidiTrack Id="1"><Name><EffectiveName Value="Keys"/></Name>
+           <DeviceChain><MainSequencer><ClipSlotList>
+             <ClipSlot Id="0"><ClipSlot><Value>{clip}</Value></ClipSlot><HasStop Value="true"/></ClipSlot>
+           </ClipSlotList></MainSequencer></DeviceChain></MidiTrack></Tracks></LiveSet></Ableton>"#
+    );
+    let p = read_xml(&xml).unwrap().project;
+    let content = p.contents.first().expect("the clip's content");
+    let LaneData::Notes(notes) = &content.lanes[0].data else { panic!("expected notes") };
+    assert_eq!(notes.len(), 2, "the deactivated note is kept, not dropped");
+    assert_eq!((notes[0].muted, notes[1].muted), (false, true));
+    assert_eq!((notes[1].time, notes[1].duration, notes[1].key), (1.0, 1.0, 60));
 }
 
 #[test]
@@ -336,6 +359,29 @@ fn grouped_set(tracks: &[(&str, &str, &str, &str)]) -> String {
     )
 }
 
+/// The live set with tempo and time-signature envelopes on its main track holding `tempo` and
+/// `signature` events after their default events (`docs/spec/als-format.md` › Tempo and
+/// time-signature changes).
+fn with_envelopes(tempo: &str, signature: &str) -> String {
+    live_set().replace(
+        r#"<Tempo><Manual Value="128"/></Tempo><TimeSignature><Manual Value="201"/></TimeSignature>
+      </Mixer></DeviceChain>"#,
+        &format!(
+            r#"<Tempo><Manual Value="128"/><AutomationTarget Id="8"/></Tempo>
+        <TimeSignature><Manual Value="201"/><AutomationTarget Id="9"/></TimeSignature>
+      </Mixer></DeviceChain>
+      <AutomationEnvelopes><Envelopes>
+        <AutomationEnvelope Id="0"><EnvelopeTarget><PointeeId Value="8"/></EnvelopeTarget><Automation><Events>
+          <FloatEvent Id="1" Time="-63072000" Value="128"/>{tempo}
+        </Events></Automation></AutomationEnvelope>
+        <AutomationEnvelope Id="1"><EnvelopeTarget><PointeeId Value="9"/></EnvelopeTarget><Automation><Events>
+          <EnumEvent Id="2" Time="-63072000" Value="201"/>{signature}
+        </Events></Automation></AutomationEnvelope>
+      </Envelopes></AutomationEnvelopes>"#
+        ),
+    )
+}
+
 #[test]
 fn reads_groups_inside_groups() {
     let set = grouped_set(&[
@@ -397,4 +443,58 @@ fn groups_that_contain_each_other_or_nest_too_deep_still_open() {
         import.project.group_depth(import.project.tracks[ids.len() - 2].id),
         Some(suhina_model::MAX_GROUP_DEPTH)
     );
+}
+
+#[test]
+fn reads_tempo_and_time_signature_changes() {
+    // 120 at bar 1, a glide to 140 at bar 3, a jump to 90 at bar 5; 3/4 from bar 2, 7/8 from
+    // beat 10 (bar 4 in 3/4).
+    let xml = with_envelopes(
+        r#"<FloatEvent Id="3" Time="0" Value="120"/><FloatEvent Id="4" Time="8" Value="140"/>
+           <FloatEvent Id="5" Time="16" Value="140"/><FloatEvent Id="6" Time="16" Value="90"/>"#,
+        r#"<EnumEvent Id="7" Time="4" Value="200"/><EnumEvent Id="8" Time="10" Value="303"/>"#,
+    );
+    let import = read_xml(&xml).unwrap();
+    let t = &import.project.transport;
+    assert_eq!(t.tempo_bpm, 120.0);
+    assert_eq!(
+        t.tempo_changes,
+        [
+            TempoPoint { beat: 8.0, bpm: 140.0, ramp: true },
+            TempoPoint { beat: 16.0, bpm: 140.0, ramp: true },
+            TempoPoint { beat: 16.0, bpm: 90.0, ramp: false },
+        ]
+    );
+    let ts = |numerator, denominator| TimeSignature { numerator, denominator };
+    assert_eq!(
+        t.time_signature_changes,
+        [
+            TimeSignatureChange { bar: 1, time_signature: ts(3, 4) },
+            TimeSignatureChange { bar: 3, time_signature: ts(7, 8) },
+        ]
+    );
+    assert!(
+        !import.warnings.iter().any(|w| w.contains("tempo") || w.contains("time signature")),
+        "{:?}",
+        import.warnings
+    );
+}
+
+#[test]
+fn malformed_tempo_and_time_signature_events_are_left_out() {
+    let xml = with_envelopes(
+        r#"<FloatEvent Id="3" Time="4" Value="NaN"/><FloatEvent Id="4" Time="8" Value="5000"/>
+           <FloatEvent Id="5" Time="1e300" Value="100"/><FloatEvent Id="6" Time="x" Value="100"/>
+           <FloatEvent Id="7" Time="12" Value="100"/>"#,
+        r#"<EnumEvent Id="8" Time="6" Value="200"/><EnumEvent Id="9" Time="8" Value="99999"/>
+           <EnumEvent Id="10" Time="16" Value="200"/>"#,
+    );
+    let import = read_xml(&xml).unwrap();
+    let t = &import.project.transport;
+    // The one good tempo point is a step: nothing before it is a breakpoint to glide from.
+    assert_eq!(t.tempo_changes, [TempoPoint { beat: 12.0, bpm: 100.0, ramp: false }]);
+    assert_eq!(t.time_signature_changes.len(), 1);
+    assert_eq!(t.time_signature_changes[0].bar, 4);
+    assert!(import.warnings.iter().any(|w| w.contains("not on a bar line")), "{:?}", import.warnings);
+    assert!(import.warnings.iter().any(|w| w.contains("out of range")), "{:?}", import.warnings);
 }

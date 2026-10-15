@@ -12,35 +12,49 @@ use crate::widgets::Action;
 /// Turns the pointer going down and up on a slot's launch button into `clip.launch` and
 /// `clip.release`. A click without the pointer (a keyboard or an accessibility tool) launches.
 /// `scene` counts from 1. `launch` is the slot clip's settings, `None` for an empty slot.
-/// Returns whether it launched.
+/// `playing`: the slot's clip is playing, so a press or click on a trigger clip (one that
+/// listens for no release) stops it instead — the mark is the stop square then.
+/// Returns whether it acted (launched, or stopped).
 pub fn press_and_release(
     ui: &Ui,
     response: &Response,
     track: TrackId,
     scene: usize,
     launch: Option<LaunchSettings>,
+    playing: bool,
     actions: &mut Vec<Action>,
 ) -> bool {
     let key = response.id.with("held");
     let was_down = ui.ctx().data(|d| d.get_temp::<bool>(key)).unwrap_or(false);
     let down = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down());
     let params = json!({ "track": track.0, "scene": scene });
-    let mut launched = false;
+    // A clip in gate, toggle or repeat mode listens for the release; its button keeps its own
+    // press-and-release meaning even while it plays.
+    let stopping = playing && !launch.is_some_and(|l| l.mode.uses_release());
+    let mut acted = false;
     if down && !was_down {
-        actions.push(Action::new("clip.launch", params.clone()));
-        launched = true;
+        if stopping {
+            actions.push(Action::new("track.stop", json!({ "track": track.0 })));
+        } else {
+            actions.push(Action::new("clip.launch", params.clone()));
+        }
+        acted = true;
     } else if !down && was_down {
         if launch.is_some_and(|l| l.mode.uses_release()) {
             actions.push(Action::new("clip.release", params));
         }
     } else if response.clicked() && !was_down {
-        actions.push(Action::new("clip.launch", params));
-        launched = true;
+        if stopping {
+            actions.push(Action::new("track.stop", json!({ "track": track.0 })));
+        } else {
+            actions.push(Action::new("clip.launch", params));
+        }
+        acted = true;
     }
     if down != was_down {
         ui.ctx().data_mut(|d| d.insert_temp(key, down));
     }
-    launched
+    acted
 }
 
 /// What a menu calls a launch mode.

@@ -340,13 +340,13 @@ fn two_controllers_play_two_armed_tracks_each_its_own() {
 
     // Hear one track at a time by muting the other, and play each controller.
     let heard = |projects: &mut Projects, muted: u64, source: LiveSource| {
-        run(projects, "track.setMute", json!({ "track": muted, "mute": true })).unwrap();
+        run(projects, "track.setMute", json!({ "tracks": [muted], "mute": true })).unwrap();
         stand.run_latest();
         input.send_from(source, note);
         let level = stand.run_latest();
         input.send_from(source, off);
         stand.run_latest();
-        run(projects, "track.setMute", json!({ "track": muted, "mute": false })).unwrap();
+        run(projects, "track.setMute", json!({ "tracks": [muted], "mute": false })).unwrap();
         // Let the release fade before the next look.
         for _ in 0..60 {
             stand.run_latest();

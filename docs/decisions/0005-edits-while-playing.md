@@ -47,7 +47,10 @@ clip; devices (ADR 0004) will add many more parameters.
    and fills their rings before sending it. `process` splits its block at that frame, so the
    block before it is the old graph and the frames from it the new one.
 4. **State carries over at the swap, without allocation.** The playhead stays in beats: if the
-   tempo changed, the transport's origin is moved so the same beat plays on. Cursors into the
+   tempo map changed, the transport's origin is moved so the same beat plays on (the old map's
+   beat at the playhead, placed through the new map; between two constant tempos the old
+   rescaling, to the frame). The controller moves the new graph's stretch voices to that beat
+   through the map of the last graph it sent. Cursors into the
    new event lists are found by binary search; playing audio clips are found again by their
    time; an unwarped audio clip plays at its own speed, not the beat's, so it carries on from
    the file position it was at (after a tempo edit its beat position moves, as in other DAWs).

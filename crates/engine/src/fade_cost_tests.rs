@@ -82,6 +82,7 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
                 pan: 0.0,
                 mute: false,
                 solo: false,
+                cue: false,
                 output: None,
                 sends: Vec::new(),
                 devices: Vec::new(),

@@ -161,6 +161,8 @@ fn read_track(
             velocity: f32::from(velocity) / 127.0,
             release_velocity: f32::from(release) / 127.0,
             channel,
+            // A MIDI file does not mark a note as muted; every note it holds plays.
+            muted: false,
         });
         true
     };

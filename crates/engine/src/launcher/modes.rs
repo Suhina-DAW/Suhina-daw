@@ -2,7 +2,7 @@
 //! slot's launch button do (`docs/spec/clip-launching.md` › Launch settings). The launcher's
 //! queue does the waiting; this module decides what goes into it. Never allocates.
 
-use suhina_model::{LaunchMode, LaunchSettings};
+use suhina_model::{LaunchMode, LaunchQuantization, LaunchSettings};
 
 use super::{ClipPlan, Launcher, Pending, Playing, Quantization, Queued};
 
@@ -16,12 +16,19 @@ pub(super) struct SlotLaunch {
 }
 
 impl SlotLaunch {
-    /// `settings` with bars of `bar_beats`.
-    pub(super) fn new(settings: &LaunchSettings, bar_beats: f64) -> Self {
-        let quantization = settings
-            .quantization
-            .beats(bar_beats)
-            .map(|step| if step > 0.0 && step.is_finite() { Quantization::Beats(step) } else { Quantization::None });
+    /// `settings`, with a clip's bars kept as bars: the launcher counts them as it counts the
+    /// global quantisation's, through the meter or from where a scene changed the time
+    /// signature.
+    pub(super) fn new(settings: &LaunchSettings) -> Self {
+        let quantization = match settings.quantization {
+            LaunchQuantization::Bars(n) => {
+                Some(Quantization::Bars(u32::from(if matches!(n, 8 | 4 | 2) { n } else { 1 })))
+            }
+            // A note value's step does not depend on the bar.
+            other => other.beats(4.0).map(|step| {
+                if step > 0.0 && step.is_finite() { Quantization::Beats(step) } else { Quantization::None }
+            }),
+        };
         Self { mode: settings.mode, legato: settings.legato, quantization }
     }
 }

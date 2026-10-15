@@ -205,10 +205,14 @@ workspace forbids.
    plug-ins 30 to 50 % of their blocks late (notes dropped, "stopped answering"). The block is
    the buffer size the user chooses (Settings › Audio, `audio.setOutput`: 64 … 4096 frames,
    rounded to a size the driver allows; 1024 when none is chosen), so the deadline follows that
-   choice: a smaller buffer is quicker to answer a key and leaves the plug-ins less time. With
-   ASIO and WASAPI exclusive mode the device's buffer is that size too; WASAPI shared mode keeps
-   the period Windows gives it, and the ring holds a device buffer and a block when the device
-   takes more than a block at once. The session counts each plug-in's blocks and late blocks
+   choice: a smaller buffer is quicker to answer a key and leaves the plug-ins less time. The
+   driver is never asked for a size outside the buffer range it declared: a range holding no size
+   the engine renders in leaves the driver its own, with a notice that says which size plays.
+   With ASIO and WASAPI exclusive mode the device's buffer is that size too; WASAPI shared mode
+   keeps the period Windows gives it, and the ring holds a device buffer and a block when the
+   device takes more than a block at once. Where the device's buffer is not Suhina's to set, the
+   Settings row says *Engine block*, since the number is the engine's block and not the device's
+   buffer. The session counts each plug-in's blocks and late blocks
    (`device.plugin`: `blocks`, `late_blocks`, `longest_us`, `no_time`), and the device panel
    shows the share. Even so the sum of 25 plug-ins' times (a heavy synth up to 9 ms a block)
    passed the budget on half the blocks, so the chains no chain plays into now run their
