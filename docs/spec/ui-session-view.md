@@ -3,7 +3,7 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-12
+last_verified: 2026-10-14
 covers:
   - crates/ui/src/session_view.rs
   - crates/ui/src/grid.rs
@@ -35,7 +35,8 @@ From top to bottom:
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built — left of the view switch, `launcher.state`
-      reports it as `cpu`; the rest is not)
+      reports it as `cpu`; the rest is not). Left of the CPU load, the program's own RAM
+      (its resident memory, in MB or GB), shown always
     - view switches (Session / Arrangement)
 3. **Main area**, left to right:
    - **Browser** (collapsible, resizable width). Observed in Live: a search field; a sidebar of

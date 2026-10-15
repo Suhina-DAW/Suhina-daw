@@ -338,10 +338,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   saved in an editor shows within a second.
 - Short animations (hover fades, a pulsing queued clip, values easing after an undo, the view
   switch), which Settings turns off.
-- The control bar has tempo, launch quantisation, play, stop, the position and the CPU load
+- The control bar has tempo, launch quantisation, play, stop, the position, the CPU load
   (how much of the time the audio engine spends rendering, from the engine's monitor; hidden
-  while no engine plays); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and redo. Every
-  click is a command, the same the CLI and MCP run.
+  while no engine plays) and the program's RAM in megabytes or gigabytes (its resident
+  memory, measured once a second); Space plays and stops, Ctrl+Z and Ctrl+Shift+Z undo and
+  redo. Every click is a command, the same the CLI and MCP run.
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - A track header 70 px or taller shows where the track plays: the main output or a group

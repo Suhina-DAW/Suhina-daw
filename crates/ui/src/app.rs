@@ -214,6 +214,10 @@ pub struct App {
     pending_drop: Option<PendingDrop>,
     /// Where the detail area is this frame and the track it shows, for drops on its devices.
     detail_drop: Option<(Rect, TrackId)>,
+    /// The program's RAM (resident), as last measured, and when to measure again: the control
+    /// bar shows it and once a second is often enough for a number that moves that slowly.
+    ram: Option<u64>,
+    next_ram: Option<f64>,
 }
 
 impl Default for App {
@@ -276,6 +280,8 @@ impl App {
             map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
+            ram: None,
+            next_ram: None,
         }
     }
 
@@ -911,6 +917,13 @@ impl App {
         let progress = grid.as_ref().map(|g| self.progress(g)).unwrap_or_default();
         // The CPU load the control bar shows, from the engine's monitor, in per mille.
         let cpu = self.session().and_then(|s| s.player()).map(|p| p.cpu_monitor().load_milli());
+        // The program's own RAM, the control bar shows it beside the CPU: measured once a
+        // second, not every frame.
+        if self.next_ram.is_none_or(|at| ui.ctx().time() >= at) {
+            self.ram = memory_stats::memory_stats().map(|s| s.physical_mem as u64);
+            self.next_ram = Some(ui.ctx().time() + 1.0);
+        }
+        let ram = self.ram;
 
         egui::Panel::top("menu-bar")
             .exact_size(theme::MENU_BAR)
@@ -925,7 +938,7 @@ impl App {
         egui::Panel::top("control-bar")
             .exact_size(theme::CONTROL_BAR)
             .frame(egui::Frame::NONE.fill(theme::panel_background()))
-            .show(ui, |ui| self.control_bar(ui, grid.as_ref(), cpu, &mut actions));
+            .show(ui, |ui| self.control_bar(ui, grid.as_ref(), cpu, ram, &mut actions));
         egui::Panel::bottom("status-bar")
             .exact_size(theme::STATUS_BAR)
             .frame(egui::Frame::NONE.fill(theme::panel_background()))
@@ -2325,7 +2338,14 @@ impl App {
             .collect()
     }
 
-    fn control_bar(&mut self, ui: &mut Ui, grid: Option<&Grid>, cpu: Option<u32>, actions: &mut Vec<Action>) {
+    fn control_bar(
+        &mut self,
+        ui: &mut Ui,
+        grid: Option<&Grid>,
+        cpu: Option<u32>,
+        ram: Option<u64>,
+        actions: &mut Vec<Action>,
+    ) {
         let bar = ui.max_rect();
         ui.allocate_rect(bar, Sense::hover());
         let painter = ui.painter_at(bar);
@@ -2471,6 +2491,33 @@ impl App {
             let response = ui.interact(rect, Id::new("cpu-load"), Sense::hover());
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("CPU load {percent:.1}%"))
+            });
+            right = rect.left() - PAD;
+        }
+        // Left of it, the program's own RAM (its resident memory), in megabytes or gigabytes.
+        if let Some(bytes) = ram {
+            let rect = row(right - 76.0, 76.0);
+            painter.rect_filled(rect, 0.0, theme::window_background());
+            let inner = rect.shrink2(Vec2::new(PAD - 2.0, 0.0));
+            widgets::text_in(
+                &painter,
+                inner,
+                Align2::LEFT_CENTER,
+                "RAM",
+                theme::ui_font(theme::TEXT_TINY),
+                theme::text_hint(),
+            );
+            widgets::text_in(
+                &painter,
+                inner,
+                Align2::RIGHT_CENTER,
+                &ram_text(bytes),
+                theme::mono_font(theme::TEXT_SMALL),
+                theme::text_secondary(),
+            );
+            let response = ui.interact(rect, Id::new("ram-usage"), Sense::hover());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("RAM usage {}", ram_text(bytes)))
             });
             right = rect.left() - PAD;
         }
@@ -2651,6 +2698,12 @@ fn describe(action: &Action) -> Option<String> {
     })
 }
 
+/// The RAM as the control bar shows it: megabytes, or gigabytes with a decimal from 1 GiB on.
+fn ram_text(bytes: u64) -> String {
+    let mib = bytes as f64 / (1024.0 * 1024.0);
+    if mib >= 1024.0 { format!("{:.1} GB", mib / 1024.0) } else { format!("{mib:.0} MB") }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2715,5 +2768,17 @@ mod tests {
         // Where the map's window cannot tell (no pointer over it yet), nothing is under the drag.
         app.map_window.drag = Some(RemoteDrag { screen: None, released: false, escape: false, ctrl: false });
         assert_eq!(drag_pointer_in(&app, main, None), None);
+    }
+
+    #[test]
+    fn ram_is_shown_in_megabytes_or_gigabytes() {
+        assert_eq!(ram_text(0), "0 MB");
+        assert_eq!(ram_text(512 * 1024 * 1024), "512 MB");
+        assert_eq!(ram_text(700_000_000), "668 MB");
+        // From a gibibyte on, gigabytes with a decimal.
+        assert_eq!(ram_text(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(ram_text(2 * 1024 * 1024 * 1024 + 555_745_280), "2.5 GB");
+        // The measurement itself answers on this machine.
+        assert!(memory_stats::memory_stats().is_some_and(|s| s.physical_mem > 0));
     }
 }
