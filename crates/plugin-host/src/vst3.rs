@@ -161,6 +161,23 @@ impl ModuleFile {
                 return Err("the plug-in's ModuleEntry failed".into());
             }
         }
+        #[cfg(target_os = "macos")]
+        {
+            // SAFETY: `bundleEntry` is the entry the VST3 module API defines on macOS, the
+            // counterpart of `InitDll` on Windows and `ModuleEntry` on Linux: hosts that load
+            // the module as a bundle call it before the factory. It is optional: modules built
+            // on the current SDK initialise in their own static constructors and do not export
+            // it. Those that do (DPF-built modules such as Cardinal and plugdata) build the
+            // plugin their class information is read from here, and answering class queries
+            // before it runs crashes them. The old contract passes the bundle's handle; these
+            // modules find their own bundle from the loaded file, so null is fine.
+            let entry = unsafe { library.get::<extern "system" fn(*mut c_void) -> bool>(b"bundleEntry\0") };
+            if let Ok(entry) = entry
+                && !entry(std::ptr::null_mut())
+            {
+                return Err("the plug-in's bundleEntry failed".into());
+            }
+        }
         // SAFETY: `GetPluginFactory` is the module's required entry: no arguments, returning an
         // owned reference to its factory.
         let get = unsafe { library.get::<extern "system" fn() -> *mut IPluginFactory>(b"GetPluginFactory\0") }
@@ -280,7 +297,15 @@ impl Drop for ModuleFile {
                     exit();
                 }
             }
-            #[cfg(not(any(windows, target_os = "linux")))]
+            #[cfg(target_os = "macos")]
+            {
+                // SAFETY: `bundleExit` is the counterpart of `bundleEntry`, optional the same
+                // way: modules built on the current SDK do not export it.
+                if let Ok(exit) = unsafe { library.get::<extern "system" fn() -> bool>(b"bundleExit\0") } {
+                    exit();
+                }
+            }
+            #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
             let _ = library;
         }
         self.library = None;
