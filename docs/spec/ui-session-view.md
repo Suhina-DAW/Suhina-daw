@@ -177,10 +177,13 @@ a slot to the arrangement, in two ways. **Suhina** decisions, our own design:
 
 One launch control per scene with its number or name. Launching a scene launches every clip in
 its row and stops tracks whose slot in that row is empty with a stop button. Scenes can carry a
-tempo and time signature that apply when launched.
+tempo and time signature that apply when launched. **Suhina:** while a row plays, its button
+stops the row: every track whose slot in that row has a clip stops at the next quantisation
+point (`scene.stop`); a track whose slot in the row is empty keeps playing.
 
-**Suhina:** the launch button shows the scene's name, then its tempo and time signature when it
-has them (`Drop 128 3/4`), with the number on the right. Right-clicking it opens the scene menu:
+**Suhina:** the launch button shows a play glyph at its left — the stop square while the row
+plays — then the scene's name, its tempo and time signature when it has them (`Drop 128 3/4`),
+with the number on the right. Right-clicking it opens the scene menu:
 fields for the name, the tempo (empty for none) and the time signature (`3/4`, empty for none),
 each applied with Enter, then **Insert scene below**, **Duplicate scene** and **Delete scene**
 (greyed out for the only scene). Every entry is a `scene.*` command, undone with Ctrl+Z. The

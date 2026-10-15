@@ -94,6 +94,11 @@ pub enum LaunchCommand {
     LaunchScene {
         scene: usize,
     },
+    /// At the next quantisation point, every track whose slot in `scene`'s row has a clip stops.
+    /// A track whose slot in the row is empty keeps playing.
+    StopScene {
+        scene: usize,
+    },
     StopColumn {
         column: usize,
     },
@@ -1042,6 +1047,19 @@ impl Renderer {
                     self.graph.launcher.queue(column, Queued::Stop);
                 }
             }
+            LaunchCommand::StopScene { scene } => {
+                if self.running {
+                    for column in 0..self.graph.launcher.columns.len() {
+                        // Only the tracks whose slot in the row has a clip: an empty slot has
+                        // nothing to stop, and its track may be playing from somewhere else.
+                        if let Some(SlotPlan { clip: Some(_), .. }) =
+                            self.graph.launcher.columns.get(column).and_then(|c| c.slots.get(scene))
+                        {
+                            self.graph.launcher.queue(column, Queued::Stop);
+                        }
+                    }
+                }
+            }
             LaunchCommand::StopAll => {
                 if self.running {
                     for column in 0..self.graph.launcher.columns.len() {
@@ -1760,6 +1778,41 @@ mod tests {
         assert_eq!(monitor.column(0).unwrap().playing, None);
         assert_eq!(monitor.column(1).unwrap().playing, Some(0));
         assert!(monitor.column(0).unwrap().overrides_arrangement);
+    }
+
+    /// Stopping a scene stops every track whose slot in the row has a clip, at the next
+    /// quantisation point; a track whose slot in the row is empty keeps playing, and a row
+    /// without clips stops nothing.
+    #[test]
+    fn stopping_a_scene_stops_its_rows_clips_and_leaves_the_empty_slots_tracks() {
+        // Column 1: scene 1 clip, scene 2 empty with a stop button.
+        // Column 2: scene 1 clip, scene 2 empty without one, so it keeps playing.
+        let p = project(
+            vec![notes(1, vec![note(0.0, 60)]), notes(2, vec![note(0.5, 72)])],
+            vec![
+                vec![with(clip(1, 1.0, true)), Slot { clip: None, has_stop: true }],
+                vec![with(clip(2, 1.0, true)), Slot { clip: None, has_stop: false }],
+            ],
+        );
+        let mut renderer = Renderer::stopped(&p, &AudioPool::new(), SR).unwrap();
+        renderer.handle(LaunchCommand::LaunchScene { scene: 0 });
+        let mut block = vec![0.0f32; 2 * 256];
+        renderer.process(&mut block);
+        let monitor = renderer.monitor();
+        assert_eq!(monitor.column(0).unwrap().playing, Some(0));
+        assert_eq!(monitor.column(1).unwrap().playing, Some(0));
+
+        renderer.handle(LaunchCommand::StopScene { scene: 0 });
+        assert_eq!(monitor.column(0).unwrap().queued, Some(Queued::Stop));
+        assert_eq!(monitor.column(1).unwrap().queued, Some(Queued::Stop));
+        let mut bar = vec![0.0f32; 2 * BAR];
+        renderer.process(&mut bar);
+        assert_eq!(monitor.column(0).unwrap().playing, None);
+        assert_eq!(monitor.column(1).unwrap().playing, None);
+        // Scene 2's row has no clips: stopping it touches nothing.
+        renderer.handle(LaunchCommand::StopScene { scene: 1 });
+        assert_eq!(monitor.column(0).unwrap().queued, None);
+        assert_eq!(monitor.column(1).unwrap().queued, None);
     }
 
     /// A slot whose clip is deactivated does nothing when launched, alone or in a scene: the

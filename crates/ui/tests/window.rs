@@ -82,6 +82,12 @@ fn clicking_an_empty_slot_with_a_stop_button_stops_the_track() {
 fn scenes_and_stop_buttons_send_their_commands() {
     let mut harness = view();
     assert_eq!(clicked(&mut harness, "Launch scene 3 Build"), [Action::new("scene.launch", json!({ "scene": 3 }))]);
+    // A playing row's click stops its clips.
+    harness.state_mut().grid.scenes[2].playing = true;
+    harness.run();
+    assert_eq!(clicked(&mut harness, "Stop scene 3 Build"), [Action::new("scene.stop", json!({ "scene": 3 }))]);
+    harness.state_mut().grid.scenes[2].playing = false;
+    harness.run();
     assert_eq!(clicked(&mut harness, "Stop Drums"), [Action::new("track.stop", json!({ "track": 1 }))]);
     assert_eq!(clicked(&mut harness, "Stop all clips"), [Action::new("launcher.stopAll", json!({}))]);
     assert_eq!(

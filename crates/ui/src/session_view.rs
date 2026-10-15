@@ -26,6 +26,8 @@ const CLIP_MARK: f32 = 10.0;
 /// The part of a clip's slot that launches it: the mark and the padding around it.
 const LAUNCH_WIDTH: f32 = PAD + CLIP_MARK + PAD;
 const EMPTY_MARK: f32 = 3.0;
+/// The play and stop glyph size in a scene row, where the glyph sits on the row's fill.
+const SLOT_GLYPH: f32 = 4.5;
 /// How dim a muted track's lane is.
 const MUTED_ALPHA: f32 = 0.55;
 /// Volume range of the mixer's value, in dB.
@@ -1012,15 +1014,18 @@ fn scene_column(
             continue;
         }
         let label = if scene.name.is_empty() {
-            format!("Launch scene {}", scene.number)
+            format!("{} scene {}", if scene.playing { "Stop" } else { "Launch" }, scene.number)
         } else {
-            format!("Launch scene {} {}", scene.number, scene.name)
+            format!("{} scene {} {}", if scene.playing { "Stop" } else { "Launch" }, scene.number, scene.name)
         };
         let response = widgets::button_area(ui, rect.intersect(clip), Id::new(("scene", scene.number)), label);
         let target = MappingTarget::Scene { scene: scene.number.saturating_sub(1) };
         if response.clicked() {
             if keys.mode.on {
                 keys.pick(target);
+            } else if scene.playing {
+                // A playing row's click stops its clips; anything else launches.
+                actions.push(Action::new("scene.stop", json!({ "scene": scene.number })));
             } else {
                 actions.push(Action::new("scene.launch", json!({ "scene": scene.number })));
             }
@@ -1033,6 +1038,19 @@ fn scene_column(
         let playing = motion::toward(ui.ctx(), response.id.with("playing"), scene.playing, motion::VALUE);
         let fill = motion::mix(hover, theme::control_playing(), playing);
         painter.rect_filled(rect, 0.0, fill);
+        // The row's glyph: the play arrow while its clips wait for a launch, the stop square
+        // while the row plays — the click does what the glyph says.
+        let glyph = Rect::from_min_size(
+            Pos2::new(rect.left() + PAD, rect.center().y - SLOT_GLYPH / 2.0),
+            Vec2::splat(SLOT_GLYPH),
+        );
+        crate::browser_view::play_glyph(
+            painter,
+            glyph.center(),
+            scene.playing,
+            motion::mix(theme::text_secondary(), theme::text_primary(), widgets::hover(ui, &response).max(playing)),
+            SLOT_GLYPH,
+        );
         let inner = rect.shrink2(Vec2::new(PAD, 0.0));
         let mut name = scene.name.clone();
         if let Some(tempo) = scene.tempo_bpm {
@@ -1050,7 +1068,10 @@ fn scene_column(
             theme::mono_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
-        let name_rect = Rect::from_min_max(inner.min, Pos2::new(inner.right() - 18.0, inner.bottom()));
+        let name_rect = Rect::from_min_max(
+            Pos2::new(glyph.right() + PAD, inner.top()),
+            Pos2::new(inner.right() - 18.0, inner.bottom()),
+        );
         widgets::text_in(
             painter,
             name_rect,

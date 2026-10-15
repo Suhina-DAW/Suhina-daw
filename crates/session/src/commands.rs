@@ -714,6 +714,13 @@ static COMMANDS: &[CommandSpec] = &[
         run: launch_scene,
     },
     CommandSpec {
+        id: "scene.stop",
+        label: "Stop a scene's row: every track whose slot in that row has a clip stops at the next quantisation boundary",
+        params: &[SCENE],
+        kind: CommandKind::Transport,
+        run: stop_scene,
+    },
+    CommandSpec {
         id: "scene.insert",
         label: "Insert an empty scene (a row of empty slots with stop buttons) at a position, or after the last scene",
         params: &[
@@ -2862,6 +2869,12 @@ fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandE
     let scene = scene_index(session.project(), params)?;
     send(session, LaunchCommand::LaunchScene { scene })?;
     Ok(json!({ "scene": scene + 1, "queued": "launch" }))
+}
+
+fn stop_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let scene = scene_index(session.project(), params)?;
+    send(session, LaunchCommand::StopScene { scene })?;
+    Ok(json!({ "scene": scene + 1, "queued": "stop" }))
 }
 
 /// Scenes a project can have; inserting stops there.

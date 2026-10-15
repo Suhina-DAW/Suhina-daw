@@ -132,7 +132,7 @@ space, the mixer at the bottom.
 | Row separator | 1 px `border` between scene rows, continued through returns and scenes |
 | Track header | 20 px, `control.background` (`control.activeBackground` when selected), 2 px bottom strip in the track colour; name 11 px `text.primary` (`text.hint` when off). A click selects the track, a drag moves it, a right-click opens its menu |
 | Main header | 20 px, `control.background`, "Main" in `text.primary`, no colour strip |
-| Scene button | 20 px, `control.background` (hover `#34332F`), name left in 11 px, number right in 10 px mono `text.hint`; a playing scene `control.playingBackground` |
+| Scene button | 20 px, `control.background` (hover `#34332F`), a 4.5 px play glyph in `text.secondary` (`text.primary` hovered) 6 px from its left, name after it in 11 px, number right in 10 px mono `text.hint`; a playing scene `control.playingBackground`, its glyph the stop square, its click `scene.stop` |
 | Stop row | 20 px under the last scene, `panel.background`: per track a 7 × 7 square outline in `text.secondary` (`accent` while the stop is queued), centred; in the scene column the square and "Stop all" |
 | Empty space | Right of the last track: "+ MIDI track" and "+ Audio track" buttons (20 px, `control.background`, 10 px `text.secondary`, 2 px apart, 6 px from its top left) and, below them, "Drop files or devices to add a track" in 10 px `text.hint`. Drops from the browser there make new tracks; the Arrangement has the same under its last lane |
 
