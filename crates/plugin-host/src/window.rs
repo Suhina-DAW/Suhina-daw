@@ -829,7 +829,7 @@ mod imp {
 
     /// The shared application, set once to run as an accessory: the editors' windows belong to
     /// this process, which has no Dock icon of its own and never becomes the active app on its
-    /// own — a window takes the focus when it opens. `None` off the main thread, where windows
+    /// own: a window takes the focus when it opens. `None` off the main thread, where windows
     /// cannot live; the host's message loop runs on the main thread.
     fn app() -> Option<Retained<NSApplication>> {
         let marker = MainThreadMarker::new()?;
@@ -898,16 +898,18 @@ mod imp {
         fn drop(&mut self) {
             // The window goes away; a user-closed one is already out of sight. The plug-in has
             // let go of its view before this (the editors close their views first).
-            OPEN.with(|open| {
-                if let Ok(mut open) = open.try_borrow_mut() {
-                    open.retain(|s| s.id != self.id);
-                }
+            // It is taken out of the list first and hidden after, so the list is not borrowed
+            // while AppKit runs.
+            let closed = OPEN.with(|open| {
+                let mut open = open.try_borrow_mut().ok()?;
+                let at = open.iter().position(|s| s.id == self.id)?;
+                Some(open.swap_remove(at))
             });
-            with_state(self.id, |s| {
-                if s.window.isVisible() {
-                    s.window.orderOut(None);
-                }
-            });
+            if let Some(s) = closed
+                && s.window.isVisible()
+            {
+                s.window.orderOut(None);
+            }
         }
     }
 
