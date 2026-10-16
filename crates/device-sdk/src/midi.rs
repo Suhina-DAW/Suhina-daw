@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Prepared MIDI event graph processing. Compilation allocates; processing uses caller storage.
 use crate::{DeviceGraph, DeviceRole, DeviceSdkError, NodeKind, Parameter};
 use suhina_device_api::NoteEvent;

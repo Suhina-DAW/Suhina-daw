@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reads Live Sets (`.als`) into the Suhina project model.
 //!
 //! The format is described in `docs/spec/als-format.md`, which was written from Live Sets we

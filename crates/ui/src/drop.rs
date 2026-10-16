@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Dragging from the browser, or files from the system, into the project
 //! (`docs/spec/browser.md` › Dragging into the project): what is dragged, where it can land,
 //! and the commands a drop runs. The views say which target is under the pointer; this module

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A change made in a plug-in's editor counts as unsaved (issue #362), noticed by comparing the
 //! states the session reads with the one the plug-in reported when it started or the project
 //! was saved. These tests run the host's VST3 test plug-in and check the other side: a plug-in

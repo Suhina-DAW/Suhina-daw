@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Agent-facing automation: an MCP server (the official `rmcp` SDK) over a Suhina session,
 //! file access limited to granted roots, and the offline WAV render shared with the CLI.
 

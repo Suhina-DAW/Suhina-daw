@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! One track's arrangement clips rendered on their own, as they sound before the track's mixer
 //! strip, for `clip.consolidate` (`docs/spec/arrangement-editing.md` › Consolidating). The same
 //! renderer as playback and offline renders.

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Adding tracks and placing files (`docs/spec/browser.md` › Files, › Commands): `track.add`,
 //! `clip.addFiles`, presets with `device.add`, and `preview.*`. The offline render is the oracle
 //! for what a placed sample sounds like, and a player attached to the session shows that a file

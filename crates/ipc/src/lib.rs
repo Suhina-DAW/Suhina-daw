@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Audio blocks between the engine and a plug-in host process (ADR 0006).
 //!
 //! The engine creates a [`Link`] (a shared-memory region and two doorbells) and starts the host

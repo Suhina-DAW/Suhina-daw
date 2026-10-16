@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A clip slot's launch button, pressed and released, and its menu of launch settings
 //! (`docs/spec/ui-session-view.md` › Launch settings). A press sends `clip.launch` at once,
 //! without waiting for the click to end, so the launch is as close to the beat as the hand was;

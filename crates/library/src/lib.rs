@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The browser's library (`docs/spec/browser.md`, ADR 0012): the folders the user added, an
 //! index of the files in them kept on disk and up to date, and the pins, recent items and
 //! colour tags. It belongs to Suhina, not to one project; the session's `library.*` commands

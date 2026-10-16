@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The preview voice (ADR 0011): samples and notes previewed through the renderer, with the
 //! transport stopped or running, and audio added to the graphs after the renderer was built.
 

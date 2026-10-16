@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Check the `Depends on` check: the script `.github/workflows/depends-on.yml` runs.
 
 The check decides whether the merge queue may merge a pull request, so it is run here against

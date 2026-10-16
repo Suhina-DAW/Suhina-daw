@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The system's audio hosts and output devices, and fitting a choice to what a device offers.
 //! Drivers report what they like: every number from them is checked, and a host or device that
 //! fails to answer is listed with the error or left out, never a panic (AGENTS.md rule 2).

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Resampling between a source's rate and a model's (docs/spec/stem-separation.md › Resampling):
 //! band-limited interpolation with a Blackman-windowed sinc, read from a table of the kernel at
 //! `PHASES` points per input frame with linear interpolation between them.

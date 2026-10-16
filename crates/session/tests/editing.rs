@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Splitting and consolidating arrangement clips (`docs/spec/arrangement-editing.md` ›
 //! Splitting, Consolidating). The offline render is the oracle: a split or a consolidation
 //! sounds as the clips did before it.

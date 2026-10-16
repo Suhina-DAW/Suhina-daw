@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the Arrangement view shows, derived from the project and the engine's monitor: one lane
 //! per track with its clips placed in beats, and marks for the notes inside each clip. Pure data,
 //! like [`crate::grid`].

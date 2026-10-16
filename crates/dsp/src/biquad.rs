@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Second-order IIR filters ("biquads"). The coefficient formulas are the standard ones from
 //! Robert Bristow-Johnson's *Audio EQ Cookbook*, a freely published reference; the code is our
 //! own.

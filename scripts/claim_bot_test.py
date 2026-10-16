@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Check the claim bot: the script `.github/workflows/claim.yml` runs.
 
 The bot moves issue cards on the project board, so a wrong branch would write to the board instead

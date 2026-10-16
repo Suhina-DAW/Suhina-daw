@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Real-time priority for the threads that make sound: the desktop app's render thread and the
 //! plug-in host's audio threads (ADR 0006, decision 4).
 //!

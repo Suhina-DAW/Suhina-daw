@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A prepared per-frame signal interpreter. All storage is allocated during compilation.
 use crate::{DeviceGraph, DeviceSdkError, FilterMode, NodeKind, Parameter, ProcessContext};
 use suhina_dsp::{Biquad, Coefficients};

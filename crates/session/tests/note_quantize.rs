@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `note.quantize`: moving notes' starts (and ends) towards a grid, one undo step, and refusing
 //! bad input (`docs/spec/ui-clip-editor.md` › Quantise).
 

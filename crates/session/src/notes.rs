@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Editing the notes of a MIDI clip: the `note.*` commands the piano roll, the CLI and MCP run
 //! (`docs/spec/ui-clip-editor.md` › Commands).
 //!

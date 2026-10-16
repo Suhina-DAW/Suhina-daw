@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Changes made in a plug-in's own editor (issue #362). Reading a plug-in's state is neither a
 //! change to the open project nor an undo step (ADR 0010, decision 7), but a project whose
 //! plug-in was set differently in its editor has unsaved changes all the same: saving writes

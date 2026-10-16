@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Suhina's logo (`assets/brand/suhina-logo.svg`), drawn by the app itself: the file's paths are
 //! filled with tiny-skia into a texture of the size asked for, so it stays sharp at any zoom.
 //!

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Overdrive: a pedal-style distortion.
 //!
 //! Per side: a band-pass (a high-pass and a low-pass around the band frequency) picks what gets

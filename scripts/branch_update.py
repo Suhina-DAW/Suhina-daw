@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tells whether a push to a pull request only merged main into it, for
 .github/workflows/test-build.yml (docs/releasing.md › Test builds).
 

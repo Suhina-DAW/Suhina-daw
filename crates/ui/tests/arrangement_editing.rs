@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Splitting and consolidating clips in the Arrangement view (`docs/spec/arrangement-editing.md`
 //! › Splitting, Consolidating): the menu entries and the keys become `clip.split` and
 //! `clip.consolidate`.

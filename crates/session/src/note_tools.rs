@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The MIDI tools of the clip editor: `note.setMuted`, `note.humanize`, `note.fitToScale`,
 //! `note.invert`, `note.reverse`, `note.legato`, `note.stretch`, `note.randomizeVelocity` and
 //! `note.rampVelocity` (`docs/spec/ui-clip-editor.md` › Muting, › Other note tools (MIDI tools

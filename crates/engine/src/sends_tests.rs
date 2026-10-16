@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Sends and returns: a track's sends reach its returns, which run their devices over the sum.
 
 use suhina_model::*;

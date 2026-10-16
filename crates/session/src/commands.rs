@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The command registry. Each command is a [`CommandSpec`]; new commands are added to
 //! [`COMMANDS`] with tests below.
 

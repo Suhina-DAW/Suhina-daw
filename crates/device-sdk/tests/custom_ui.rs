@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #![allow(clippy::duplicate_mod)]
 use image::ImageEncoder as _;
 use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, Parameter, ui::*};

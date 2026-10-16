@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The main window: tabs for the open projects (ADR 0007), the control bar, the Session or
 //! Arrangement view and the status bar around the active project.
 //! Every change goes through `Session::execute` (AGENTS.md rule 6); the window only reads the

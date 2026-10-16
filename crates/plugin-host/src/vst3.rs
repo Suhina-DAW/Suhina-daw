@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Running a VST3 plug-in, through the `vst3` bindings to the VST 3 SDK (MIT since 3.8).
 //!
 //! The component and its controller live on the host's main thread, the audio processor's

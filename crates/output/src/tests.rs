@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use super::*;
 
 /// Two ring frames: main (0.5, -0.5) with cue (0.25, -0.25), then main (1, 0) with cue (0.1, 0.2).

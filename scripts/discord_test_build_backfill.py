@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Posts the test builds already linked from open pull requests to the Discord testing forum, for
 the manual run of .github/workflows/test-build-links.yml (docs/releasing.md › Discord).
 

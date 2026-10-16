@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A slot's launch button pressed and released with the mouse, and the menu of a clip's launch
 //! settings (`docs/spec/ui-session-view.md` › Clip slots).
 

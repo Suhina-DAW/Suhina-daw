@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Renames Loopwerk to Suhina in the working tree: text in every tracked file, then paths.
 
     python scripts/rename_suhina.py           # rename (Cargo.lock is rewritten like any other file)

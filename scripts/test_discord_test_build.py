@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tests for discord_test_build.py: python3 -m unittest discover -s scripts -p 'test_*.py'"""
 
 import json

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Edits reaching a playing renderer (ADR 0005).
 //!
 //! [`Controller::update`] builds a new [`Graph`] for the edited project on the calling thread,

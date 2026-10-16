@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The follow action of a slot clip in the detail area, driven like a user would: each control
 //! runs `clip.setFollowAction`, one undo step per change.
 

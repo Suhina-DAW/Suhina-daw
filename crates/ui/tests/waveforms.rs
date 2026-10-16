@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The waveform drawn at several zooms, rendered to `target/ui-snapshots/waveforms.png` for
 //! looking at: `cargo test -p suhina-ui --test waveforms -- --ignored`. The shapes themselves are
 //! checked without a GPU in `src/waveform/tests.rs`.

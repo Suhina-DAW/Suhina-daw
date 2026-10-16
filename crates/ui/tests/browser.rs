@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The browser panel in the window (`docs/spec/browser.md`), driven like a user would: search,
 //! filters, places, the keyboard, and dragging samples, MIDI files and devices into the
 //! project, which runs the same commands agents use.

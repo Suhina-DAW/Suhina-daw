@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! MIDI inputs and arming (ADR 0017) with stand-in MIDI ports and audio output: ports opened
 //! and closed as they are turned on and off, `track.setArm`, and a note from a port heard
 //! through the armed track's instrument, also after the output is opened again. Real ports are

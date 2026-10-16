@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A stand-in for the plug-in host, used by the `ipc` tests: it opens the link named on its
 //! command line and serves blocks, halving every sample.
 //!

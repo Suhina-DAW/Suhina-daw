@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Suhina's own project file, `.suhina`: the project model (ADR 0001) as versioned JSON, so a
 //! project can be saved and opened again with nothing lost, and read by people and agents
 //! (ADR 0010, `docs/spec/suhina-format.md`).

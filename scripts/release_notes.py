@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Release notes from git history, for the release workflow (docs/releasing.md).
 
     release_notes.py --repo OWNER/REPO --head REF [--base REF] --style STYLE [--version V] [--tag T]

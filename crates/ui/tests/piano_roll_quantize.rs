@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Quantise in the piano roll, driven like a user would: Ctrl+U quantises the selected notes (or
 //! every note) with the last settings, and the Quantise panel sets them
 //! (`docs/spec/ui-clip-editor.md` › Quantise).

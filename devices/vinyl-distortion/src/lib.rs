@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Vinyl distortion: the ways a record and its stylus bend a sound, as three effects.
 //!
 //! - **Tracing:** a band multiplied by its own shaped copy, which adds even harmonics, like a

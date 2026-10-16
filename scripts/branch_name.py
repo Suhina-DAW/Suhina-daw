@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Check a pull request's branch name against the rule in AGENTS.md › Tasks.
 
 A branch is named `<kind>/<short-description>`: `feature/` for something a user can do, `fix/` for

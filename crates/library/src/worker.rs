@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The library's background thread (ADR 0012): checks each folder against its saved index,
 //! watches it for changes (or polls it when watching cannot be trusted), reads folders again on
 //! request, and sends every new index back to the [`crate::Library`].

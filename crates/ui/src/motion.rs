@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Animations, and the switch that turns them off. Every animated value in the views goes
 //! through here, so with animations off each one jumps straight to where it is going.
 

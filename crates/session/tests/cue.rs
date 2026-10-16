@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The cue: `track.setCue` (a project edit, undone like one), and `output.setCuePair` and
 //! `output.setCueVolume` with a stand-in eight-channel audio device. How the cue sounds is
 //! tested in the engine; where its samples go on a device, in `crates/output`.

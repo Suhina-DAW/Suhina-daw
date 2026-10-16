@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stretches a WAV file, for listening tests:
 //! `cargo run --release -p suhina-stretch --example stretch_wav -- in.wav out.wav <ratio> [semitones]`
 //! A ratio of 1.2 makes it 20 % longer (120 bpm material played at 100 bpm).

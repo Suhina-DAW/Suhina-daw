@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Saving a project as a Suhina project (.suhina) and opening it again.
 
 use serde_json::json;

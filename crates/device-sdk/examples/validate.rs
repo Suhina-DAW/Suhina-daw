@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args_os().nth(1).ok_or("usage: validate <device.sd>")?;
     let graph = suhina_device_sdk::DeviceGraph::read_file(std::path::Path::new(&path))?;

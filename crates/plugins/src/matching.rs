@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Finding the installed plug-in a project's device stands for (ADR 0006, decision 8).
 //!
 //! A project names a plug-in by the id it had when it was saved, which is often not one that is

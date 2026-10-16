@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The FM synth's parameters: 22 per operator (operators 1 to 6), the voice's global ones in
 //! the order a voice stores them, then performance settings (bend, portamento, what the
 //! wheels and pedals do, volume).

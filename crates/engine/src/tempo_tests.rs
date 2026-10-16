@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Offline renders through a tempo map (`docs/spec/tempo-map.md`): notes, re-pitched and
 //! time-stretched audio, launched clips and the metronome stay on the grid across a step and
 //! through a ramp; quantisation and the metronome follow time-signature changes; a project whose

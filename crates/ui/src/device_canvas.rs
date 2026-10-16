@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! SDK drawing programs are evaluated only on the UI thread.
 use crate::{detail_view::GraphParameter, widgets::Action};
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};

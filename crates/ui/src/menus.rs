@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Context menus the views share. Every entry is a command, the same the CLI and MCP run.
 
 use egui::{Id, Key, Sense, Ui, Vec2};

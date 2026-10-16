@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! File access for agents. An MCP client may read only below the read root and write only below
 //! the write root it was given at launch; without a root it has no access of that kind.
 

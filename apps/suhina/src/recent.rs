@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The projects opened and saved lately, newest first, kept in `recent.txt` (one path a line)
 //! beside the settings file, for the project dialog.
 

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Adding tracks, and placing samples and MIDI files as clips (`docs/spec/browser.md` › Files):
 //! what the browser's drops and agents do. Each command is one undo step. A sample's decoded
 //! audio joins the session's pool and reaches a playing engine with the next graph (ADR 0011).

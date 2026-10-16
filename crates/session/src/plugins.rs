@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Commands for the plug-in library: scanning for installed plug-ins, listing them, and the
 //! folders a scan looks in (ADR 0006). They belong to Suhina, not to one project, so they run
 //! on [`Projects`] like the `projects.*` commands.

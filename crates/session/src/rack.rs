@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The plug-ins a project runs (ADR 0006): for each plug-in device, the installed plug-in found
 //! for it in the catalog, started in a host process with the state the project saved, off the
 //! audio thread, and handed to the playing engine; its health watched, and a restart that gets

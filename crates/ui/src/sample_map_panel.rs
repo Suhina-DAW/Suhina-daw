@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sample map in the browser (`docs/spec/sample-map.md` › Where the map is shown): which
 //! samples it holds (the browser's place), laying them out off the window's thread, and turning
 //! what the user does on the map into the browser's selection, previews, drags and commands.

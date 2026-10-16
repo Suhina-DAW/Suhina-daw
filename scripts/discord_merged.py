@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Marks a merged pull request's thread in the Discord testing forum, for
 .github/workflows/discord.yml (docs/releasing.md › Discord).
 

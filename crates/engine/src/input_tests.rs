@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Audio input (ADR 0017): each track hears its channel or pair of the input device, as its
 //! monitoring says, through its chain and mix; a band recorded on separate tracks; the input
 //! ring's clock drifting from the output's.

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The metronome: a short click on every beat while the transport runs, higher on the first beat
 //! of a bar. It follows the launcher's beat clock, so it keeps time through tempo changes, scene
 //! tempos and graph swaps, and the meter's bars through time-signature changes. It is off until

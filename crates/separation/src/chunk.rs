@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Cutting a signal into the model's windows and adding the windows' outputs back together
 //! (docs/spec/stem-separation.md › Chunking).
 //!

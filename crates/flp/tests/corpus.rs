@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests against the local, uncommitted FL Studio corpus (`corpus/flp`, see
 //! `docs/spec/flp-corpus.md`). Run with `cargo test -p suhina-flp --features corpus`.
 //!

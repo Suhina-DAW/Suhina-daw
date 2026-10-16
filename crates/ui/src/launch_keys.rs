@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Computer keys that launch slots, scenes and stop buttons, and the mapping mode that sets
 //! them (`docs/spec/ui-session-view.md` › Launch keys). A key down is the press and a key up the
 //! release, and both run the command the mouse would ([`suhina_session::mapped_command`]). A

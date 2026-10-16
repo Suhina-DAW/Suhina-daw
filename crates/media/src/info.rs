@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What a file in the browser is, and what can be told about a sample without decoding it: its
 //! length, rate and channels, and its tempo and key from the file's metadata or its name
 //! (`docs/spec/browser.md` › Tempo and key of a file).

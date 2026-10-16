@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests against the local, uncommitted Live Set corpus (`corpus/als`, see
 //! `docs/spec/als-corpus.md`). Run with `cargo test -p suhina-als --features corpus`.
 #![cfg(feature = "corpus")]

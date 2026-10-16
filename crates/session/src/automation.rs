@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Automation commands (#395, `docs/spec/automation.md`): points on the lanes of a track's
 //! mixer (`volume`, `pan`, `mute`) and of its devices' parameters, a lane switched off and on,
 //! and the lanes listed. A parameter is named by `track`, `device` (left out for the mixer) and

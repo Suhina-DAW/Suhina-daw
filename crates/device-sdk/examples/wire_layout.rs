@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A gain graph with authored node positions, port anchors and wire bends.
 #[allow(dead_code)]
 use suhina_device_sdk::{

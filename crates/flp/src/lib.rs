@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reads the container and the event stream of FL Studio projects (`.flp`).
 //!
 //! The format is described in `docs/spec/flp-format.md`, a draft written from public

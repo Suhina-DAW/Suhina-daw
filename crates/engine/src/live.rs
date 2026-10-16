@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Live input ([ADR 0017](../../../docs/decisions/0017-inputs-and-latency.md)): notes played on a
 //! MIDI controller, heard through the instrument of every armed track, whether the transport
 //! runs or not.

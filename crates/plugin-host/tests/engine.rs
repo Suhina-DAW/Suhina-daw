@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plug-ins in the engine's track chains (ADR 0006, issue #100), with the plug-ins built into
 //! the host: a project's plug-in effect and instrument in an offline render, a plug-in that
 //! crashes or hangs while the engine plays on, and a session that finds, starts, watches,

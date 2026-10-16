@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The engine's side of plug-in hosting (ADR 0006): starting `suhina-plugin-host` processes,
 //! loading plug-in instances into them, talking to them, noticing when one crashes or hangs, and
 //! restarting it with its last state.

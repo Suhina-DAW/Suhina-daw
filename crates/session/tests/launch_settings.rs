@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A slot clip's launch settings (`clip.setLaunchMode`, `clip.setLegato`, `clip.setQuantization`)
 //! and the release of its launch button (`clip.release`), through a real renderer rendered
 //! offline (`docs/spec/clip-launching.md` › Launch settings).

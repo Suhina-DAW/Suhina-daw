@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The plug-in scanner (`suhina_plugins::scan`) against the real `suhina-plugin-host --scan`.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions
 

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Real-time time-stretching of warped audio clips (ADR 0003).
 //!
 //! Each warped clip placement gets a [`StretchVoice`]: a [`suhina_stretch::Stretch`] built with

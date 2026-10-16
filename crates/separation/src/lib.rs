@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stem separation (docs/spec/stem-separation.md): an audio signal into its stems, offline.
 //!
 //! The crate owns everything around the model: the source is brought to the model's sample rate

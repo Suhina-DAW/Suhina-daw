@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The host's share of a plug-in's own event loop. On Linux a plug-in's editor has no message
 //! loop of its own: it hands the host the file descriptors it waits on (its X11 connection) and
 //! the timers it needs, and the host calls it back from its main loop (VST3 `IRunLoop`, CLAP's

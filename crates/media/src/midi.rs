@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Standard MIDI files (`.mid`): the notes of each MIDI track, in beats, for the browser's MIDI
 //! clips and previews (`docs/spec/browser.md` › Files). Read by hand from the public file layout
 //! (a header chunk, then one chunk per track of delta-timed events); every count and length in

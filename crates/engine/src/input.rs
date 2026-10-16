@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Audio input ([ADR 0017](../../../docs/decisions/0017-inputs-and-latency.md)): what the
 //! input device (microphones, a guitar, an interface's line inputs) hears, read by the render
 //! thread and heard through the tracks that take it.

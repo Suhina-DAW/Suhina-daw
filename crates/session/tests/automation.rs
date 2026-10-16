@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Automation commands (#395): points on mixer and device lanes, undo, turning a lane off by a
 //! manual change and on again, and malformed parameters.
 

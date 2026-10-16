@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Scene commands: insert, duplicate, delete, rename, tempo and time signature, with undo, and
 //! what a playing engine does when the scenes change under it (rendered offline here).
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions

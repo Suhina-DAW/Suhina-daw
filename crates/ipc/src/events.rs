@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Events that go with a block: notes, controllers and parameter values, each at a frame of the
 //! block. They are stored in shared memory as fixed 16-byte records, so neither side allocates
 //! to pass them: frame (u32), kind (u8), channel (u8), key or controller number (u8), a zero

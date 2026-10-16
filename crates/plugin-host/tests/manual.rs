@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tools for looking into one installed plug-in by hand, run with `--ignored`: they take the
 //! plug-in from `SUHINA_PLUGIN` (`vst3:<bundle>` or `clap:<file>`, as the host takes it) and,
 //! if set, the host from `SUHINA_HOST` (a program that runs `suhina-plugin-host` with the

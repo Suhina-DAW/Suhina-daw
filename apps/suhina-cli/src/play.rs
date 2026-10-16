@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Real-time playback on the default audio output: the arrangement once, or the clip launcher
 //! driven by typed commands. The device itself is `suhina-output`.
 

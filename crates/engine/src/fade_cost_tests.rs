@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What clip fades cost the audio thread (issue #227): a fade-heavy project rendered block by
 //! block with each fade shape at curve 0 and ±1, against the same project without fades. The
 //! numbers are in `docs/spec/arrangement-editing.md` › What fades cost the audio thread.

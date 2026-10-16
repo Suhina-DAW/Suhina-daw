@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Groups inside groups in the track list, for the arrangement's track headers and the session
 //! view's column headers alike: which tracks a folded group hides, the arrow that folds a
 //! group, and what a track header let go among the others asks for (a move in the track

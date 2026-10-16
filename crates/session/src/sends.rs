@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Sends and return tracks: the send of a track to a return (level, before or after the fader)
 //! and adding, removing and renaming returns. The engine plays them (`suhina_engine`, sends).
 

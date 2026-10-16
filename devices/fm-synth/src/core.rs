@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Ported from MSFA (music-synthesizer-for-android) as found in Dexed: fm_core.cc and
 // fm_op_kernel.cc.
 // Copyright 2012 Google Inc.

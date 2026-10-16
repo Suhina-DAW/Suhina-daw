@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Limiter: a stereo-linked brickwall peak limiter with a short lookahead.
 //!
 //! The threshold works as a drive: the input is raised by `ceiling - threshold` decibels, so a

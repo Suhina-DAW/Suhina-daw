@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The `plugins.*` commands: where scans look, what they found, and how the commands sit next
 //! to the project commands. Scanning itself runs the plug-in host, so it is tested with the
 //! host in `crates/plugin-host/tests/scan.rs`.

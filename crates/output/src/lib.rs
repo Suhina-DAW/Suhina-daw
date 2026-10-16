@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The audio device: lists the system's hosts and output devices and plays an engine
 //! [`Renderer`] on the one chosen ([`OutputChoice`]), or on the default output.
 //!

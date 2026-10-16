@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The Session view: tracks as columns, scenes as rows, scene launch on the right, the mixer
 //! along the bottom (`docs/spec/ui-session-view.md`, sizes in `docs/design/components.md`).
 //! It draws a [`Grid`] and turns clicks into [`Action`]s; it never changes the project itself.

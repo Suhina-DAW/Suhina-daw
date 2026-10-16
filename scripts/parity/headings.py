@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Locate chapter and section headings in the extracted manual text.
 
     python scripts/parity/headings.py [--dir target/parity]

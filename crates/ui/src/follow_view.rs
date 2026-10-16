@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The follow action of the selected slot clip, in the detail area beside its other parts
 //! (`docs/spec/ui-session-view.md` › Detail area: follow action, sizes in
 //! `docs/design/components.md` › Follow action). Every control changes it through

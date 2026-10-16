@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Automation envelopes: the value of an [`AutomationLane`] at a beat, and the mixer parameters a
 //! channel's lanes can name. Pure functions, shared by the engine, the commands and the tests
 //! (`docs/spec/automation.md`).

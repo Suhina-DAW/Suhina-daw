@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the host can run. Until plug-in formats land, only test processors, named `test:…`:
 //!
 //! - `test:gain`: multiplies by a gain (0.5 at first); its state is the gain as 4 bytes,

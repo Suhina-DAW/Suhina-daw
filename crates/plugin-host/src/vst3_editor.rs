@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A VST3 plug-in's editor: the controller's `IPlugView`, attached to a window of the host's
 //! own ([`crate::window`]). The plug-in asks for a new size through the frame the host gives
 //! it (`IPlugFrame::resizeView`); when the user resizes a resizable window, the view is told

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Level meters: what a track, a group and the main output read while a project plays.
 
 use suhina_model::*;

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The dialog shown while an opened project's plug-ins start (ADR 0006): how many are ready,
 //! which are still loading, which could not start. The project plays meanwhile (a plug-in that
 //! has not started passes the sound through or is silent), so the dialog can be sent to the

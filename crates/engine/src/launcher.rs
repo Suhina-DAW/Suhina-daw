@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The clip launcher: one column of slots per track, at most one playing clip per column, and
 //! launches that wait for the next quantisation boundary. Behaviour: `docs/spec/clip-launching.md`.
 //!

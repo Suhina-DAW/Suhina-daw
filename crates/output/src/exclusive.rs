@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! WASAPI in exclusive mode (Windows): the device is Suhina's alone, with the buffer size
 //! asked for and no system mixer in between. cpal opens WASAPI only shared, so this goes
 //! through the `wasapi` crate. Everything COM happens on the stream's own thread, which sets

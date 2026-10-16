@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Extract a reference manual PDF to plain text, one page per marker, for the parity measurement.
 
 The manual itself is never committed and never read from the repository: point --pdf at a copy

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The cue bus: a second stereo output for headphones, heard apart from the main mix. Tracks
 //! whose cue is on (`Channel::cue`) add their sound after their own channel's volume and pan,
 //! and the browser's preview voice (ADR 0011) plays into it; the whole bus is scaled by the cue

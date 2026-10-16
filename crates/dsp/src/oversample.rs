@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Oversampling. A waveshaper creates harmonics above Nyquist that fold back as inharmonic
 //! aliasing; running it at twice the sample rate, between a half-band interpolator and
 //! decimator, keeps most of them out.

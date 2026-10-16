@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Audio files for a project: finds the files its audio clips refer to and decodes them into
 //! memory with symphonia (MPL-2.0), so the engine can play them without touching the disk.
 

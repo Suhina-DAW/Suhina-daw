@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Running audio through a plug-in offline, as fast as it goes: the same host process and
 //! link as playback, but each block waits for the plug-in instead of a real-time deadline.
 

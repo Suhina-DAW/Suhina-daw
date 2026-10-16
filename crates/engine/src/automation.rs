@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Automation of built-in device parameters and of a track's mixer (#395,
 //! `docs/spec/automation.md`). Plug-in parameters have their own events (`plugin_params`) but
 //! share the [`Envelope`].

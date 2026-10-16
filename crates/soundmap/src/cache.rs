@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The feature cache of one library folder (ADR 0013 › Cache): `features-<hash>.bin` beside
 //! the library's index.
 //!

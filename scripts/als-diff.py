@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Show what changed between two extracted Live Set XML files, as element paths.
 
 Usage: python scripts/als-diff.py a.als.xml b.als.xml

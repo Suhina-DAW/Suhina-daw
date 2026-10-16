@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The tempo map and the meter: how beats turn into time and into bars when the tempo and the
 //! time signature change over the song (`docs/spec/tempo-map.md`).
 //!

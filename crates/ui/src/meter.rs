@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Level meters (`docs/spec/level-meters.md`, sizes in `docs/design/components.md` › Meter):
 //! the engine's peak and RMS levels of a track or the main output as two bars, one per side,
 //! on the volume control's dB scale, with the highest peak of the last moments held as a line

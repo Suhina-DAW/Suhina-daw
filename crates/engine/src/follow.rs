@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Follow actions: what a launched clip does after it has played for its follow time. Behaviour:
 //! `docs/spec/clip-launching.md` › Follow actions.
 //!

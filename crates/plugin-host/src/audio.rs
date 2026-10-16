@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Running instances' blocks on audio threads, one instance after another when a block asks
 //! for it (ADR 0006, decision 2).
 //!

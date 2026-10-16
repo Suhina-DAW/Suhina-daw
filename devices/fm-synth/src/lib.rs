@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! FM Synth: a six-operator FM instrument whose engine is a port of MSFA, the engine inside the
 //! Dexed synthesizer (ROADMAP › Built-in effects and instruments).
 //!

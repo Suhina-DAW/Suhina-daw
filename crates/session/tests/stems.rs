@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stems files placed with `clip.addFiles` (`docs/spec/stems-format.md`): a group of a muted
 //! master and the stems, named and coloured from the file, with its mastering on the group.
 #![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions

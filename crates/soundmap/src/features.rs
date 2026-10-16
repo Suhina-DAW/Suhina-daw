@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The numbers that describe how a sample sounds (ADR 0013 › Features, version 2).
 //!
 //! Everything is computed from a mono sum of the file, resampled to [`RATE`], from its onset

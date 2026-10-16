@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Conversions between decibels and linear gain.
 
 /// Gain at or below this many decibels is treated as silence by [`db_to_gain_or_silence`].

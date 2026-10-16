@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A track's audio input (ADR 0017) through the session: `track.setAudioInput` as an edit, and
 //! an input device's frames heard through the armed track with a stand-in output.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions

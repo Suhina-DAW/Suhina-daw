@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Suhina audio engine. Offline rendering and real-time playback share this code path:
 //! [`Renderer::new`] does all allocation up front, and [`Renderer::process`] never allocates,
 //! so the same `process` call can later run on the audio thread.

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Makes the small Stems test files in crates/media/tests/data (self-authored, see
 docs/spec/stems-format.md).
 

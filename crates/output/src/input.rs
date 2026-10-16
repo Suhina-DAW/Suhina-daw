@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The audio input device ([ADR 0017](../../../docs/decisions/0017-inputs-and-latency.md)):
 //! opened beside the output on the same host, at the output's sample rate, when one is chosen
 //! (off by default, so nothing opens a microphone unasked). Its callback converts every channel

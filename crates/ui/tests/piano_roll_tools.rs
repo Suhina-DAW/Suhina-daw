@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The piano roll's second step in the window (`docs/spec/ui-clip-editor.md`): pulled to the top
 //! by its splitter, Alt and the wheel zooming key rows, the toolbar's tools (Select, Draw, Paint,
 //! Erase) and its own grid value.

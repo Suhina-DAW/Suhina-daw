@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A render from an open project plays what is heard (issue #363, ADR 0006 decision 5): it
 //! starts its plug-ins with the state the running ones have now, not the state the project was
 //! opened with. Reading that state changes nothing in the open project.

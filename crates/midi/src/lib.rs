@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! MIDI controllers ([ADR 0017](../../../docs/decisions/0017-inputs-and-latency.md)): lists the
 //! system's MIDI input ports and opens them with `midir`, and turns what they send into the
 //! engine's live notes. This is the only code that opens a MIDI device; the session sees it as a

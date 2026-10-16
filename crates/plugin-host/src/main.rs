@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `suhina-plugin-host`: the process plug-ins run in, never the engine's (ADR 0006).
 //!
 //! `suhina-plugin-host --control <address>` connects to the engine's control socket and

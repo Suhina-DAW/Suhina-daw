@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Live input (ADR 0017): notes from a MIDI controller played by the armed tracks' instruments,
 //! with the transport stopped or running, across graph swaps.
 

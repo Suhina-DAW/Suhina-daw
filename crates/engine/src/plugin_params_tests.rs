@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plug-in parameters from the engine (#109) with a stand-in processor: set values, values set
 //! while playing, and automation lanes, heard at their frames in offline renders and in real
 //! time.

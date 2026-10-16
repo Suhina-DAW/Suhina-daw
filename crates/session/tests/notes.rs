@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The `note.*` commands: editing a MIDI clip's notes, one undo step each, and refusing bad input
 //! (`docs/spec/ui-clip-editor.md` › Commands).
 

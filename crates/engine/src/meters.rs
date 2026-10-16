@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Level meters (`docs/spec/level-meters.md`): the peak and RMS level of every track and of
 //! the main output, per channel, with a clip indicator that stays lit until it is reset.
 //!

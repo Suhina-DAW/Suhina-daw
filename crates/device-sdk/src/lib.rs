@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Build, validate, save, and run data-only Suhina device graphs (`.sd`).
 //!
 //! Version 4 separates device revisions from the file format version.

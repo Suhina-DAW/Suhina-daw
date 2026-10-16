@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Audio clip playback. Each clip placement becomes an [`AudioEvent`] when the renderer is built;
 //! `process` only reads decoded samples that are already in memory.
 //!

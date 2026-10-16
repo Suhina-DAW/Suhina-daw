@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Device chains in the renderer: effects on a track, instruments playing its notes, launched
 //! clips, the transport, graph swaps.
 

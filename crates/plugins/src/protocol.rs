@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The control messages between the engine and a plug-in host process (ADR 0006): one JSON
 //! object per line over a local socket. Audio does not go here; it goes through `suhina-ipc`.
 //!

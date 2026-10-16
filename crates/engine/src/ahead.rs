@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stretched clips rendered ahead of the audio thread (ADR 0003).
 //!
 //! A stretch voice costs little on average but unevenly: a restart before an onset or a stretcher

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Auto-pan: an LFO that turns each side's level down and up. With the two sides half a cycle
 //! apart (the default) the sound moves between left and right; with no phase difference both
 //! sides move together, which is tremolo.

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The arrangement's loop region (`docs/spec/arrangement-editing.md` › Loop region): playback
 //! wraps from the loop end to the loop start on the exact frame, whatever the block size, and a
 //! render of the whole arrangement does not repeat it.

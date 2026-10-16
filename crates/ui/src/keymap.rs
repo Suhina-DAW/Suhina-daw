@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keyboard shortcuts: which keys run which action, kept in a file the user can edit
 //! (`keymap.json`: an action id to a list of keys such as `"Ctrl+Shift+Z"`, the four mouse
 //! switches the Mouse-first preset sets, and the name of the `preset` they came from). An action

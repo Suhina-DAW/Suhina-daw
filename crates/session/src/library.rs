@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Commands for the browser's library (`docs/spec/browser.md` › Commands, ADR 0012): the
 //! folders, searching them with the built-in effects and instruments, and installed plug-ins, what a file is,
 //! pins, recent items and colour tags. They belong to Suhina, not to one project, so they run

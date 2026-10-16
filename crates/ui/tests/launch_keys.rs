@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Launch keys in the window (`docs/spec/ui-session-view.md` › Launch keys): the mapping mode
 //! maps a key to the picked slot, scene or stop button, and the key then launches it while the
 //! Session view is shown, ahead of a shortcut on the same key.

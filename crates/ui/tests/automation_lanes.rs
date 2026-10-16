@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Automation lanes in the Arrangement view (#420), driven like a user would: points added,
 //! moved and deleted with the pointer and the keyboard become `automation.*` commands that
 //! change the project through the session, with undo.

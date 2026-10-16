@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! A self-normalising short-time Fourier transform with Kaiser windows and a half-bin-shifted
 //! ("modified") real FFT, ported from Signalsmith Linear's `DynamicSTFT` (MIT, see
 //! `LICENSE-signalsmith.txt`).

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The inference backend: what runs a model on one window (docs/spec/stem-separation.md ›
 //! Backends). The chunking, resampling and channel handling around it are the crate's; a backend
 //! sees one window at the model's rate and channel count, and writes each stem's share of it.

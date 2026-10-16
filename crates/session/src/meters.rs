@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The level meters' commands: reading what the playing engine's meters show and turning off
 //! clip indicators (`docs/spec/level-meters.md`).
 

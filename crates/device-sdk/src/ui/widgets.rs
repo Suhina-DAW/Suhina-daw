@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use super::*;
 const TEXT: [u8; 4] = [236, 232, 225, 255];
 const DARK: [u8; 4] = [37, 36, 33, 255];

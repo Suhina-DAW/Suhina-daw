@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A second CLAP plug-in built into the host for tests (`test:clap-delay`): a delay whose one
 //! parameter (id 0, "Delay", 0 to [`MAX_DELAY`] frames, stepped, 0 at first) is also its
 //! latency, like a plug-in whose lookahead the user sets. Its latency may change only while it

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Fixes found by trying the piano roll package's build: the playhead in the piano roll, the
 //! clipboard keys as the real window sends them, the right button and the wheel never scrolling,
 //! and dragging a velocity bar (`docs/spec/ui-clip-editor.md`).

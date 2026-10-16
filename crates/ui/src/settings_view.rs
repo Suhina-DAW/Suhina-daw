@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The Settings page: replaces the main view until it is closed (the design brief keeps one
 //! window and no dialogs). Its pages are listed down the left; each setting is a row: a label, a
 //! short note and its control.

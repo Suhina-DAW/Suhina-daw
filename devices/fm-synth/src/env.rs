@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Ported from MSFA (music-synthesizer-for-android) as found in Dexed: env.cc and pitchenv.cc.
 // Copyright 2012-2013 Google Inc.; Copyright 2017 Pascal Gauthier.
 // Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE in this crate).

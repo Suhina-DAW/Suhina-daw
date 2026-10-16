@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Data-only drawing programs, image resources and input bindings for custom panels.
 use crate::{DeviceSdkError, Parameter};
 mod widgets;

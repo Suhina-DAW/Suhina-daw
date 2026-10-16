@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! MIDI inputs ([ADR 0017](../../../docs/decisions/0017-inputs-and-latency.md)): which ports
 //! there are, which are on, and where the notes they play go. The session only describes the
 //! choice; the MIDI layer (`suhina-midi`) lists and opens ports through [`MidiSystem`], which the

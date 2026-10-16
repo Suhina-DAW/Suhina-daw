@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Snapping a layout to a grid, one item per cell, keeping neighbours together (ADR 0013 ›
 //! Grid): recursive splitting of the points and the cells down to parts small enough to
 //! assign exactly.

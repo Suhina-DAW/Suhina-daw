@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The fast paths of a scan: VST3 bundles that describe themselves in `moduleinfo.json` are read
 //! without loading anything, and the rest go to a few long-lived `suhina-plugin-host
 //! --scan-worker` processes that each read file after file. A worker that crashes or hangs on a

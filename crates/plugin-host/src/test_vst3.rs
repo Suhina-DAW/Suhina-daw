@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A VST3 plug-in built into the host for tests (`test:vst3`): a gain (0.5 at first) with its
 //! state (the gain as 4 bytes, little-endian `f32`), a reported latency of [`LATENCY`] frames
 //! and a controller of its own. Its factory is handed to the host directly, so the tests run

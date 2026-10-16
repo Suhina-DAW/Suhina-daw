@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What sort of sound an item is, from the words in its name (spec › Kinds and colours).
 
 use std::path::Path;

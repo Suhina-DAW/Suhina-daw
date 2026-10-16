@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Launch mappings: a computer key or a MIDI note that launches a slot, a scene or a track's stop
 //! button (`docs/spec/clip-launching.md` › Launching from keys and notes).
 

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Check `scripts/branch_name.py`, the branch name reminder `.github/workflows/branch-name.yml` runs.
 
     python scripts/branch_name_test.py

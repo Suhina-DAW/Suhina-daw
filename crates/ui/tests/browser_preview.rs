@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Previewing from the browser end to end, through a real audio output: a sample row pressed
 //! starts playing, and keeps playing when the press turns into a drag. Needs an audio device, so it is ignored by default
 //! (`cargo test -p suhina-ui --test browser_preview -- --ignored`).

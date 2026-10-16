@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Compressor: a stereo-linked, feed-forward compressor with a soft knee, a high-pass on the
 //! detector and a dry/wet mix for parallel compression.
 //!

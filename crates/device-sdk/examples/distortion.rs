@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Build the distortion effect as a self-contained .sd file.
 use suhina_device_sdk::{DeviceGraph, DeviceRole, Node as N, NodeKind as K, Parameter};
 

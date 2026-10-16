@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `clip.setFollowAction`: a slot clip's follow action, with undo, malformed parameters, and
 //! playback through an offline renderer (`docs/spec/clip-launching.md` › Follow actions).
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions

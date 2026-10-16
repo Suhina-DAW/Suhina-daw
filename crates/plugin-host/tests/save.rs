@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Saving a project with running plug-ins (issue #111, ADR 0010 decision 7): `project.save`
 //! asks each running plug-in for its state and writes that into the file, the component's
 //! state into `Device::state` and a VST3 controller's into its extension, without recording a

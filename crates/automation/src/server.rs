@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The MCP server. Following PhotoCraft's conventions, it exposes a few generic tools rather than
 //! one tool per command: agents discover commands with `command_list` and run them with
 //! `command_run` or `command_batch`, so the tool list stays small as commands grow.

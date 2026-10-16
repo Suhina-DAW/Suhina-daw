@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A window standing in for the engine's (the desktop app's main window) in tests: plug-in
 //! editors are owned by it or embedded in it (ADR 0006, decision 10). On Windows it lives on
 //! a thread that serves its messages, as the app's window does: a host making a window owned

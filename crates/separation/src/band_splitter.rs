@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The test backend (docs/spec/stem-separation.md › The test backend): a deterministic band
 //! splitter with no weights, so the whole pipeline runs in `cargo test` without a third-party
 //! model. It is no separator of instruments; it is a stand-in whose output is known.

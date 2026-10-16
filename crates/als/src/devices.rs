@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Live's own devices that map onto Suhina's built-in effects and instruments (ADR 0004). Each mapping follows
 //! `docs/spec/als-format.md` › Devices: the element Live stores, the unit of every value, and
 //! the Suhina parameter it becomes. Parameter ids are the devices' stable ids

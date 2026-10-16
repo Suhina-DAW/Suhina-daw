@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Finding installed plug-ins (ADR 0006, decision 9).
 //!
 //! [`standard_folders`] lists where each system keeps plug-ins; users can add folders of their

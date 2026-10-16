@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plug-in devices in a track's chain (ADR 0006).
 //!
 //! The engine never loads a plug-in and does not know how one is hosted: a plug-in device's slot

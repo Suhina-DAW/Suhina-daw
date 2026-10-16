@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Offline renders of each launch mode, legato and per-clip quantisation
 //! (`docs/spec/clip-launching.md` › Launch settings).
 

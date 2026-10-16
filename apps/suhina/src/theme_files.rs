@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Theme files: one JSON file per theme in the `themes` folder beside the settings file, named
 //! by the theme's id (`night-blue.json`). A file saved while Suhina runs is read again within a
 //! second, so a theme can be edited in any text editor and seen right away. Backups and the theme

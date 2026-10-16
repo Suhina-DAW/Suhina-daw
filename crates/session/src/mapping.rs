@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Launch mappings: commands that add, list and remove the keys and MIDI notes that launch slots,
 //! scenes and stop buttons, and [`mapped_command`], which turns a press or release of a mapped
 //! key or note into the command the mouse would run (`docs/spec/clip-launching.md` › Launching

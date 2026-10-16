@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The `library.*` commands (`docs/spec/browser.md` › Commands): folders, search across files,
 //! built-in effects and instruments, and plug-ins, pins, recent items recorded from what was added, tags.
 #![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions

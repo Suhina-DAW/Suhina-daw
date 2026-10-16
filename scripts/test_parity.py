@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tests for scripts/parity/: python3 -m unittest discover -s scripts -p 'test_*.py'
 
 None of them needs a copy of the manual or matplotlib: they cover the scoring, the heading

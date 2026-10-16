@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Waking the other process when a word in shared memory changes, and waiting for that with a
 //! deadline. Each side first spins briefly (a fast host answers within microseconds), then
 //! sleeps in the operating system:

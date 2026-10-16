@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Hand-built byte fixtures for the container, the event walk, the values and every malformed
 //! case in `docs/spec/flp-format.md`.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions

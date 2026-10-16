@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Suhina, the desktop app: opens a project, plays it on the default audio output and shows it
 //! in the main window (`suhina-ui`).
 

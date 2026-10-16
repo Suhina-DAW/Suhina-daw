@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Commands for a slot clip's launch settings (mode, legato, its own quantisation) and for the
 //! release of a slot's launch button (`docs/spec/clip-launching.md` › Launch settings).
 

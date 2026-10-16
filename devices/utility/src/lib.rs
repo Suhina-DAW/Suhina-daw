@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Utility: gain, balance, stereo width and mid/side, mono and bass mono, phase inversion,
 //! channel selection, DC removal and mute, in one device.
 //!

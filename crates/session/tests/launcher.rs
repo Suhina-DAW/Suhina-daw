@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Transport and launcher commands drive a real renderer through its controller, rendered
 //! offline here instead of on an audio device.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions

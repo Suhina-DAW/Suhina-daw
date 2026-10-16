@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Notes and controllers for a VST3 instrument. Notes go to `process` as an `IEventList`;
 //! controllers and pitch bend are not events in VST3 but parameters, found through the
 //! controller's `IMidiMapping`, so they go as parameter changes ([`crate::vst3_params`]). Both

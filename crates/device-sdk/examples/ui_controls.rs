@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use suhina_device_sdk::{Connection, DeviceGraph, DeviceRole, Node, Parameter, ParameterControl};
 #[allow(dead_code, clippy::duplicate_mod)]
 pub fn build() -> Result<DeviceGraph, Box<dyn std::error::Error>> {

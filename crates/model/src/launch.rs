@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! How a clip in a launcher slot responds to being launched: its launch mode, legato and its own
 //! launch quantisation (`docs/spec/clip-launching.md` › Launch settings).
 

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the browser keeps between runs, in `browser.json` (`docs/spec/browser.md` › Where it is
 //! kept): the folders, the pins, the recent items by group, the colour tags and which items
 //! carry them. A file that cannot be read gives an empty store and a warning; parts that do not

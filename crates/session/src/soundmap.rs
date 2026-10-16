@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sample map's commands (`docs/spec/sample-map.md` › Commands, ADR 0013): analysis of the
 //! library's samples, layouts of a scope, similar items, kinds set by hand. Like the library they belong to
 //! Suhina, not to one project, so they run on [`Projects`] and never change a project.

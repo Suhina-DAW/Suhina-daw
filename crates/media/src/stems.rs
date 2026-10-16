@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Stems files (`.stem.mp4`, `.stem.m4a`): an MP4 file whose first audio track is the finished
 //! mix (the master) and whose further audio tracks are its parts (stems), with names, colours
 //! and mastering settings in a JSON document in `moov/udta/stem`. The format is described in

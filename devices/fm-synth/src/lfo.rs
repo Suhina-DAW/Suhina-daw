@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Ported from MSFA (music-synthesizer-for-android) as found in Dexed: lfo.cc.
 // Copyright 2013 Google Inc.; Copyright 2016-2025 Pascal Gauthier.
 // Licensed under the Apache License, Version 2.0 (see LICENSE-APACHE in this crate).

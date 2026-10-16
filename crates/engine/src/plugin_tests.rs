@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plug-in slots in the renderer (ADR 0006) with stand-in processors: effects and instruments,
 //! a plug-in that misses its deadline or is gone, latency compensation, processors arriving
 //! while playing and carried through edits.

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Low-frequency oscillator waveforms.
 //!
 //! The waveforms are pure functions of a position in cycles, so a device can derive the position

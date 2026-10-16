@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Several open projects, one of them active, like tabs. Commands go to the active project
 //! unless a caller names another; only the active project plays (ADR 0007).
 

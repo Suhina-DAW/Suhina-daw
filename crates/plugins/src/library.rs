@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The user's plug-in library: the folders they added, the catalog of what the last scan
 //! found, and how each plug-in is hosted. All are kept as JSON in Suhina's settings folder,
 //! so a scan survives a restart and the next one reads only what changed.

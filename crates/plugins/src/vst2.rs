@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Reading the standard VST2 bank (an `.fxb` file's contents) the model keeps for a VST2
 //! plug-in (layout in `crates/als/src/vst2.rs`). A bank of programs (`FxBk`) holds parameter
 //! values rather than the plug-in's own chunk; not every VST3 version of a plug-in reads such a

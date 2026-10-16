@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Level meters in the window: a playing track's meter moves, its clip light stays lit until
 //! it is clicked, and the main output has a meter too, in both views.
 

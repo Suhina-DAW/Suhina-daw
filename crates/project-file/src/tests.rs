@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Round trips of every part of the model, and files that are not projects or do not hold
 //! together.
 

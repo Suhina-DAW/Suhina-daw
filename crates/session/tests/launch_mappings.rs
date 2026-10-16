@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Keys and MIDI notes mapped to slots, scenes and stop buttons (`launcher.addMapping`,
 //! `launcher.removeMapping`, `launcher.mappings`), and the commands their presses and releases
 //! run, through a real renderer rendered offline (`docs/spec/clip-launching.md` › Launching from

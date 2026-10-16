@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Measures how plug-ins keep up on each audio output: drives `suhina-cli mcp --audio`, opens a
 project, and for each output plays it from a beat for a while, then reads `audio.info` and every
 plug-in device's `device.plugin` counts.

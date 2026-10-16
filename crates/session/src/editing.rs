@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Splitting an arrangement clip and consolidating a range of one track into one clip
 //! (`docs/spec/arrangement-editing.md` › Splitting, Consolidating).
 

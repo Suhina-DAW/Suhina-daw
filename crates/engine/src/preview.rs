@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The preview voice ([ADR 0011](../../../docs/decisions/0011-preview-and-added-audio.md)): plays a
 //! sample at its own speed, or a MIDI file's notes through a track's instrument or a fallback
 //! instrument, into the output after the track chains, whether the transport runs or not.

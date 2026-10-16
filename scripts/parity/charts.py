@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The two figures of the parity report.
 
     python scripts/parity/charts.py [--out docs/research]

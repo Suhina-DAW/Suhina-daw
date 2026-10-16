@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A CLAP plug-in built into the host for tests (`test:clap-ports`) whose audio is laid out
 //! like a modular rack's: a main input and a main output of [`MAIN_CHANNELS`] channels each,
 //! and a stereo side input and output that are not main. It copies each input port to the

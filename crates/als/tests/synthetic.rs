@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests against small Live Set XML documents written by hand from `docs/spec/als-format.md`.
 
 use std::io::Write;

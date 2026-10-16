@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Missing files (`docs/spec/missing-files.md`): the bar that says a project's audio files are
 //! missing, and the panel that finds them by name and relinks them.
 

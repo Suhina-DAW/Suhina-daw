@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Waveforms of audio files, as `docs/spec/waveforms.md` describes: peaks (lowest, highest and
 //! RMS per channel) at a few resolutions, computed once when a file is decoded, and one way of
 //! drawing them for clips, the browser's preview and the sample map. Drawing reads the level

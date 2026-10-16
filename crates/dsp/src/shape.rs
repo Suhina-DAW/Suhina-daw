@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Waveshapers: memoryless curves that add harmonics. Run them oversampled
 //! ([`Oversampler2x`](crate::Oversampler2x)) to keep the harmonics from aliasing.
 

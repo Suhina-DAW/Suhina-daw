@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The tempo map's commands (`docs/spec/tempo-map.md` › Commands): tempo changes and
 //! time-signature changes over the song, each edit one undo step. Tempo points are numbered from
 //! 1 in beat order; bars from 1, as shown.

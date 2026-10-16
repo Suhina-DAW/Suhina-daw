@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The windows plug-ins' editors live in: plain top-level windows on the host's main thread,
 //! which the plug-ins' own views are attached to. Several may be open at once, one per
 //! instance whose editor is open; what happened to each (asked to close, its size) is kept by

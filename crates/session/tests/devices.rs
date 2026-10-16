@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use serde_json::{Value, json};
 use suhina_model::*;
 use suhina_session::Session;

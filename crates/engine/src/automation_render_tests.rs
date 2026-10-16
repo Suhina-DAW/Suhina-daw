@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Offline renders that prove mixer and built-in device parameters follow their lanes (#395).
 
 use suhina_model::*;

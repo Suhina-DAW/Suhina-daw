@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The shared-memory region: a header of atomics, then the input and the output buffer, then
 //! the block's events, then the instances that run the block after this link's own (its
 //! followers).

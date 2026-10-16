@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! One folder's index (ADR 0012): the files of the kinds the browser lists and every
 //! sub-folder, with their sizes and modification times. Built by walking the folder within the
 //! limits, brought up to date by reading only the sub-folders whose time changed, and kept on

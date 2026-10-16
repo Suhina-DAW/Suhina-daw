@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The cue bus: cued tracks and the preview heard apart from the main mix, which does not
 //! change.
 

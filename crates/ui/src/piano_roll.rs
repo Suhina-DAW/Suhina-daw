@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The piano roll: the MIDI clip editor in the detail area (`docs/spec/ui-clip-editor.md`). A key
 //! column, a ruler, the note grid and a velocity lane. Every edit is a `note.*` command; the view
 //! keeps only what is on screen: zoom, scroll, the selected notes and a gesture in progress.

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `preview.play` and `preview.stop` (ADR 0011): the browser's preview of a sample or a MIDI
 //! file, through the attached engine. `preview.noteOn` and `preview.noteOff` are the piano
 //! roll's key column: a note through the track's instrument until it is let go. They never

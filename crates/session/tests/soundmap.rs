@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The `soundmap.*` commands (`docs/spec/sample-map.md` › Commands): analysis of the browser's
 //! samples, layouts by how they sound, similar samples.
 #![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions

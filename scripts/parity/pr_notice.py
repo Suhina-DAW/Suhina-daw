@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Remind a pull request that changes code to keep the parity measurement current.
 
 A pull request that adds, changes or removes something a user can do updates the coverage in

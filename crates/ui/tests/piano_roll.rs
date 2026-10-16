@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The piano roll in the window, driven like a user would: a selected MIDI clip shows its notes
 //! in the detail area, and drawing, selecting, moving, resizing, deleting and velocity changes
 //! become `note.*` commands (`docs/spec/ui-clip-editor.md`).

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Several plug-in instances in one `suhina-plugin-host` process (ADR 0006, decision 2):
 //! instances in one group share a process, each with its own audio and state; a crash or hang
 //! takes the group's process, and restarts bring every instance back into one new process.

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Automation lanes in the Arrangement view (#420, `docs/spec/automation.md` › In the
 //! Arrangement view): under a track, one lane per chosen parameter (its volume, pan and mute,
 //! each parameter of its built-in effects and instruments), its envelope drawn over the

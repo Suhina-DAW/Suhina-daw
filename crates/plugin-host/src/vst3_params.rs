@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Parameter changes for a VST3 processor. A processor learns new parameter values only through
 //! `process`: each block carries an `IParameterChanges` list with a queue of values per
 //! parameter. The control thread puts `(id, value)` pairs in a [`Pending`] list; the audio

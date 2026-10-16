@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Several open projects: which one is active, where commands go, and that only the active one
 //! keeps its player.
 #![allow(clippy::unwrap_used)] // test helpers outside #[test] functions

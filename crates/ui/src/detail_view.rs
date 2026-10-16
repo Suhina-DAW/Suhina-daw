@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The detail area: the selected track's device chain, and beside it the selected clip's
 //! properties (`docs/spec/ui-session-view.md` › Detail area). The chain is laid out in a row under the view
 //! or stacked in a column beside it (a setting). It shows the project as it is; changing devices

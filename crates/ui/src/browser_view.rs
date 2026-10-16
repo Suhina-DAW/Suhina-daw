@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Draws the browser panel (`docs/spec/browser.md` › Layout; sizes from
 //! `docs/design/components.md` › Browser): the search, the category filters, the sidebar of
 //! places, the results, the preview strip and the footer. Library changes and previews run

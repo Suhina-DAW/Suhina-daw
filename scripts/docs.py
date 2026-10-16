@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """The documentation index: front matter in every file under docs/, docs/INDEX.md built from it,
 and checks on the front matter.
 

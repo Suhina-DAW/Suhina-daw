@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Launch modes, legato and per-clip launch quantisation: what a press and a release of a
 //! slot's launch button do (`docs/spec/clip-launching.md` › Launch settings). The launcher's
 //! queue does the waiting; this module decides what goes into it. Never allocates.

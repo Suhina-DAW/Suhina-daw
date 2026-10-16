@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Commands for devices on tracks (ADR 0004): listing the built-in effects and instruments, adding, removing and
 //! switching them, and setting their parameters. Each edit is one undo step, and a playing
 //! engine hears it at once: a chain that keeps its devices keeps playing (held notes, tails).

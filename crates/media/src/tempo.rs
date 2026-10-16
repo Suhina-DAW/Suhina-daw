@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tempo detection for loops (`docs/spec/browser.md` › Tempo and key of a file): an onset
 //! envelope of the sound, its autocorrelation, and the tempos at which the file is a whole
 //! number of bars long. A tempo is given only when one of those stands out, so one-shots and

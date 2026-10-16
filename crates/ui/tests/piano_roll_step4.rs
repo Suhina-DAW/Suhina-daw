@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Piano roll step 4 in the window (`docs/spec/ui-clip-editor.md`): the toolbar's size setting and
 //! its six tools, the Mute tool and muted notes, the MIDI tools column, the selection in the clip
 //! column, and the Mouse-first preset's four mouse switches.

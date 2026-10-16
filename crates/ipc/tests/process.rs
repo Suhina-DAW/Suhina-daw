@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The engine side against a real second process (`suhina-ipc-peer`): blocks round-trip, and
 //! a peer that crashes or hangs in the middle of a block costs missed blocks, never a stall.
 #![allow(clippy::panic)] // test helpers outside #[test] functions

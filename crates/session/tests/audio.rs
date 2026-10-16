@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The `audio.*` commands with a stand-in audio system: listing hosts, choosing an output,
 //! reopening the playing project on it with the transport where it was, and reporting what
 //! runs. Real devices are tested in `crates/output`.

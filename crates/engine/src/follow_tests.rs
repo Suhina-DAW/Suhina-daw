@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Follow actions in the launcher (`docs/spec/clip-launching.md` › Follow actions): offline
 //! renders of chains of clips, sample-accurate at the follow time.
 

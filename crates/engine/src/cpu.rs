@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The audio thread's CPU load: how much of the wall time between the starts of
 //! [`crate::Renderer::process`](crate::Renderer) calls the calls themselves took, smoothed
 //! and published as an atomic any thread can read. Like [`crate::LauncherMonitor`] and

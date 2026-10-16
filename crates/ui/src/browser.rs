@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The browser's state and what it lists (`docs/spec/browser.md`): the search, the category,
 //! the place chosen in the sidebar, the open folders of the tree, the selection, and what is
 //! known about files (length, tempo, key, waveform), read on a thread of its own so the window

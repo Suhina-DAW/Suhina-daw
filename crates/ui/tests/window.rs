@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The Session view and the window, driven like a user would: clicks become the commands the
 //! CLI and MCP run, and edits change the project through the session.
 

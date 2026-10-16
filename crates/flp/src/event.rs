@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The event stream of the data chunk: walking it, and decoding the values of its events.
 
 use crate::{FlpError, TextEncoding};

@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Update the marked sections of docs/research/parity-live-12.md, in place.
 
 The report is an ordinary document: its prose is edited in markdown, by hand or by an agent. The

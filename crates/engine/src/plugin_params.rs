@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plug-in parameters from the engine (#109): the values a project sets on a plug-in device,
 //! values set while it plays (`device.setParam`), and its automation lanes, turned into
 //! parameter events at their frames in the block a plug-in slot hands over (ADR 0006,

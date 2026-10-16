@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Running a CLAP plug-in (through `clack-host`).
 //!
 //! The plug-in instance lives on the host's main thread, which also answers control messages

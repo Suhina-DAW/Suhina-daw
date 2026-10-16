@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Backups (autosave) of the open projects: when they are written, where, the thread that writes
 //! them, clean-up, and the journal the offer on start reads (`docs/spec/backups.md`, ADR 0010
 //! decision 11). The window's thread only copies the project; turning it into JSON and writing

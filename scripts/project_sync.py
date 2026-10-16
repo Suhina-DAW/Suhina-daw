@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Brings the Suhina project board up to date with the repository (docs/claim-bot.md › Project sync).
 
     project_sync.py [--dry-run | --apply]

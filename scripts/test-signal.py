@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Writes the test signal for the device corpus (docs/spec/als-corpus.md, series 6).
 
   python scripts/test-signal.py corpus/devices/test-signal.wav

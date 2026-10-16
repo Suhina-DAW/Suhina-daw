@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A small self-made project: four tracks, two return tracks, six scenes with clips and a
 //! 48-bar arrangement. The app opens it with `--demo`, and the UI tests draw it.
 

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Group buses (ADR 0004 › 10). A group track whose channel holds devices sums what plays into
 //! it and runs its devices over the sum, as a compressor on a group must. Every track that plays
 //! into a bus has a chain (one without devices when it has none), so its sound reaches the bus

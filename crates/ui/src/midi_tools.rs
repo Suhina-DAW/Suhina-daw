@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The MIDI tools column beside the note grid: what the tools act on, the quantise block and the
 //! note tools, each one `note.*` command over the selection or the whole clip
 //! (`docs/spec/ui-clip-editor.md` › Other note tools).

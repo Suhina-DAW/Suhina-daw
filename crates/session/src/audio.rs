@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The audio output a project plays on: which host (WASAPI, ASIO, ALSA…), device, sample rate
 //! and buffer size, and the `audio.*` commands that list, choose and report it. The session
 //! only describes the choice; the output layer (`suhina-output`) enumerates devices and opens

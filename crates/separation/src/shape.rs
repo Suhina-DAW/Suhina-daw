@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What a model takes and gives (docs/spec/stem-separation.md › Chunking): its sample rate,
 //! channels, window, hop, weighting and stem count. A model's manifest supplies these later; every
 //! value is checked here, since a manifest is input.

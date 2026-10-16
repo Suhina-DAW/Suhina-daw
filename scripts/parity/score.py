@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Parity scoring: how much of a reference manual's documented surface Suhina has today.
 
     python scripts/parity/score.py [--dir target/parity]

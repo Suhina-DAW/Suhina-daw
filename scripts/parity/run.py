@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Run the whole parity measurement, from a manual PDF you own to the report and its figures.
 
     python scripts/parity/run.py --pdf "C:/path/to/your/live12-manual.pdf"

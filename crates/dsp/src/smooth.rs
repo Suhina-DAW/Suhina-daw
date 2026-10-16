@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Parameter smoothing. A parameter that jumps from one block to the next makes an audible step
 //! ("zipper noise"); a [`Smoother`] ramps it linearly to each new target instead.
 

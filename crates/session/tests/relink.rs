@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Missing files (`docs/spec/missing-files.md`): `project.missingFiles`, `library.findFiles` and
 //! `project.relinkFiles`.
 #![allow(clippy::unwrap_used, clippy::panic)] // test helpers outside #[test] functions

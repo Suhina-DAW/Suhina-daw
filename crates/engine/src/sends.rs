@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Sends and returns (ADR 0004 › 11). A channel's sends feed return tracks: after its devices,
 //! a track's chain adds its sound to the input of each return it sends to, at the send's level,
 //! before (pre-fader) or after (post-fader) its own volume and pan. A return sums what it is

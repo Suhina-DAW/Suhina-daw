@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The project a new blank project starts as: two note tracks, two audio tracks, two returns, the
 //! main channel and eight empty scenes, so there is somewhere to put clips and devices before
 //! tracks can be added.

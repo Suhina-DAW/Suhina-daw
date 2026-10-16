@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Tests for project_sync.py: python3 -m unittest discover -s scripts -p 'test_*.py'
 
 The answers below are recorded GraphQL responses, cut down to the cards and issues each test needs;

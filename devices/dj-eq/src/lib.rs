@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! DJ EQ: three bands split by Linkwitz-Riley crossovers, each with a gain and a kill switch.
 //!
 //! Each side is split at the low frequency into low and the rest, and the rest at the high

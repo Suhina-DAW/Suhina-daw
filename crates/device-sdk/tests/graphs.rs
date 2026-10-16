@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use suhina_device_sdk::{
     Connection as C, DeviceGraph, DeviceRole, NODE_CATALOG, Node as N, NodeKind as K, Parameter, ParameterControl,
     ProcessContext, Waveform,

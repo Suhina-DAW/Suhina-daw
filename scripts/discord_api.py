@@ -1,3 +1,6 @@
+# Copyright (C) 2026 The Suhina contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Discord's REST API for the scripts that keep the testing forum's threads (docs/releasing.md ›
 Discord): calls as the bot and through a webhook, waiting out rate limits, and finding a pull
 request's thread by its name, `#<number> …`. Standard library only. Neither the token nor a

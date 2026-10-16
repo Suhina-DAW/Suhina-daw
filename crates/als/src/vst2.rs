@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A VST2 plug-in's saved state as the standard VST2 bank (an `.fxb` file's contents), the form
 //! the model keeps and the form a VST3 version of the plug-in reads when it stands in for the
 //! VST2 one (ADR 0006, decision 8).

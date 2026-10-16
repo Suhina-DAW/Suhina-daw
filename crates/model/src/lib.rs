@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Suhina project model: the project as pure data, with no audio or UI dependencies.
 //!
 //! The model is DAW-neutral (see `docs/decisions/0001-daw-neutral-model.md`): tracks and mixer

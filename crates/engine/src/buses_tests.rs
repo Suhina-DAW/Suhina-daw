@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Group buses: a group with devices processes the sum of the tracks routed into it.
 
 use suhina_model::*;

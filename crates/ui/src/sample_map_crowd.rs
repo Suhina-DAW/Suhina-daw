@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Drawing a map with many points (docs/spec/sample-map.md › Many items): the clusters each kind
 //! forms and where their labels go without overlapping, and the density raster drawn instead of
 //! the dots when too many are in view. Everything here is plain data in and out, so it is tested

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Graph trust boundary and dependency scheduling, never called on the audio thread.
 use crate::{DeviceGraph, DeviceRole, DeviceSdkError, MAX_DELAY_FRAMES, MAX_TEXT_BYTES, NodeKind};
 use std::collections::HashSet;

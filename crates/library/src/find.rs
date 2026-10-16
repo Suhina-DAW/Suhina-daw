@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Finding files by name (`docs/spec/missing-files.md`): in the index of the browser's folders,
 //! and by walking any folder. Names are compared without regard to case.
 

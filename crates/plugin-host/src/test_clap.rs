@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A CLAP plug-in built into the host for tests (`test:clap`): a gain, with its state (the gain
 //! as 4 bytes, little-endian `f32`) and a reported latency of [`LATENCY`] frames. Loading it
 //! through `clack-host` runs the host's whole CLAP path except opening a file, so the tests do

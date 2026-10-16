@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What kind of sound each item of a scope is, before it is laid out (ADR 0013 › Kinds): a kind
 //! set by hand, the words of its name, and a light classifier in feature space learned from the
 //! scope's own named items, so no model is shipped. And the layout's input, in which each item

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The engine's side of the tempo map (`docs/spec/tempo-map.md`): beats to arrangement frames
 //! through [`TempoMap`] counted in frames, and bars through [`Meter`]. Every conversion in the
 //! engine goes through these, so the arrangement, the play position, the launcher and the

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A voice in the layout the engine reads, and DX7 system-exclusive voice data: one voice
 //! (163 bytes) or a bank of 32 packed voices (4104 bytes), as Yamaha's published MIDI data
 //! format describes them.

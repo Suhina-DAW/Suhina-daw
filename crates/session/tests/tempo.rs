@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The tempo map's commands (`docs/spec/tempo-map.md` › Commands): tempo points and
 //! time-signature changes, kept in order, undone in one step each, and malformed params that
 //! change nothing.

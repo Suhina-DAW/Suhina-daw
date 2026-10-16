@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The objects a VST3 plug-in asks its host to make (`IHostApplication::createInstance`): a
 //! message and its attribute list, which a plug-in's component and controller send each other
 //! through their connection points. Many plug-ins make one as soon as they are connected and do

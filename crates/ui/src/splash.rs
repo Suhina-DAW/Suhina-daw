@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The splash shown while Suhina starts: a small panel with the logo and the version, drawn
 //! centred in the main window over its first frames. The work that makes starting slow (the
 //! browser's library, the sample map, the project to open) waits until the splash has been on

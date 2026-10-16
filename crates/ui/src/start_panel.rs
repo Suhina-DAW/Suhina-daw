@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The start panel: what the window shows right of the browser while no project is open (at
 //! start, as Settings › General › At start › Panel says, and after the last project closes). A
 //! new project, one from a template, or a recent project, found by name and listed with when it

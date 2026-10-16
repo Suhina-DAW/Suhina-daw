@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The engine's side (`suhina-plugins`) against the real `suhina-plugin-host` process:
 //! loading, state, and surviving a host that crashes or hangs, then restarting it.
 #![allow(clippy::panic, clippy::unwrap_used)] // test helpers outside #[test] functions

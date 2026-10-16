@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The library as a whole: folders added and kept on disk, searching, listing, the background
 //! thread and its watching.
 

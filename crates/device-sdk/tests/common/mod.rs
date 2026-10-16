@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Tests load standalone example crates, each with its own local helpers.
 #![allow(clippy::duplicate_mod)]
 #[path = "../../examples/auto_pan.rs"]

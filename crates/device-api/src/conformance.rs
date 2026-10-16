@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Checks every device must pass, whatever it does. Each device crate calls [`check`] from a
 //! test; the checks cover the [`Device`] contract, not the device's sound. Instruments also go
 //! through note checks: a fixed performance played in blocks of every size, `reset` while notes

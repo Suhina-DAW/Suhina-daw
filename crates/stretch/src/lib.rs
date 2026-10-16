@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 //! Time-stretching and pitch-shifting for polyphonic audio: a pure-Rust port of Signalsmith
 //! Stretch 1.3.2 (MIT, Geraint Luff / Signalsmith Audio; see `LICENSE-signalsmith.txt`).
 //!

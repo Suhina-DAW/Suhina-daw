@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Paths chosen with the system's own file and folder dialogs. The window only asks, with a
 //! [`PickRequest`] the app takes ([`crate::App::take_pick_request`]); the desktop app shows the
 //! dialog and hands back what was chosen ([`crate::App::set_picked`]). So the window, and its

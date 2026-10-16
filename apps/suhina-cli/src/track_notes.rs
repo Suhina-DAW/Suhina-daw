@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The notes a track's arrangement clips play, as plug-in events, for listening to one
 //! instrument device of a project (`plugin run-device`). The engine plays plug-ins in a track's
 //! chain itself once they are part of it; until then this reads the clips the way the engine's

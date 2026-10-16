@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Clip fades in the renderer (`docs/spec/arrangement-editing.md` › Fades): golden renders of a
 //! fade-in and a fade-out, the same envelope on stretched clips, block-size independence, and
 //! launched clips (`docs/spec/clip-launching.md` › Fades).

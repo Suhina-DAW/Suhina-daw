@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Plug-in parameters from the engine (#109), with the plug-ins built into the host: an offline
 //! render whose automation lane turns the test plug-ins' gain up (CLAP and VST3), and a session
 //! that lists a running plug-in's parameters, sets one while it plays and automates it, by
