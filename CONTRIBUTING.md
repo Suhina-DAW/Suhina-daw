@@ -143,7 +143,10 @@ issues, not the epic.
 apart from `AGENTS.md` and the documents those point at, so write it to stand on its own: goal,
 acceptance criteria, where the code goes. Keep the plan in the issue and the result in the pull
 request. An agent searches for an existing issue before it opens one, and for an open pull request
-before it opens one; it continues work that is open rather than starting it again. The rules in
+before it opens one; it continues work that is open rather than starting it again. An agent run
+by someone with write access opens issues through the
+[Open issue](.github/workflows/open-issue.yml) workflow, so they show the bot `suhina-bot[bot]` as
+their author rather than that person (`AGENTS.md` › Tasks has the commands). The rules in
 [AI-assisted contributions](#ai-assisted-contributions) apply to what the agent wrote.
 
 ## Trying a pull request
