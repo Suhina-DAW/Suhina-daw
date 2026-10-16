@@ -44,19 +44,22 @@ env:
   MAINTAINERS: juhamikael
   LABEL: ready to merge
   # Shell functions the jobs source: whether the pull request has the label now (not as the event
-  # saw it), and stopping a merge: auto-merge off, and out of the queue when it is in it. A failed
-  # dequeue fails the job, so a pull request is never left queued without anyone seeing it.
+  # saw it), and stopping a merge: auto-merge off when it is on, and out of the queue when it is in
+  # it. Either call failing fails the job, so a merge is never left running without anyone seeing.
   HELPERS: |
     has_label() {
       gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" --jq '.[].name' | grep -Fxq -- "$LABEL"
     }
     stop_merge() {
-      gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
       state=$(gh api graphql \
-        -f query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id isInMergeQueue } } }' \
+        -f query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id isInMergeQueue autoMergeRequest { enabledAt } } } }' \
         -f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$NUMBER" \
-        --jq '.data.repository.pullRequest | "\(.id) \(.isInMergeQueue)"')
-      read -r id queued <<< "$state"
+        --jq '.data.repository.pullRequest | "\(.id) \(.isInMergeQueue) \(.autoMergeRequest != null)"')
+      read -r id queued auto <<< "$state"
+      if [ "$auto" = "true" ]; then
+        gh api graphql -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
+          -f id="$id" >/dev/null
+      fi
       if [ "$queued" = "true" ]; then
         gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' \
           -f id="$id" >/dev/null
@@ -180,3 +183,9 @@ jobs:
             gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/reviews/$review/dismissals" \
               -f message="\`$LABEL\` was taken off." -f event=DISMISS >/dev/null
           done
+          # Put back while this run stopped the merge: the newer `labeled` run may have queued it
+          # and been undone above. The pull request now waits rather than merging; say so.
+          if has_label; then
+            echo "::error::The label was added again while the merge was being stopped. Take \`$LABEL\` off and add it again to queue the pull request."
+            exit 1
+          fi
