@@ -1366,7 +1366,7 @@ impl App {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.missing.bar(ui, prompt));
             }
             // With the detail area across the full width, the browser takes its side of what is
-            // left above it (Settings › Interface › Detail area › Layout).
+            // left above it (Settings › Detail area › Detail area layout).
             let full_width = grid.is_some()
                 && self.settings.view.detail_layout == crate::view_settings::DetailLayout::FullWidth
                 && self.settings.device_layout != DeviceLayout::Stack;

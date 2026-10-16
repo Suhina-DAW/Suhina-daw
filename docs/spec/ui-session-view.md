@@ -69,7 +69,7 @@ From top to bottom:
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
-   the selected clip's editor. **Suhina:** Settings › Interface › Detail area › **Layout** puts it
+   the selected clip's editor. **Suhina:** Settings › Detail area › **Detail area layout** puts it
    **Beside the browser** (the default: it starts right of the browser, which runs down to the
    status bar) or **Full width** (it spans the whole window, under the browser too, which ends
    above it); with the device chain stacked in a column beside the view the layout does not
@@ -148,7 +148,7 @@ with its launch settings under it: **Launch mode** (Trigger, Gate, Toggle, Repea
 quantisation** (Global, None, 8 bars … 1/32) and **Legato**, each an undoable edit.
 
 Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
-empty MIDI clip there (**Suhina:** while Settings › Interface › **Double-click makes a clip** is On,
+empty MIDI clip there (**Suhina:** while Settings › Arrangement › **Double-click makes a clip** is On,
 the default; Off, the double-click does nothing, and the Arrangement's lanes follow the same
 setting), one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
 [arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects it, so the

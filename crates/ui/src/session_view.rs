@@ -89,7 +89,7 @@ pub struct SessionViewState {
     /// A column's name or channel strip was double-clicked: the window shows that track's devices
     /// (`docs/spec/ui-clip-editor.md` › Where it opens).
     pub open_devices: Option<TrackId>,
-    /// A double-click on an empty slot does nothing (Settings › Interface › Double-click makes a
+    /// A double-click on an empty slot does nothing (Settings › Arrangement › Double-click makes a
     /// clip is off); by default it makes an empty MIDI clip.
     pub double_click_does_nothing: bool,
 }

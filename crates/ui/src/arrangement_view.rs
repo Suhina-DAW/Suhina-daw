@@ -252,7 +252,7 @@ pub struct ArrangementViewState {
     /// Moved clips stack on others instead of replacing them: audio clips, MIDI clips.
     pub stack_audio: bool,
     pub stack_midi: bool,
-    /// A double-click on an empty spot of a lane does nothing (Settings › Interface ›
+    /// A double-click on an empty spot of a lane does nothing (Settings › Arrangement ›
     /// Double-click makes a clip is off); by default it makes an empty MIDI clip.
     pub double_click_does_nothing: bool,
     pub header_width: f32,

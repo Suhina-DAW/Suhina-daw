@@ -130,7 +130,7 @@ selects it; it stacks when the MIDI stacking setting is on. A double-click on a 
 clip's own. In the Session view a double-click on an empty slot makes one there
 ([Session view](ui-session-view.md) › Clip slots).
 
-Both double-clicks follow one setting, Settings › Interface › **Double-click makes a clip** (On by
+Both double-clicks follow one setting, Settings › Arrangement › **Double-click makes a clip** (On by
 default, saved as `double_click_clip`). Off, a double-click on an empty spot of a lane, or on an
 empty slot, does nothing: no clip, and the selection stays as the first click left it.
 `clip.create` sent any other way (the command line, MCP) is not affected.
