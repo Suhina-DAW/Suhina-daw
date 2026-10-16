@@ -3505,10 +3505,7 @@ impl App {
         }
         let carry = self.carry.clone();
         // Ctrl (Cmd on macOS) held at the drop: a copy, as the keymap's rule has it.
-        let copy = ui.input(|i| {
-            eprintln!("PROBE modifiers at drop-read: ctrl={} cmd={}", i.modifiers.ctrl, i.modifiers.command);
-            i.modifiers.ctrl || i.modifiers.command
-        });
+        let copy = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
         let Some(carry) = carry else { return };
         let (released, escape, pointer) =
             ui.input(|i| (!i.pointer.primary_down(), i.key_pressed(Key::Escape), i.pointer.latest_pos()));
