@@ -16,6 +16,7 @@ use suhina_engine::model::{DeviceKind, LaneData, Note, Project, TrackId};
 use suhina_session::{Placement, PluginReport, PluginStatus};
 
 use crate::grid::gain_to_db;
+use crate::motion;
 use crate::theme::{self, PAD, ROW};
 use crate::widgets::{self, Action};
 
@@ -27,6 +28,9 @@ const NODE_ROW: f32 = 22.0;
 /// Width of the clip's properties beside the chain, and of a property's label.
 const CLIP_WIDTH: f32 = 196.0;
 const LABEL_WIDTH: f32 = 52.0;
+/// The Clip / Devices switch in the clip column's title row: one part's width, and its height.
+const SWITCH_PART: f32 = 44.0;
+const SWITCH_HEIGHT: f32 = 15.0;
 const ON_SWITCH: f32 = 9.0;
 /// A plug-in device's button (open its editor, restart it).
 const BUTTON_HEIGHT: f32 = 18.0;
@@ -191,6 +195,18 @@ pub struct ClipInfo {
     /// What the piano roll has selected in this clip (› Clip column in
     /// `docs/spec/ui-clip-editor.md`).
     pub selection: SelectionInfo,
+    /// The Clip / Devices switch at the end of the title row, and which part is on: only for a
+    /// clip with an editor (› Where it opens in `docs/spec/ui-clip-editor.md`).
+    pub switch: Option<Showing>,
+}
+
+/// What the detail area shows for a clip that has an editor: the editor, or its track's devices.
+/// Window state, not part of the project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Showing {
+    #[default]
+    Clip,
+    Devices,
 }
 
 /// What the piano roll has selected in the clip the detail area shows: how many notes, how many
@@ -342,6 +358,7 @@ pub fn build_with(
                 fades: (placed.fade_in, placed.fade_out),
                 notes,
                 selection: SelectionInfo::default(),
+                switch: None,
             }),
             chain(project, id, plugins),
         );
@@ -450,7 +467,13 @@ fn format_value(value: f64) -> String {
 
 /// The detail laid out in a row: devices side by side, or the clip's properties. A plug-in's
 /// button adds its command to `actions`; where its embedded editor lands goes to `places`.
-pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places: &mut Vec<EditorPlace>) {
+/// Returns the part the clip's Clip / Devices switch was clicked to, if it was.
+pub fn show_row(
+    ui: &mut Ui,
+    detail: &Detail,
+    actions: &mut Vec<Action>,
+    places: &mut Vec<EditorPlace>,
+) -> Option<Showing> {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
@@ -459,14 +482,16 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places:
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
         Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
-            let column = clip_properties(ui, &painter, area, info, false);
+            let (column, picked) = clip_properties(ui, &painter, area, info, false);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
             if rest.width() > 0.0 {
                 chain_row(ui, &painter, rest, chain, actions, places);
             }
+            return picked;
         }
     }
+    None
 }
 
 /// A chain's devices side by side in `area`; one with an embedded editor is as wide as it.
@@ -518,8 +543,14 @@ fn sdk_viewport(device: &DeviceBox) -> Option<[f32; 2]> {
     device.graph.as_ref()?.canvas.as_ref()?.viewport_size
 }
 
-/// The detail stacked in a column: devices one under another.
-pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places: &mut Vec<EditorPlace>) {
+/// The detail stacked in a column: devices one under another. Returns the part the clip's
+/// Clip / Devices switch was clicked to, if it was.
+pub fn show_stack(
+    ui: &mut Ui,
+    detail: &Detail,
+    actions: &mut Vec<Action>,
+    places: &mut Vec<EditorPlace>,
+) -> Option<Showing> {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
@@ -528,32 +559,36 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
         Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
-            let column = clip_properties(ui, &painter, area, info, true);
+            let (column, picked) = clip_properties(ui, &painter, area, info, true);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
             if rest.height() > 0.0 {
                 chain_stack(ui, &painter, rest, chain, actions, places);
             }
+            return picked;
         }
     }
+    None
 }
 
 /// The clip's properties column for a clip whose editor fills the rest of the detail area (the
 /// piano roll): on the left in a row, on top when `stacked`. Returns the rest. The quantise
 /// controls and the MIDI tools live in the column beside this one
-/// (› Other note tools in `docs/spec/ui-clip-editor.md`).
-pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> Rect {
+/// (› Other note tools in `docs/spec/ui-clip-editor.md`). With it, the part the Clip / Devices
+/// switch was clicked to, if it was.
+pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> (Rect, Option<Showing>) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
-    let column = clip_properties(ui, &painter, area, info, stacked);
+    let (column, picked) = clip_properties(ui, &painter, area, info, stacked);
     clip_for_readers(ui, column, info);
-    if stacked {
+    let rest = if stacked {
         Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max)
     } else {
         Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max)
-    }
+    };
+    (rest, picked)
 }
 
 /// A chain's devices one under another in `area`; one with an embedded editor is as tall as
@@ -1072,7 +1107,13 @@ fn device_panel(
 /// The selected clip: its name and where it is, how long, and what it plays. In a row it takes
 /// a column of [`CLIP_WIDTH`] at the left of `area`, stacked the rows it needs at the top;
 /// returns the space it took.
-fn clip_properties(ui: &Ui, painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked: bool) -> Rect {
+fn clip_properties(
+    ui: &Ui,
+    painter: &egui::Painter,
+    area: Rect,
+    info: &ClipInfo,
+    stacked: bool,
+) -> (Rect, Option<Showing>) {
     let mut rows = vec![
         ("Track", info.track.clone()),
         (if info.scene { "Scene" } else { "Start" }, info.start.clone()),
@@ -1126,11 +1167,24 @@ fn clip_properties(ui: &Ui, painter: &egui::Painter, area: Rect, info: &ClipInfo
     // title last; text never wraps (› Clip column in `docs/spec/ui-clip-editor.md`).
     let title = Rect::from_min_size(column.min, Vec2::new(column.width(), ROW));
     if title.bottom() > column.bottom() + 0.5 {
-        return column;
+        return (column, None);
     }
+    // The Clip / Devices switch ends the title row; the name keeps clear of it.
+    let (name, picked) = match info.switch {
+        Some(showing) => {
+            let width = (SWITCH_PART * 2.0 + 1.0).min(title.width() - PAD * 2.0);
+            let at = Rect::from_center_size(
+                Pos2::new(title.right() - PAD - width / 2.0, title.center().y),
+                Vec2::new(width, SWITCH_HEIGHT),
+            );
+            let picked = switch(ui, painter, at, showing);
+            (Rect::from_min_max(title.min, Pos2::new(at.left() - PAD, title.bottom())), picked)
+        }
+        None => (title, None),
+    };
     widgets::text_in(
         painter,
-        title.shrink2(Vec2::new(PAD, 0.0)),
+        name.shrink2(Vec2::new(PAD, 0.0)),
         Align2::LEFT_CENTER,
         &info.name,
         theme::ui_font(theme::TEXT),
@@ -1167,7 +1221,30 @@ fn clip_properties(ui: &Ui, painter: &egui::Painter, area: Rect, info: &ClipInfo
             theme::text_value(),
         );
     }
-    column
+    (column, picked)
+}
+
+/// The Clip / Devices switch in `rect`: two equal parts 1 px apart, the one on light
+/// (`docs/design/components.md` › Clip properties). Returns the part clicked, when it was off.
+fn switch(ui: &Ui, painter: &egui::Painter, rect: Rect, showing: Showing) -> Option<Showing> {
+    let part = (rect.width() - 1.0) / 2.0;
+    let mut picked = None;
+    for (index, (text, value)) in [("Clip", Showing::Clip), ("Devices", Showing::Devices)].into_iter().enumerate() {
+        let cell = Rect::from_min_size(
+            Pos2::new(rect.left() + index as f32 * (part + 1.0), rect.top()),
+            Vec2::new(part, rect.height()),
+        );
+        let response = widgets::button_area(ui, cell, egui::Id::new(("detail-switch", index)), format!("Show {text}"));
+        if response.clicked() && value != showing {
+            picked = Some(value);
+        }
+        let on = motion::toward(ui.ctx(), response.id.with("on"), value == showing, motion::VALUE);
+        let idle = motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response));
+        painter.rect_filled(cell, 0.0, motion::mix(idle, theme::text_value(), on));
+        let color = motion::mix(theme::text_secondary(), theme::window_background(), on);
+        widgets::text_in(painter, cell, Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT_SMALL), color);
+    }
+    picked
 }
 
 fn parameter_height(parameter: &GraphParameter) -> f32 {

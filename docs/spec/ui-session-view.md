@@ -92,7 +92,9 @@ group's column it joins that group, [arrangement editing](arrangement-editing.md
 groups); right-clicking opens its menu (rename, colour, group, ungroup, move into group, move out
 of group, delete). A track inside groups has its name stepped in 4 px per level; a group's name
 follows a fold arrow, and a folded group hides the columns of the tracks inside it.
-Double-clicking to rename is planned.
+Double-clicking selects the track and shows its devices in the detail area, opening the detail
+area if it was hidden ([clip editor](ui-clip-editor.md) › Where it opens); renaming stays in the
+menu.
 Dropping a device or file from the browser on the empty area right of the last track creates a
 new track; the area also has **+ MIDI track** and **+ Audio track** buttons ([browser](browser.md) ›
 Files). A file dropped on a slot or below the stop row becomes a clip in that slot (scenes are
@@ -287,6 +289,10 @@ vertical channel strip under its slots, and the strip shows more the taller the 
 - **The device list.** One row per device in chain order, its name dimmed while it is off; the
   wheel scrolls it when it holds more than fits. A click selects the track and shows its devices
   in the detail area, opening the detail area if it was hidden; the clicked row stays lit.
+- **A double-click on the strip** itself (its background or its name, not a fader, knob,
+  button or device row) does the same for the whole track: it selects the track and shows its
+  devices in the detail area, opening the detail area if it was hidden. A single click there does
+  nothing, as before.
 - The main column shows the main output's meter where a track's meter stands.
 
 ## Detail area: a selected clip

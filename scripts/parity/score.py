@@ -156,8 +156,10 @@ CHAPTERS = [
      "Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, "
      "resampling) exists in crates/separation with a test backend; no model and nothing a user "
      "can run yet."),
-    (23, "Working with Instruments and Effects (Device View)", 34, 0.35, "partial",
+    (23, "Working with Instruments and Effects (Device View)", 34, 0.36, "partial",
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
+     "the devices one click from a MIDI clip's editor (a Clip / Devices switch, Ctrl+Shift+D) and "
+     "a double-click on a track header or channel strip that shows its devices, "
      "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. "
      "SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, "
      "graphs and custom panels, and support explicit revision updates. Missing A/B, "

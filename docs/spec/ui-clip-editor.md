@@ -39,8 +39,36 @@ lane, the grid and zoom, and the `note.*` commands.
 - **Later ([#343](https://github.com/suhina-daw/suhina-daw/issues/343)):** a clip selected in a Session slot opens it too, once slot selection lands (open pull
   request #302); the piano roll then edits that slot's clip with the same commands (`scene`
   instead of `index`). A double-click on a clip opens the detail area if it is closed.
-- **Later ([#64](https://github.com/suhina-daw/suhina-daw/issues/64)):** the device view and the
-  clip editor as two tabs or a toggle, so a MIDI clip's track devices stay one click away.
+- **Built ([#505](https://github.com/suhina-daw/suhina-daw/issues/505)):** a **Clip / Devices**
+  switch, so a MIDI clip's track devices stay one click away. While the detail area shows a clip
+  that has an editor (a MIDI clip, in the Arrangement view or in a slot), the clip column's title
+  row ends in a two-part switch, **Clip** and **Devices** ([components](../design/components.md)
+  › Clip properties). **Devices** puts the track's device chain where the piano roll was: the clip
+  column stays on the left (on top when stacked) with the switch in it, and the chain fills the
+  rest, as it does beside an audio clip; dropping an instrument, effect or plug-in there adds it to
+  that track as it always does. **Clip** brings the piano roll back. **Ctrl+Shift+D** (the keymap
+  action `view.devices`) and **View › Show devices** / **Show clip** do the same; they open the
+  detail area first when it is hidden. An audio clip has no switch: its track's devices already
+  show beside its properties, and the key leaves it as it is.
+
+  The switch is window state, like Shift+Tab: not a command, not an undo step, not saved. It
+  lasts while the same clip stays selected; **selecting another clip** (in the Arrangement view or
+  in a slot) shows its editor again, and in the Arrangement view so does a click on the clip
+  already selected, so a single click on a clip keeps meaning "edit this clip". While the devices show, the piano roll's keys and Ctrl+U do nothing
+  (there are no notes on screen), the splitter's least height is the devices' 80 px, and nothing
+  is pulled to the top.
+- **Built ([#505](https://github.com/suhina-daw/suhina-daw/issues/505)):** a **double-click on a
+  track** shows its devices: on an Arrangement track header ([arrangement
+  editing](arrangement-editing.md) › Tracks), on a Session column's name, or on the
+  Session channel strip's own background ([Session view](ui-session-view.md) › Mixer). The track
+  is selected (the first click of the two already does that), the detail area opens if it was
+  hidden (Shift+Tab, View › Hide detail area, or the splitter), and it shows that track's device
+  chain. On an Arrangement header or a channel strip, a clip selected on that track stays
+  selected and the switch goes to **Devices**, and a clip selected on another track is no longer
+  selected; a click on a Session column's name clears the slot selection already, so there the
+  devices show on their own. A double-click on a
+  control in the header or the strip (a button, a fader, a knob, a value) is that control's own,
+  as before.
 
 ## Coordinates
 

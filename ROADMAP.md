@@ -681,6 +681,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
+- **A MIDI clip's track devices one click away** ([#505](https://github.com/suhina-daw/suhina-daw/issues/505)):
+  the clip column's **Clip / Devices** switch (Ctrl+Shift+D, View › Show devices) puts the track's
+  device chain where the piano roll was and back, and a double-click on a track's header, a Session
+  column's name or its channel strip shows that track's devices, opening the detail area if it was
+  hidden ([spec](docs/spec/ui-clip-editor.md)).
 - In the Session view a click on a clip's name selects it and its mark launches it; the detail area
   shows a slot's clip (scene, length, loop, gain, fades). Launching selects the clip too (Settings ›
   Interface › Detail area › Select on launch), Enter launches the selected slot and the arrow keys

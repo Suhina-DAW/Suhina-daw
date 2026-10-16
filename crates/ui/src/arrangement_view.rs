@@ -297,6 +297,9 @@ pub struct ArrangementViewState {
     /// opens a clip editor closed by hand again (`docs/spec/ui-clip-editor.md` › Least height
     /// and closing).
     pub clip_clicked: bool,
+    /// A track header was double-clicked this frame: the window shows that track's devices
+    /// (`docs/spec/ui-clip-editor.md` › Where it opens).
+    pub open_devices: Option<TrackId>,
     /// Automation lanes under the tracks: which are shown, selected points, a drag.
     pub automation: LanesState,
     /// A marker being dragged: its index and where the pointer is, in beats before snapping.
@@ -343,6 +346,7 @@ impl Default for ArrangementViewState {
             meters: Meters::default(),
             focus: None,
             clip_clicked: false,
+            open_devices: None,
             automation: LanesState::default(),
             marker_drag: None,
             marker_menu_beat: 0.0,
@@ -2343,6 +2347,10 @@ fn track_header(
         state.targeted = Some(lane.track);
         let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
         state.pick_track(lane.track, shift, command, order.tracks);
+    }
+    // A double-click shows the track's devices in the detail area.
+    if body.double_clicked() {
+        state.open_devices = Some(lane.track);
     }
     if body.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(lane.track);

@@ -529,6 +529,12 @@ from its lower half), and a right-click opens the track's menu: name, colour, gr
 level up, right after the group it leaves), delete. A group's header starts with a triangle that
 folds its tracks away (Folded groups). The Session view's column headers have the same menu.
 
+A **double-click on a header** (on its name or its background, not on one of its controls) also
+shows the track's devices in the detail area, opening the detail area if it was hidden; a clip
+selected on that track stays selected, with the detail area's switch on **Devices**, and a clip
+selected on another track is no longer selected ([clip editor](ui-clip-editor.md) › Where it
+opens). It is window state, not a command.
+
 ### Groups inside groups
 
 Groups nest: a group track can hold tracks and other groups, at most 16 levels deep

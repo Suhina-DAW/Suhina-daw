@@ -217,6 +217,9 @@ pub struct App {
     /// Which keys run which action, and whether that changed and should be saved.
     keymap: Keymap,
     keymap_changed: bool,
+    /// The detail area's Clip / Devices switch: for a clip with an editor, the editor or its
+    /// track's devices (`docs/spec/ui-clip-editor.md` › Where it opens). Window state.
+    detail_showing: detail_view::Showing,
     /// The detail area is showing, and its height (in a row) or width (stacked).
     detail_open: bool,
     detail_height: f32,
@@ -334,6 +337,7 @@ impl App {
             scan: None,
             keymap: Keymap::default(),
             keymap_changed: false,
+            detail_showing: detail_view::Showing::Clip,
             detail_open: true,
             detail_height: DETAIL_HEIGHT,
             detail_max: false,
@@ -1380,6 +1384,10 @@ impl App {
             {
                 self.show_editor();
             }
+            // Selecting another clip, or clicking the selected one, shows its editor again.
+            if shown_clip.is_some() && (clicked || shown_clip != self.last_clip) {
+                self.detail_showing = detail_view::Showing::Clip;
+            }
             self.last_clip = shown_clip;
             let inner = if grid.is_some() && self.detail_open {
                 self.detail_area(ui, inner, &mut actions)
@@ -1493,6 +1501,7 @@ impl App {
                                 .and_then(suhina_session::Player::output_info)
                                 .map_or(0, |i| i.input_channels);
                             arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
+                            self.devices_asked();
                             self.timeline = Some((self.revision, self.arrangement.folds.clone(), timeline));
                             // The headers can be moved from the view itself; that is the setting too.
                             let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
@@ -1597,6 +1606,49 @@ impl App {
         if std::mem::take(&mut self.view.open_detail) {
             self.show_editor();
         }
+        self.devices_asked();
+    }
+
+    /// A double-click on a track (an Arrangement header, a Session column's name or channel
+    /// strip) selects it and shows its devices, opening the detail area; a clip selected on
+    /// another track is no longer selected (`docs/spec/ui-clip-editor.md` › Where it opens).
+    fn devices_asked(&mut self) {
+        if let Some(track) = self.arrangement.open_devices.take() {
+            if self.arrangement.selected_clip().is_some_and(|(t, _)| t != track) {
+                self.arrangement.clear_selected_clip();
+            }
+            if self.arrangement.selected_tracks.first() != Some(&track) {
+                self.arrangement.selected_tracks = vec![track];
+            }
+            self.show_devices();
+        }
+        if let Some(track) = self.view.open_devices.take() {
+            self.view.selected = Some(track);
+            if self.view.selected_slot.is_some_and(|(t, _)| t != track) {
+                self.view.selected_slot = None;
+            }
+            self.show_devices();
+        }
+    }
+
+    /// Shows the shown track's devices in the detail area, opening it when it is hidden.
+    fn show_devices(&mut self) {
+        self.detail_showing = detail_view::Showing::Devices;
+        self.show_editor();
+    }
+
+    /// The Clip / Devices switch's key and menu entry, for a clip with an editor: the other part,
+    /// or the devices when the detail area is hidden, which opens it.
+    fn toggle_devices(&mut self) {
+        if self.piano_clip(self.shown_clip()).is_none() {
+            return;
+        }
+        self.detail_showing = match self.detail_showing {
+            detail_view::Showing::Clip => detail_view::Showing::Devices,
+            _ if !self.detail_open => detail_view::Showing::Devices,
+            detail_view::Showing::Devices => detail_view::Showing::Clip,
+        };
+        self.show_editor();
     }
 
     /// Lays out the detail area beside or under the view in `area`, draws it with its splitter,
@@ -1647,6 +1699,11 @@ impl App {
         let least = self.least_detail_height();
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
+        // With the switch on Devices the track's devices take the editor's place, and nothing is
+        // pulled to the top (› Where it opens in `docs/spec/ui-clip-editor.md`).
+        let switch = piano.is_some().then_some(self.detail_showing);
+        let piano = piano.filter(|_| self.detail_showing == detail_view::Showing::Clip);
+        let (pullable, pulled) = (pullable && piano.is_some(), pulled && piano.is_some());
         let focus = match clip {
             Some(detail_view::ClipRef::Arrangement(track, _))
                 if pulled && self.settings.piano_roll_top == PianoRollTop::Track =>
@@ -1729,6 +1786,9 @@ impl App {
                 detail_view::bar_beats(session.project()),
             );
         }
+        if let detail_view::Detail::Clip(info, _) = &mut shown {
+            info.switch = switch;
+        }
         // A selected slot clip's follow action comes first, the rest of the detail beside or
         // under it.
         let follow = match (self.shown, self.view.selected_slot, self.session()) {
@@ -1773,9 +1833,9 @@ impl App {
             }
         };
         let piano_roll = &mut self.piano_roll;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
+        let picked = ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
-                let mut rest = detail_view::show_clip_column(ui, info, stacked);
+                let (mut rest, picked) = detail_view::show_clip_column(ui, info, stacked);
                 // The MIDI tools column, between the clip's properties and the note grid. With the
                 // detail area stacked there is no room beside the notes, so it is not drawn there
                 // (the quantise settings and Ctrl+U still work: › Other note tools).
@@ -1787,12 +1847,16 @@ impl App {
                 }
                 let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
+                picked
             } else if stacked {
-                detail_view::show_stack(ui, &shown, actions, &mut places);
+                detail_view::show_stack(ui, &shown, actions, &mut places)
             } else {
-                detail_view::show_row(ui, &shown, actions, &mut places);
+                detail_view::show_row(ui, &shown, actions, &mut places)
             }
         });
+        if let Some(showing) = picked.inner {
+            self.detail_showing = showing;
+        }
         self.place_editors(&places);
         // The toolbar's × hides the editor.
         if std::mem::take(&mut self.piano_roll.hide_requested) {
@@ -1839,7 +1903,9 @@ impl App {
     /// The least height of the detail area in a row: the piano roll's while it shows one, else
     /// 80 px.
     fn least_detail_height(&self) -> f32 {
-        let piano = self.settings.device_layout != DeviceLayout::Stack && self.piano_clip(self.shown_clip()).is_some();
+        let piano = self.settings.device_layout != DeviceLayout::Stack
+            && self.detail_showing == detail_view::Showing::Clip
+            && self.piano_clip(self.shown_clip()).is_some();
         if piano { piano_roll::LEAST_HEIGHT } else { 80.0 }
     }
 
@@ -1884,6 +1950,9 @@ impl App {
 
     /// The params that name the clip the piano roll shows in a `note.*` command, if it shows one.
     pub fn piano_roll_address(&self) -> Option<serde_json::Value> {
+        if self.detail_showing == detail_view::Showing::Devices {
+            return None;
+        }
         let clip = match self.shown {
             View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
             View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
@@ -1902,6 +1971,9 @@ impl App {
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
     fn piano_key(&mut self, action: &str) -> Option<Action> {
+        if self.detail_showing == detail_view::Showing::Devices {
+            return None;
+        }
         let clip = match self.shown {
             View::Session => self
                 .view
@@ -2433,6 +2505,13 @@ impl App {
                 if ui.add_enabled(clip, egui::Button::new(label).shortcut_text(keys("view.editor"))).clicked() {
                     self.toggle_editor();
                 }
+                // The detail area's Clip / Devices switch, for a clip with an editor.
+                let devices = self.detail_open && self.detail_showing == detail_view::Showing::Devices;
+                let label = if devices { "Show clip" } else { "Show devices" };
+                let editor = has_project && self.piano_clip(self.shown_clip()).is_some();
+                if ui.add_enabled(editor, egui::Button::new(label).shortcut_text(keys("view.devices"))).clicked() {
+                    self.toggle_devices();
+                }
                 ui.separator();
                 let (zoom, limits) = (self.settings.zoom, crate::settings::ZOOMS);
                 if ui
@@ -2677,6 +2756,7 @@ impl App {
             }
             "view.editor" if self.shown_clip().is_some() => self.toggle_editor(),
             "view.editor" => {}
+            "view.devices" => self.toggle_devices(),
             "view.mappingMode" => self.toggle_mapping_mode(),
             "view.arrangement" => {
                 self.shown = View::Arrangement;
@@ -2695,7 +2775,9 @@ impl App {
                         self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i))
                     }
                 };
-                let showing = self.detail_open && self.piano_clip(clip).is_some();
+                let showing = self.detail_open
+                    && self.detail_showing == detail_view::Showing::Clip
+                    && self.piano_clip(clip).is_some();
                 if showing && let Some(quantize) = self.piano_roll.quantize_selected() {
                     actions.push(quantize);
                 }

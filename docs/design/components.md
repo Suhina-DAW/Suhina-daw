@@ -198,6 +198,7 @@ volume readout, fader with the meter, toggles.
 | Send knob | A knob with the return's letter in its centre (8 px mono `text.hint`), pointer `text.value` (`text.primary` hovered); −70 dB … +6 dB over the travel. A 1.5 px `text.value` dot under it when the send is before the fader |
 | Knob | 22 px; circle r 9, `control.background` fill, 1 px `text.hint` stroke; pointer 1.5 px from centre to r 8; travel −135° … +135°; pan pointer `text.primary`, sends `#C9C4BB` |
 | Toggles | 18 px at the bottom, at every height: track on (the track number, or the return's letter, in 10 px mono) and, 2 px apart, solo ("S" in 10 px) and cue ("C" in 10 px), a quarter each; on a track that plays notes or audio, solo, cue and arm take a fifth each and track on the rest |
+| Background | `panel.background` behind the parts; a double-click on it or on the name (not on a control or a device row) selects the track and shows its devices in the detail area, opening it if it was hidden |
 | Track on | On: `#C9C4BB` with `window.background` text. Off: `control.background` with `text.hint` |
 | Solo | On: `accent` with `window.background` text; off: `control.background`, `text.secondary`. A click solos the track alone; Ctrl (Cmd) adds it to the tracks soloed already |
 | Cue | Coloured as track on: on, `#C9C4BB` with `window.background` text; off, `control.background` with `text.hint`. A click turns the track's cue on or off (`track.setCue`): it is also heard on the cue output ([spec](../spec/cue-output.md)) |
@@ -481,6 +482,14 @@ The detail area for a selected clip, on the arrangement or in a clip slot: a 196
 rather than drawn over it. The track's device chain follows to the right (in a row) or below (stacked:
 the column is then as tall as its rows). For a MIDI clip the piano roll (below) takes the place of the
 device chain. Editing the properties is planned.
+
+For a clip with an editor (a MIDI clip) the title row ends in the **Clip / Devices** switch, 6 px
+from the column's right edge: a segmented control 15 px high, two 44 px parts 1 px apart, "Clip"
+and "Devices" in 10 px; the part on is `text.value` (`#C9C4BB`) with `window.background` text, the
+other `control.background` (`control.hoverBackground` hovered) with `text.secondary`, and the change
+eases over 120 ms. The clip's name keeps 6 px clear of it and is shortened with an ellipsis. On
+**Devices** the column stays and the track's device chain takes the piano roll's place
+([clip editor](../spec/ui-clip-editor.md) › Where it opens).
 
 ## Follow action
 

@@ -85,6 +85,9 @@ pub struct SessionViewState {
     pub shown_device: Option<(TrackId, usize)>,
     /// A strip's device row was clicked: the window opens the detail area on the track.
     pub open_detail: bool,
+    /// A column's name or channel strip was double-clicked: the window shows that track's devices
+    /// (`docs/spec/ui-clip-editor.md` › Where it opens).
+    pub open_devices: Option<TrackId>,
     /// A double-click on an empty slot does nothing (Settings › Interface › Double-click makes a
     /// clip is off); by default it makes an empty MIDI clip.
     pub double_click_does_nothing: bool,
@@ -518,6 +521,9 @@ fn column_header(
     if response.clicked() {
         state.selected = Some(column.track);
         state.selected_slot = None;
+    }
+    if response.double_clicked() {
+        state.open_devices = Some(column.track);
     }
     let fill = if state.selected == Some(column.track) { theme::control_active() } else { theme::control_background() };
     painter.rect_filled(rect, 0.0, fill);

@@ -175,11 +175,17 @@ fn overlap(a: &str, b: &str) -> bool {
     !((piano_roll_only(a) && not_in_piano_roll(b)) || (not_in_piano_roll(a) && piano_roll_only(b)))
 }
 
+/// The detail area's own actions, listed with the window's, and their default keys.
+const DETAIL_ACTIONS: [(&str, &str, &str); 1] =
+    [("view.devices", "Show the selected clip's track devices, or the clip again", "View")];
+const DETAIL_DEFAULTS: [(&str, &[&str]); 1] = [("view.devices", &["Ctrl+Shift+D"])];
+
 /// Every action a key can be bound to: the window's, then each command that needs no
 /// parameters.
 pub fn actions() -> Vec<Action> {
     let mut all: Vec<Action> = WINDOW_ACTIONS
         .iter()
+        .chain(&DETAIL_ACTIONS)
         .map(|(id, label, group)| Action { id: (*id).into(), label: (*label).into(), group })
         .collect();
     let session = suhina_session::commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
@@ -415,10 +421,11 @@ impl Default for Keymap {
     }
 }
 
-/// The keys of `defaults`, read from their text.
+/// The keys of `defaults` and of the detail area's actions, read from their text.
 fn bindings_for(defaults: &[(&str, &[&str])]) -> BTreeMap<String, Vec<Shortcut>> {
     defaults
         .iter()
+        .chain(&DETAIL_DEFAULTS)
         .map(|(id, keys)| ((*id).to_string(), keys.iter().filter_map(|k| Shortcut::parse(k)).collect()))
         .collect()
 }
@@ -847,5 +854,22 @@ mod tests {
         assert_eq!(Keymap::default().keys("selection.up"), Keymap::default().keys("pianoRoll.up"));
         assert!(!overlap("selection.up", "pianoRoll.up"));
         assert!(overlap("selection.up", "transport.play"));
+    }
+
+    #[test]
+    fn the_clip_devices_switch_has_its_own_key_under_every_preset() {
+        let action =
+            actions().into_iter().find(|a| a.id == "view.devices").unwrap_or_else(|| panic!("the switch is an action"));
+        assert_eq!(action.group, "View");
+        assert_eq!(Keymap::default().label("view.devices").as_deref(), Some("Ctrl+Shift+D"));
+        for preset in Preset::ALL {
+            let mut keymap = Keymap::default();
+            keymap.set_preset(preset);
+            assert_eq!(keymap.label("view.devices").as_deref(), Some("Ctrl+Shift+D"), "{preset:?}");
+            assert!(keymap.conflicts().is_empty(), "{preset:?}");
+        }
+        // Rebound and unbound like any other action, and read back from the file.
+        let (keymap, warnings) = Keymap::from_json(r#"{ "view.devices": [] }"#);
+        assert_eq!((keymap.keys("view.devices").len(), warnings.len()), (0, 0));
     }
 }

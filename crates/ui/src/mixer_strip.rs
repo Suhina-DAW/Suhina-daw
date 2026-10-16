@@ -149,6 +149,14 @@ pub fn show(
     actions: &mut Vec<Action>,
 ) {
     painter.rect_filled(rect, 0.0, theme::panel_background());
+    // The strip's own background, under its controls: a double-click shows the track's devices.
+    let strip = ui.interact(rect.intersect(painter.clip_rect()), id.with("strip"), Sense::click());
+    strip.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Other, true, format!("{} channel strip", column.name))
+    });
+    if strip.double_clicked() {
+        state.open_devices = Some(column.track);
+    }
     let parts = layout(rect, !column.sends.is_empty());
     if let Some(name) = parts.name {
         name_row(ui, painter, name, column, id);
