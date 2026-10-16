@@ -236,11 +236,19 @@ workspace forbids.
    late. A chain whose plug-in has not answered by the deadline misses that block, as before;
    the others are not held up by it. An offline render gives each block out `OFFLINE_TIMEOUT`
    from when it went. `longest_us` is each plug-in's longest round trip, timed from the block's
-   hand-over, since the engine may look at other chains before it takes an answer. A host still busy with an earlier block (one whose answer came after
-   its deadline) refuses the next (`Sent::Refused`). In real time the engine does not wait
-   for it, since that would spend the deadline every chain shares: the round trip is one
-   miss and the block is lost to the plug-in, so an effect passes the sound through and an
-   instrument is silent for that block, as when it misses its deadline. The chain does not
+   hand-over, since the engine may look at other chains before it takes an answer. A plug-in still at a block it was late with (one whose answer
+   came after its deadline, as when a synthesizer takes longer over the notes of a start or a
+   stop's all-notes-off) is waited for like an answer: its chain hands it the next block as
+   soon as it is done (`PluginProcessor::ready`, `PluginAudio::ready`, `Link::wait_ready`),
+   while the other chains go on, and only until that block's deadline (#506). Only a plug-in
+   late with the block before alone is waited for; one that has not answered several in a row
+   (hung, or far behind) is not. Measured with `measure_quick_play_and_stop` (see
+   Consequences): an instrument that took longer than a whole block over each press of play or
+   stop lost two blocks a press, the late one and the next, refused, with the notes it
+   brought; it now loses the late one only. A host still busy when the deadline comes refuses
+   the block (`Sent::Refused`): the round trip is one miss and the block is lost to the
+   plug-in, so an effect passes the sound through and an instrument is silent for that block,
+   as when it misses its deadline. The chain does not
    try it again through `process`, which would count it a second time and make a slow host
    *hung* after 16 round trips instead of 32 (#188). An offline render waits for the busy
    host, up to `OFFLINE_TIMEOUT` (`PluginProcessor::send`'s patience, `Link::wait_ready`),
@@ -473,6 +481,16 @@ workspace forbids.
   48 kHz, a deadline of 12.8 ms, three runs): a block took 10.2 to 10.4 ms on average a stage
   at a time (99 %: 11.6 to 12.9 ms) and 5.1 to 5.3 ms with each chain going on as its own
   plug-in answers (99 %: 9.6 to 10.0 ms), #151.
+- Measured on Linux (4 cores, a container; test `measure_quick_play_and_stop` in
+  `crates/plugin-host/tests/quick_play_stop.rs`, release build, `test:burst` instruments that
+  take a set time over each block bringing notes, play and stop pressed every 4 blocks, 2000
+  blocks of 256 frames at 48 kHz, a deadline of 3.2 ms), #506: an instrument taking 6 ms over
+  a press (more than a whole block) was late with 999 blocks for 500 presses, the late block
+  and the next, refused; once a plug-in late with one block is waited for to take the next,
+  501. One taking 4 ms (past the deadline, within the block) loses its late block either way
+  (504 and 499); 2.5 ms and less loses next to none. With four instruments on four tracks,
+  one taking 6 ms and the others 1 ms or less, the others were late with 4 to 8 blocks of
+  2000, about as with 1 ms each on their own.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
 - Host processes and scan workers start without a window of their own (`host_command`; on
   Windows `CREATE_NO_WINDOW`), so the desktop app, which has no console, does not open a

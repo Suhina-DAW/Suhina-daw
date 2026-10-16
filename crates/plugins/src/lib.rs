@@ -221,6 +221,15 @@ impl PluginAudio {
         self.link.wait_answered(until)
     }
 
+    /// Whether a block can go now ([`Link::ready`]), waiting at most until `until` (a time
+    /// already past only looks) for the host to finish the block it was late with, so the next
+    /// one goes as soon as it can rather than being refused (#506). Only a host late with the
+    /// last block alone is waited for: one that has not answered several (hung, or far behind)
+    /// is not, and its blocks are refused at once as before. Counts nothing. Real-time safe.
+    pub fn ready(&self, until: Instant) -> bool {
+        self.link.ready() || (self.unanswered.load(Ordering::Relaxed) <= 1 && self.link.wait_ready(until))
+    }
+
     /// The second half: waits at most `timeout` for the block sent with [`PluginAudio::send`]
     /// and reads its result into `output`. Real-time safe.
     pub fn finish(&mut self, output: &mut [f32], timeout: Duration) -> Outcome {

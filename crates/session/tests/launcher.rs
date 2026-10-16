@@ -708,3 +708,26 @@ fn stopping_a_scene_stops_its_rows_clips_and_leaves_the_empty_slots_tracks() {
     // A scene that does not exist is refused.
     assert!(run(&mut session, "scene.stop", json!({ "scene": 99 })).is_err());
 }
+
+/// Pressing play and stop quickly (#506) costs the session next to nothing: each press is a
+/// message to the audio thread, with no undo step, no change to the project (so no backup or
+/// save follows) and no new graph. Prints what a press took; the numbers in #506 come from
+/// `cargo test -p suhina-session --release --test launcher quick_presses -- --nocapture`.
+#[test]
+fn quick_presses_of_play_and_stop_cost_the_session_next_to_nothing() {
+    let (mut session, mut renderer) = playing();
+    let before = session.project().clone();
+    let mut took = Vec::with_capacity(1000);
+    for n in 0..1000 {
+        let id = if n % 2 == 0 { "transport.play" } else { "transport.stop" };
+        let started = std::time::Instant::now();
+        run(&mut session, id, json!({})).unwrap();
+        took.push(started.elapsed());
+        advance(&mut renderer, 256);
+        assert_eq!(renderer.monitor().running(), n % 2 == 0, "press {n} reached the audio thread");
+    }
+    assert!(!session.can_undo(), "a press is not an undo step");
+    assert!(session.project() == &before, "a press does not change the project");
+    took.sort();
+    println!("1000 presses of play and stop: median {:?}, 99 % {:?}, longest {:?}", took[500], took[990], took[999]);
+}

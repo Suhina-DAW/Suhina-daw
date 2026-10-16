@@ -404,6 +404,10 @@ impl PluginProcessor for Hosted {
         self.audio.poll(until)
     }
 
+    fn ready(&mut self, until: std::time::Instant) -> bool {
+        self.audio.ready(until)
+    }
+
     /// Its host process and number there, unless releases from a block it could not take wait
     /// to be sent (they go on its own link first) or its link still has a block out.
     fn joint(&self) -> Option<Joint> {

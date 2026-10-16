@@ -111,6 +111,18 @@ pub trait PluginProcessor: Send {
         true
     }
 
+    /// Whether a block can go to the plug-in now, waiting at most until `until` (a time already
+    /// past only looks) for it to finish a block it was late with: in real time a plug-in that
+    /// missed one block's deadline over a burst of work (the notes of a start, a stop's
+    /// all-notes-off) is often done early in the next block, which is then sent as soon as it is
+    /// rather than refused at once and lost too (#506). A processor that cannot tell says `true`
+    /// (the default), and its block is sent, or refused, at once. Never allocates; never waits
+    /// past `until`.
+    fn ready(&mut self, until: Instant) -> bool {
+        let _ = until;
+        true
+    }
+
     /// Parameter values for the block that [`PluginProcessor::process`] or
     /// [`PluginProcessor::send`] hands over next, at frames counted from the start of its
     /// buffer, in frame order (#109). The engine calls it before every block (with none, too);
@@ -343,6 +355,13 @@ impl PluginSlot {
     /// nothing to wait for. Never allocates.
     pub(crate) fn poll(&mut self, until: Instant) -> bool {
         self.processor.as_mut().is_none_or(|processor| processor.poll(until))
+    }
+
+    /// Whether a block can go to the plug-in now, waiting at most until `until` for one it was
+    /// late with ([`PluginProcessor::ready`]); true when disabled or without a processor, as
+    /// nothing will be sent. Never allocates.
+    pub(crate) fn ready(&mut self, until: Instant) -> bool {
+        !self.enabled || self.processor.as_mut().is_none_or(|processor| processor.ready(until))
     }
 
     /// Whether it has parameter events for the block's frames `from..to`, without handing them
