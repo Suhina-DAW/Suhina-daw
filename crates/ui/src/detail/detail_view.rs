@@ -496,10 +496,14 @@ pub fn show_row(
             let (column, picked) = clip_properties(ui, &painter, area, info, false);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
-            if rest.width() > 0.0 {
-                chain_row(ui, &painter, rest, chain, selected, actions, places);
-            }
-            return Picked { showing: picked, ..Picked::default() };
+            // The chain is drawn beside the clip's properties: a click on one of its panels
+            // selects the device as it does with the chain alone.
+            let chain_picked = if rest.width() > 0.0 {
+                chain_row(ui, &painter, rest, chain, selected, actions, places)
+            } else {
+                Picked::default()
+            };
+            return Picked { showing: picked, clicked: chain_picked.clicked };
         }
     }
     Picked::default()
@@ -588,10 +592,14 @@ pub fn show_stack(
             let (column, picked) = clip_properties(ui, &painter, area, info, true);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
-            if rest.height() > 0.0 {
-                chain_stack(ui, &painter, rest, chain, selected, actions, places);
-            }
-            return Picked { showing: picked, ..Picked::default() };
+            // The chain is drawn under the clip's properties: its panels pick as they do with
+            // the chain alone.
+            let chain_picked = if rest.height() > 0.0 {
+                chain_stack(ui, &painter, rest, chain, selected, actions, places)
+            } else {
+                Picked::default()
+            };
+            return Picked { showing: picked, clicked: chain_picked.clicked };
         }
     }
     Picked::default()

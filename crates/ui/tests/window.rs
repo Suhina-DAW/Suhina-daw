@@ -3883,3 +3883,29 @@ fn launching_a_clip_greys_the_arrangement_until_back_to_arrangement() {
     }
     assert!(!back, "the arrangement is back");
 }
+
+#[test]
+fn a_device_selects_and_deletes_even_beside_a_shown_clip() {
+    let devices =
+        |h: &Harness<'static, App>| h.state().session().map(|s| s.project().channels[0].devices.len()).unwrap_or(0);
+    let mut app = App::new();
+    app.set_session(Session::new(project_with_a_device()), &[]);
+    let mut harness = window(app);
+    // A slot's clip selected: the detail shows its properties and its piano roll. The switch's
+    // Devices brings the track's chain up, whose panels pick as they do with the chain alone.
+    harness.get_by_label("Launch Beat A on Drums (scene 1)").click();
+    harness.run();
+    harness.get_by_label("Show Devices").click();
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_some(), "the chain shows beside the clip");
+    // The panel's click selects the device there too, and Delete takes it off the track.
+    harness.get_by_label("Device Utility").click();
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(devices(&harness), 0, "the device went, the clip staying selected");
+    // One undo puts it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(devices(&harness), 1, "the device is back");
+}
