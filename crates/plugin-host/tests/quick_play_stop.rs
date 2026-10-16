@@ -58,6 +58,7 @@ fn project(tracks: u32) -> Project {
             length: 64.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         ..Project::default()
     };
