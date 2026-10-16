@@ -1,6 +1,6 @@
 ---
 description: Measurements, states and tokens of every UI component, from the minimal v3 mockups
-read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
+read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout, audition button, velocity lane top edge
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -499,7 +499,10 @@ arrow, an arrow. After a 1 px `border.strong` divider and 5 px,
 the note clipboard's Cut, Copy, Paste and Duplicate icons, greyed out (`text.hint`, no highlight)
 when there is nothing to act on; then the quantise icon (notes snapping onto a line), which shows
 the MIDI tools column with the quantise block open, and the **MIDI tools** icon (three horizontal
-sliders, `control.activeBackground` while the column shows), which shows and hides that column.
+sliders, `control.activeBackground` while the column shows), which shows and hides that column,
+and the **Audition** icon (headphones: a 1.1 px band over two filled 3 × 5 px cups,
+`control.activeBackground` with a `text.primary` shape while on, off at start; accessible label
+"Audition"), which makes drawn and moved notes sound once.
 4 px after it the 96 px **workflow menu**: the mode's name and a ▾ in 10 px `text.value`, its menu
 the four modes as selectable rows, a divider, and one row per workflow setting ("Double-click on a
 note: Deletes it") opening a submenu of its choices, the chosen one highlighted; it is left out when
@@ -514,7 +517,12 @@ cannot hold is greyed out while the piano roll follows it. Then the
 **Hide editor** button: a box as tall as the tool buttons with a 1.1 px × in `text.secondary`
 (`text.primary` on `control.hoverBackground` hovered), 3 px from the right edge. The piano roll's
 least height is 120 px of detail area (the toolbar, the 24 px ruler and five 12 px key rows; the
-velocity lane is left out when it would leave fewer than five rows or be under 12 px). Notes a draw or
+velocity lane is left out when it would leave fewer than five rows or be under 12 px). The lane's
+top edge (the 1 px `border.strong` line over it) is grabbed within 3 px either side, the pointer a
+vertical resize cursor: dragged, the lane is 24 to 480 px tall, never leaving fewer than five key
+rows. A velocity line being drawn in the lane is 1 px `accent`; an Alt+drag on a note shows its
+velocity over it, "Velocity 112" in 9 px mono `text.primary` on a 76 × 14 px `control.background`
+box with 2 px corners. Notes a draw or
 paint drag is making are the track colour at 0.7 with a 1 px `text.primary` inset; notes an erase
 drag has passed over fade to 0.12; the cut line of a slice drag is 1 px `accent`, and a note it
 would split is marked with a 1 px `accent` line over it. A key with the pointer over it, or one

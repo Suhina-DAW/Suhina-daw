@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
+read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools, startBy, velocities, duplicate by beats
 type: system
 status: current
 last_verified: 2026-10-16
@@ -171,7 +171,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
   in beats, key with 60 as C3, velocity 1 to 127, and `muted`); `note.add {..., notes: [{time, length, key,
   velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
-  semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
+  semitones?}`, `note.resize {length? | by? | startBy?}` (`startBy` moves each start and keeps
+  each end) and `note.setVelocity {velocity? | by? | velocities?}` (`velocities`: one value per
+  entry of `notes`) take
   `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
   deleted stay valid; each is one undo step and fails as a whole on a bad value
   ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
@@ -203,8 +205,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
 - **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
   changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
   adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
-  right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
-  copy right after the notes' end. The note clipboard is apart from the clip clipboard.
+  right after the copied notes), and returns their indices; `note.duplicate {..., notes, beats?,
+  semitones?}` adds a copy right after the notes' end, or `beats` and `semitones` from them (the
+  piano roll's Ctrl+drag). The note clipboard is apart from the clip clipboard.
 - **Splitting notes.** `note.split {track, index | scene, notes, at}` splits each named note that
   spans the beat `at` into two at `at` (the first keeps the start, the second the end); a note
   that starts or ends exactly at `at` is left alone, so a second split at the same beat changes
@@ -230,8 +233,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `preview.setGain {gain}` changes the level of the one playing (in dB, gliding there without a
   click); `preview.stop` stops it; `launcher.state` reports `preview`. With no project open they still
   work, through an output of their own that closes before a project opens one (ADR 0011).
-  `preview.noteOn {track, key, velocity?}` plays one key through the track's instrument and
-  holds it, as the piano roll's key column does, until `preview.noteOff {track, key?}` lets that
+  `preview.noteOn {track, key | keys, velocity?}` plays one key (or the keys of `keys` together,
+  as the piano roll's audition does) through the track's instrument and holds it, as the piano
+  roll's key column does, until `preview.noteOff {track, key?}` lets that
   key go, or every held preview note when `key` is left out. Both are transport commands: the
   project, its undo history and the transport are untouched.
 

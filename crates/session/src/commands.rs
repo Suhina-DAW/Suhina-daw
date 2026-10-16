@@ -1302,10 +1302,11 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "preview.noteOn",
-        label: "Play a note through a track's instrument and hold it until preview.noteOff, as the piano roll's key column does",
+        label: "Play a note, or a chord, through a track's instrument and hold it until preview.noteOff, as the piano roll's key column does",
         params: &[
             TRACK,
-            param("key", ParamType::Integer, "the key to play, 0 to 127 (60 is C3)"),
+            optional("key", ParamType::Integer, "the key to play, 0 to 127 (60 is C3)"),
+            optional("keys", ParamType::Integers, "instead: several keys to play together, 1 to 128 of them"),
             optional("velocity", ParamType::Number, "how hard, 1 to 127 (default 100)"),
         ],
         kind: CommandKind::Transport,
@@ -1626,7 +1627,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "note.resize",
-        label: "Set the length of notes of a MIDI clip, or change it by a number of beats",
+        label: "Set the length of notes of a MIDI clip, change it by a number of beats, or move their starts and keep their ends",
         params: &[
             TRACK,
             CLIP_INDEX,
@@ -1634,6 +1635,11 @@ static COMMANDS: &[CommandSpec] = &[
             NOTES,
             optional("length", ParamType::Number, "the new length in beats, above 0"),
             optional("by", ParamType::Number, "instead: beats to add to each length (negative shortens)"),
+            optional(
+                "startBy",
+                ParamType::Number,
+                "instead: beats to move each start by (negative is earlier), each end kept where it is",
+            ),
         ],
         kind: CommandKind::Edit,
         run: notes::resize,
@@ -1648,6 +1654,11 @@ static COMMANDS: &[CommandSpec] = &[
             NOTES,
             optional("velocity", ParamType::Number, "the new velocity, 1 to 127"),
             optional("by", ParamType::Number, "instead: an amount to add to each velocity (negative lowers)"),
+            optional(
+                "velocities",
+                ParamType::Numbers,
+                "instead: one velocity (1 to 127) per entry of notes, in the same order",
+            ),
         ],
         kind: CommandKind::Edit,
         run: notes::set_velocity,
@@ -1699,8 +1710,15 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "note.duplicate",
-        label: "Add a copy of notes of a MIDI clip right after their end; the result gives the copies' indices",
-        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, NOTES],
+        label: "Add a copy of notes of a MIDI clip right after their end, or beats and semitones away; the result gives the copies' indices",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            NOTES,
+            optional("beats", ParamType::Number, "instead of right after: beats from the notes to the copies"),
+            optional("semitones", ParamType::Integer, "semitones from the notes to the copies, higher when positive"),
+        ],
         kind: CommandKind::Edit,
         run: notes::duplicate,
     },

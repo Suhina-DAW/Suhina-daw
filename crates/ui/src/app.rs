@@ -1373,8 +1373,10 @@ impl App {
                 self.detail_area(ui, inner, &mut actions)
             } else {
                 self.place_editors(&[]);
-                // A hidden piano roll does not keep the keyboard, nor the view to one track.
+                // A hidden piano roll does not keep the keyboard, nor the view to one track, and
+                // a note its audition sounds goes off.
                 self.piano_roll.focused = false;
+                actions.extend(self.piano_roll.stop_audition());
                 self.arrangement.focus = None;
                 // In a row under the view, the splitter stays along the bottom, to drag it open.
                 if grid.is_some() && self.settings.device_layout != DeviceLayout::Stack {
@@ -1687,6 +1689,8 @@ impl App {
             None => detail,
         };
         if piano.is_none() {
+            // A note the audition sounds goes off with the piano roll.
+            actions.extend(self.piano_roll.stop_audition());
             self.piano_roll.hide();
         }
         let mut places = Vec::new();

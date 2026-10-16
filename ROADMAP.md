@@ -679,6 +679,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   outside the part the clip plays are shaded like the grid past its end. Dragging the ruler up and
   down zooms time, sideways scrolls it; **Z** zooms to the selected notes and **Shift+Z** to the
   whole clip.
+- **The piano roll's note gestures** ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):
+  dragging a note's left edge moves the selection's starts and keeps their ends (on the grid, Alt
+  free; `note.resize {startBy}`); Ctrl+drag (Cmd on macOS) copies the selection to where it is let
+  go and selects the copies (`note.duplicate {beats, semitones}`); Alt+drag on a note changes the
+  selection's velocity and shows the value; a drag from an empty spot of the velocity lane draws a
+  line that sets every stem it spans in one step (`note.setVelocity {velocities}`); the lane's top
+  edge drags it taller or shorter; and the toolbar's **Audition** button (off at start) makes drawn
+  and moved notes sound once through the track's instrument (`preview.noteOn {keys}`).
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the

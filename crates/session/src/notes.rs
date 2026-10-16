@@ -349,26 +349,45 @@ pub(crate) fn move_notes(session: &mut Session, params: &Value) -> Result<Value,
 }
 
 pub(crate) fn resize(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let (length, by) = (optional_number(params, "length")?, optional_number(params, "by")?);
-    if length.is_some() == by.is_some() {
-        return Err("give length (beats) or by (beats to add), one of them".into());
+    let (length, by, start_by) =
+        (optional_number(params, "length")?, optional_number(params, "by")?, optional_number(params, "startBy")?);
+    if [length.is_some(), by.is_some(), start_by.is_some()].iter().filter(|given| **given).count() != 1 {
+        return Err(
+            "give length (beats), by (beats to add) or startBy (beats to move the starts by), one of them".into()
+        );
+    }
+    if start_by.is_some_and(|b| b.abs() > MAX_BEAT) {
+        return Err(format!("startBy must be within ±{MAX_BEAT}").into());
     }
     edit_notes(&mut session.project, params, |notes| {
         let resized = indices(params, notes.len())?;
-        let mut lengths = Vec::with_capacity(resized.len());
+        let mut changes = Vec::with_capacity(resized.len());
         for &index in &resized {
             let note = notes.get(index).ok_or("a note is missing")?;
-            let new = length.unwrap_or(note.duration + by.unwrap_or(0.0));
+            // `startBy` moves the start and keeps the end: the length changes the other way.
+            let mut time = note.time + start_by.unwrap_or(0.0);
+            if (-EPSILON..0.0).contains(&time) {
+                time = 0.0;
+            }
+            if !(0.0..=MAX_BEAT).contains(&time) {
+                return Err(format!("note {index} would start at beat {time}, outside 0 to {MAX_BEAT}").into());
+            }
+            let new = match (length, start_by) {
+                (Some(length), _) => length,
+                (None, Some(_)) => note.time + note.duration - time,
+                (None, None) => note.duration + by.unwrap_or(0.0),
+            };
             if !(new > 0.0 && new <= MAX_BEAT) {
                 return Err(format!(
                     "note {index} would be {new} beats long; a length is above 0 and at most {MAX_BEAT}"
                 )
                 .into());
             }
-            lengths.push((index, new));
+            changes.push((index, time, new));
         }
-        for (index, new) in lengths {
+        for (index, time, new) in changes {
             if let Some(note) = notes.get_mut(index) {
+                note.time = time;
                 note.duration = new;
             }
         }
@@ -378,16 +397,38 @@ pub(crate) fn resize(session: &mut Session, params: &Value) -> Result<Value, Com
 
 pub(crate) fn set_velocity(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let (velocity, by) = (optional_number(params, "velocity")?, optional_number(params, "by")?);
-    match (velocity, by) {
-        (Some(_), Some(_)) | (None, None) => return Err("give velocity (1 to 127) or by (to add), one of them".into()),
-        (Some(v), None) if !(1.0..=127.0).contains(&v) => {
+    let each = velocity_list(params)?;
+    match (velocity, by, &each) {
+        (Some(_), Some(_), _) | (Some(_), _, Some(_)) | (_, Some(_), Some(_)) | (None, None, None) => {
+            return Err("give velocity (1 to 127), by (to add) or velocities (one per note), one of them".into());
+        }
+        (Some(v), None, None) if !(1.0..=127.0).contains(&v) => {
             return Err(format!("velocity must be 1 to 127, got {v}").into());
         }
-        (None, Some(b)) if b.abs() > 127.0 => return Err(format!("by must be within ±127, got {b}").into()),
+        (None, Some(b), None) if b.abs() > 127.0 => return Err(format!("by must be within ±127, got {b}").into()),
         _ => {}
     }
     edit_notes(&mut session.project, params, |notes| {
         let changed = indices(params, notes.len())?;
+        if let Some(each) = &each {
+            // One value per entry of `notes`, in the order given; a repeated index takes its last.
+            let given = params.get("notes").and_then(Value::as_array).map_or(0, Vec::len);
+            if each.len() != given {
+                return Err(format!(
+                    "velocities must have one value per note: {given} notes, {} velocities",
+                    each.len()
+                )
+                .into());
+            }
+            let named = params.get("notes").and_then(Value::as_array).ok_or("notes must be a list of note indices")?;
+            for (value, midi) in named.iter().zip(each) {
+                let note = value.as_u64().and_then(|i| usize::try_from(i).ok()).and_then(|i| notes.get_mut(i));
+                if let Some(note) = note {
+                    note.velocity = velocity_of(midi.round());
+                }
+            }
+            return Ok(json!({ "notes": changed }));
+        }
         for &index in &changed {
             if let Some(note) = notes.get_mut(index) {
                 let midi = velocity.unwrap_or_else(|| f64::from(midi_velocity(note.velocity)) + by.unwrap_or(0.0));
@@ -396,6 +437,25 @@ pub(crate) fn set_velocity(session: &mut Session, params: &Value) -> Result<Valu
         }
         Ok(json!({ "notes": changed }))
     })
+}
+
+/// `params.velocities`: one velocity, 1 to 127, per entry of `notes`; `None` when left out.
+fn velocity_list(params: &Value) -> Result<Option<Vec<f64>>, CommandError> {
+    let list = match params.get("velocities") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(v) => v.as_array().ok_or("velocities must be a list of velocities, 1 to 127, one per note")?,
+    };
+    if list.len() > MAX_NOTES_PER_COMMAND {
+        return Err(format!("at most {MAX_NOTES_PER_COMMAND} velocities in one command, got {}", list.len()).into());
+    }
+    list.iter()
+        .map(|v| {
+            v.as_f64()
+                .filter(|v| (1.0..=127.0).contains(v))
+                .ok_or_else(|| CommandError::from("each of velocities must be a number from 1 to 127"))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
 }
 
 /// The quantise grid `params.grid` names, in beats: a value as `launcher.setQuantization` takes it,
@@ -576,10 +636,36 @@ pub(crate) fn paste(session: &mut Session, params: &Value) -> Result<Value, Comm
 }
 
 pub(crate) fn duplicate(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let beats = optional_number(params, "beats")?;
+    let semitones = match params.get("semitones") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_i64().filter(|s| (-127..=127).contains(s)).ok_or("semitones must be a whole number, -127 to 127")?,
+        ),
+    };
+    if beats.is_some_and(|b| b.abs() > MAX_BEAT) {
+        return Err(format!("beats must be within ±{MAX_BEAT}").into());
+    }
     let notes = notes_of(&session.project, params)?;
     let chosen = indices(params, notes.len())?;
     let clipboard = clipboard_of(notes, &chosen)?;
-    let added = placed(&clipboard, clipboard.from + clipboard.span)?;
+    if beats.is_none() && semitones.is_none() {
+        let added = placed(&clipboard, clipboard.from + clipboard.span)?;
+        return append(session, params, added);
+    }
+    // Copies `beats` and `semitones` away from the originals: a copy made by dragging.
+    let (beats, semitones) = (beats.unwrap_or(0.0), semitones.unwrap_or(0));
+    let mut time = clipboard.from + beats;
+    if (-EPSILON..0.0).contains(&time) {
+        time = 0.0;
+    }
+    let mut added = placed(&clipboard, time)?;
+    for note in &mut added {
+        note.key = u8::try_from(i64::from(note.key) + semitones)
+            .ok()
+            .filter(|k| *k <= 127)
+            .ok_or("a copy would leave the keys 0 to 127")?;
+    }
     append(session, params, added)
 }
 

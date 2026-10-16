@@ -608,6 +608,25 @@ fn a_key_column_note_plays_until_it_is_let_go() {
     assert_eq!(session.project(), &before);
 }
 
+/// The piano roll's audition plays the notes a drag moved together: `preview.noteOn` with `keys`.
+#[test]
+fn a_chord_plays_until_it_is_let_go() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "device.add", json!({ "track": "Drums", "id": "fm-synth" })).unwrap();
+    advance(&mut renderer, 2);
+    let before = session.project().clone();
+    let on = run(&mut session, "preview.noteOn", json!({ "track": "Drums", "keys": [64, 60, 60, 67], "velocity": 90 }))
+        .unwrap();
+    assert_eq!(on, json!({ "track": 1, "keys": [60, 64, 67], "velocity": 90.0 }));
+    let held = beat_peaks(&mut renderer, 2)[1];
+    assert!(held > 0.01, "the chord plays: {held}");
+    run(&mut session, "preview.noteOff", json!({ "track": "Drums" })).unwrap();
+    let tail = beat_peaks(&mut renderer, 2)[1];
+    assert!(tail < held * 0.05, "released: {tail} of {held}");
+    assert!(!session.player().unwrap().preview_monitor().playing());
+    assert_eq!(session.project(), &before);
+}
+
 #[test]
 fn bad_key_column_notes_are_refused_and_change_nothing() {
     let (mut session, mut renderer) = playing();
@@ -620,6 +639,12 @@ fn bad_key_column_notes_are_refused_and_change_nothing() {
         ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 0 })),
         ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 128 })),
         ("preview.noteOn", json!({ "track": "Nope", "key": 60 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 60, "keys": [60] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": [] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": [60, 128] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": [-1] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": 60 })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": vec![60; 129] })),
         ("preview.noteOff", json!({ "track": "Drums", "key": 200 })),
         ("preview.noteOff", json!({ "track": "Nope" })),
     ];

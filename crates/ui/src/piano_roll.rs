@@ -21,6 +21,13 @@ use crate::theme;
 use crate::widgets::{self, Action};
 use crate::workflow::Workflow;
 
+/// The gestures of [#351](https://github.com/suhina-daw/suhina-daw/issues/351): the left edge,
+/// copying by dragging, velocity on a note and as a line, the lane's height and the audition.
+#[path = "piano_roll_gestures.rs"]
+mod gestures;
+use gestures::Part;
+pub use gestures::start_by;
+
 /// Height of the toolbar, width of the key column, height of the ruler and the default height of
 /// the velocity lane.
 const TOOLBAR: f32 = 22.0;
@@ -49,7 +56,7 @@ const MIN_LINE_SPACING: f32 = 6.0;
 const MAX_LINES: usize = 4000;
 /// The most notes one command takes, so a stroke never builds one it cannot run.
 const MAX_NOTES_PER_COMMAND: usize = suhina_session::MAX_NOTES_PER_COMMAND;
-/// How close to a note's right end, in points, the pointer resizes it instead of moving it.
+/// How close to a note's start or end, in points, the pointer resizes it instead of moving it.
 const EDGE: f32 = 5.0;
 /// How close to a velocity stem, in points, the pointer grabs it.
 const STEM_REACH: f32 = 4.0;
@@ -315,10 +322,17 @@ impl Tool {
 /// A drag in progress, from where it started.
 #[derive(Debug, Clone, PartialEq)]
 enum Gesture {
-    /// The selection follows the grabbed note.
-    Move { from: Pos2, grabbed: usize },
+    /// The selection follows the grabbed note; with `copy` (Ctrl held when it began) a copy of
+    /// it does, and the notes stay.
+    Move { from: Pos2, grabbed: usize, copy: bool },
     /// The selection's lengths follow the grabbed note's right end.
     Resize { from: Pos2, grabbed: usize },
+    /// The selection's starts follow the grabbed note's left edge; their ends stay.
+    ResizeStart { from: Pos2, grabbed: usize },
+    /// Alt and a drag on a note: the selection's velocities follow the pointer up and down.
+    NoteVelocity { from: Pos2, grabbed: usize },
+    /// A line drawn in the velocity lane: each stem it spans takes its height.
+    VelocityLine { from: Pos2 },
     /// A rectangle selects the notes it touches; `add` keeps the selection.
     Select { from: Pos2, add: bool },
     /// The selection's velocities follow the grabbed stem.
@@ -417,6 +431,15 @@ pub struct PianoRollState {
     pub(crate) ruler: RulerState,
     /// How wide the note grid was last drawn, for the zoom keys (Z, Shift+Z).
     view_width: f32,
+    /// The velocity lane's height dragged by its top edge, kept until Suhina closes; `None`: the
+    /// default height (› Layout).
+    lane_wanted: Option<f32>,
+    /// The toolbar's Audition button: drawn and moved notes sound once.
+    pub audition: bool,
+    /// Keys to sound at the end of this frame, and the track and time the sounding ones go off.
+    audition_pending: Vec<u8>,
+    audition_off: Option<(u64, f64)>,
+    audition_sounding: Vec<u8>,
 }
 
 impl Default for PianoRollState {
@@ -456,6 +479,11 @@ impl Default for PianoRollState {
             workflow_picked: None,
             ruler: RulerState::default(),
             view_width: 0.0,
+            lane_wanted: None,
+            audition: false,
+            audition_pending: Vec::new(),
+            audition_off: None,
+            audition_sounding: Vec::new(),
         }
     }
 }
@@ -620,6 +648,7 @@ impl PianoRollState {
         if beats == 0.0 && keys == 0 {
             return None;
         }
+        self.audition_moved(&chosen, keys);
         params["beats"] = json!(round_beat(beats));
         params["semitones"] = json!(keys);
         Some(Action::new(id, params))
@@ -644,6 +673,7 @@ impl PianoRollState {
         self.selecting_new = false;
         self.stroke.clear();
         self.erasing.clear();
+        self.audition_pending.clear();
     }
 
     /// Keeps `note`'s length and velocity for the next note drawn, and for the key column's
@@ -781,6 +811,8 @@ enum IconButton {
     Duplicate,
     Quantise,
     MidiTools,
+    /// Headphones: drawn and moved notes sound once (› Playing the keys).
+    Audition,
     /// The × at the right end: hides the editor.
     Hide,
 }
@@ -801,6 +833,7 @@ impl IconButton {
             Self::Duplicate => "Duplicate",
             Self::Quantise => "Quantise",
             Self::MidiTools => "MIDI tools",
+            Self::Audition => "Audition",
             Self::Hide => "Hide editor",
         }
     }
@@ -819,7 +852,7 @@ impl IconButton {
             Self::Paste => "selection.paste",
             Self::Duplicate => "selection.duplicate",
             Self::Hide => "view.editor",
-            Self::Quantise | Self::MidiTools => return None,
+            Self::Quantise | Self::MidiTools | Self::Audition => return None,
         })
     }
 
@@ -941,6 +974,18 @@ impl IconButton {
             Self::Hide => {
                 line((-4.0, -4.0), (4.0, 4.0));
                 line((-4.0, 4.0), (4.0, -4.0));
+            }
+            // Headphones: a band over the head and a cup at each end.
+            Self::Audition => {
+                let band: Vec<Pos2> = (0..=12)
+                    .map(|i| {
+                        let angle = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
+                        at(5.0 * angle.cos(), 1.5 + 5.5 * angle.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(band, stroke));
+                painter.rect_filled(Rect::from_center_size(at(-5.0, 3.5), size(3.0, 5.0)), 0.0, color);
+                painter.rect_filled(Rect::from_center_size(at(5.0, 3.5), size(3.0, 5.0)), 0.0, color);
             }
             // Three horizontal sliders: the MIDI tools column's toggle.
             Self::MidiTools => {
@@ -1086,11 +1131,11 @@ pub fn resize_by(raw: f64, grabbed: &Note, resized: &[Note], grid: NoteGrid, fre
     if by.is_finite() { by } else { 0.0 }
 }
 
-/// The note at `pos`, the topmost (latest) first, and whether `pos` is on its right end.
-fn note_at(layout: &Layout, notes: &[Note], pos: Pos2) -> Option<(usize, bool)> {
+/// The note at `pos`, the topmost (latest) first, and which part of it `pos` is on.
+fn note_at(layout: &Layout, notes: &[Note], pos: Pos2) -> Option<(usize, Part)> {
     notes.iter().enumerate().rev().find_map(|(i, n)| {
         let rect = layout.note_rect(n).expand2(Vec2::new(0.0, 0.5));
-        rect.contains(pos).then(|| (i, pos.x >= rect.right() - EDGE.min(rect.width() / 3.0)))
+        rect.contains(pos).then(|| (i, Part::of(rect, pos.x)))
     })
 }
 
@@ -1153,6 +1198,7 @@ impl Gestures<'_> {
             actions.push(Action::new("note.add", add_params(self.clip, &[note])));
             // `note.add` appends: the new note is the next index.
             state.selected = BTreeSet::from([self.clip.notes.len()]);
+            state.audition_keys([note.key]);
         }
     }
 
@@ -1273,7 +1319,7 @@ pub fn show(
     let toolbar_rect = Rect::from_min_max(area.min, Pos2::new(area.right(), area.top() + band));
     let whole = area;
     let area = Rect::from_min_max(Pos2::new(area.left(), toolbar_rect.bottom()), area.max);
-    let lane_height = velocity_lane_height(area.height() - RULER, state.key_height);
+    let lane_height = velocity_lane_height(area.height() - RULER, state.key_height, state.lane_wanted);
     let keys = Rect::from_min_max(
         Pos2::new(area.left(), area.top() + RULER),
         Pos2::new(area.left() + KEYS, area.bottom() - lane_height),
@@ -1334,8 +1380,10 @@ pub fn show(
     if let Some(pos) = ui.ctx().pointer_hover_pos().filter(|p| grid_rect.contains(*p)) {
         let over = note_at(&layout, &clip.notes, pos);
         let cursor = match (&state.gesture, over, state.tool) {
-            (Some(Gesture::Resize { .. }), _, _) => Some(CursorIcon::ResizeHorizontal),
+            (Some(Gesture::Resize { .. } | Gesture::ResizeStart { .. }), _, _) => Some(CursorIcon::ResizeHorizontal),
+            (Some(Gesture::Move { copy: true, .. }), _, _) => Some(CursorIcon::Copy),
             (Some(Gesture::Move { .. }), _, _) => Some(CursorIcon::Grabbing),
+            (Some(Gesture::NoteVelocity { .. }), _, _) => Some(CursorIcon::ResizeVertical),
             (Some(Gesture::Slice { .. }), _, _) | (None, _, Tool::Slice) => Some(CursorIcon::Text),
             // There is no eraser cursor in the windowing layer, so the pointer is hidden and the
             // eraser button's shape is drawn where the pointer is.
@@ -1343,7 +1391,7 @@ pub fn show(
                 eraser = Some(pos);
                 Some(CursorIcon::None)
             }
-            (None, Some((_, true)), _) => Some(CursorIcon::ResizeHorizontal),
+            (None, Some((_, Part::Start | Part::End)), _) => Some(CursorIcon::ResizeHorizontal),
             (Some(Gesture::Draw { .. } | Gesture::Paint), _, _) | (None, None, Tool::Draw | Tool::Paint) => {
                 Some(CursorIcon::Crosshair)
             }
@@ -1452,14 +1500,21 @@ pub fn show(
             // Left click draws: with the Mouse-first switch on, the Select tool draws a note on an
             // empty spot the way Draw does (› Keymap presets).
             (None, Tool::Select) if workflow.empty_click_draws => Gesture::Draw { from },
-            (Some((grabbed, edge)), _) => {
+            (Some((grabbed, part)), _) => {
                 if !state.selected.contains(&grabbed) {
                     if !(inputs.shift || inputs.command) {
                         state.selected.clear();
                     }
                     state.selected.insert(grabbed);
                 }
-                if edge { Gesture::Resize { from, grabbed } } else { Gesture::Move { from, grabbed } }
+                // The ends resize; on the body Alt changes the velocity and Ctrl copies
+                // (› Moving, › Resizing, › Velocity).
+                match part {
+                    Part::End => Gesture::Resize { from, grabbed },
+                    Part::Start => Gesture::ResizeStart { from, grabbed },
+                    Part::Body if inputs.alt => Gesture::NoteVelocity { from, grabbed },
+                    Part::Body => Gesture::Move { from, grabbed, copy: inputs.command },
+                }
             }
             (None, Tool::Select) => Gesture::Select { from, add: inputs.shift || inputs.command },
         });
@@ -1485,14 +1540,21 @@ pub fn show(
         }
         if lane_response.drag_started_by(PointerButton::Primary) {
             let from = ui.input(|i| i.pointer.press_origin()).or(at).unwrap_or(lane.center());
-            if let Some(grabbed) = stem_at(&layout, &clip.notes, &state.selected, from) {
+            // A drag that grabs no bar (or any drag with Alt) draws a line (› Velocity).
+            let grabbed = if inputs.alt { None } else { stem_at(&layout, &clip.notes, &state.selected, from) };
+            if let Some(grabbed) = grabbed {
                 if !state.selected.contains(&grabbed) {
                     state.selected = BTreeSet::from([grabbed]);
                 }
                 state.gesture = Some(Gesture::Velocity { from, grabbed });
+            } else {
+                state.gesture = Some(Gesture::VelocityLine { from });
             }
         }
     }
+    // The lane's top edge: dragging it makes the lane taller or shorter (› Layout).
+    let room = area.height() - RULER;
+    gestures::lane_edge(ui, &layout, room, state);
 
     // The key column: pressing a key plays it through the track's instrument while it is held,
     // and Ctrl+click or Ctrl+drag selects the notes of that pitch or those pitches.
@@ -1533,6 +1595,9 @@ pub fn show(
         (Some(Gesture::Draw { from }), Some(now)) if dragging || stopped => {
             Some(Effect::Draw(drawn_note(state, &layout, clip, grid, *from, now, inputs.alt)))
         }
+        (Some(Gesture::VelocityLine { from }), Some(now)) if dragging || stopped => {
+            Some(gestures::velocity_line(&layout, &clip.notes, *from, now))
+        }
         (Some(gesture), Some(now)) if dragging || stopped => {
             Some(effect(gesture, now, &layout, clip, &chosen, grid, inputs.alt))
         }
@@ -1543,6 +1608,10 @@ pub fn show(
     if ui.input(|i| i.pointer.button_released(PointerButton::Secondary)) && std::mem::take(&mut state.right_playing) {
         actions.push(Action::new("transport.stop", json!({})));
     }
+    let velocity_label = match (&state.gesture, &preview) {
+        (Some(Gesture::NoteVelocity { grabbed, .. }), Some(Effect::Velocity(by))) => Some((*grabbed, *by)),
+        _ => None,
+    };
     if stopped {
         if let (Some(effect), Some(gesture)) = (preview.clone(), state.gesture.take()) {
             commit(&gesture, effect, clip, state, actions, &layout);
@@ -1557,6 +1626,9 @@ pub fn show(
 
     let shape = shape.unwrap_or(clip.shape);
     draw(ui, &layout, clip, state, grid, preview, shape.played());
+    if let Some((grabbed, by)) = velocity_label {
+        gestures::draw_velocity_label(ui, &layout, clip, grabbed, by);
+    }
     let axis = ruler_view::Axis { origin: grid_rect.left() - state.scroll.x, beat_width: state.beat_width };
     ruler_view::draw(ui, ruler, &axis, &shape);
     // The eraser under the pointer: the windowing layer has no eraser cursor, so the pointer is
@@ -1576,6 +1648,9 @@ pub fn show(
         draw_playhead(ui, &layout, beat);
     }
     for_readers(ui, &layout, clip, state);
+    // Notes the audition sounds go on now and off a moment later.
+    let track = clip.address.get("track").and_then(Value::as_u64);
+    state.audition_frame(ui, track, actions);
 }
 
 /// A single click in the grid, on note `over` or an empty spot at `pos`: what the tool does with
@@ -1761,6 +1836,13 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     let tools = place();
     if paint.place(tools, IconButton::MidiTools, state.tools_open, true) {
         state.tools_open = !state.tools_open;
+    }
+    let audition = place();
+    if paint.place(audition, IconButton::Audition, state.audition, true) {
+        state.audition = !state.audition;
+        if !state.audition {
+            state.audition_pending.clear();
+        }
     }
     // The workflow menu: the mode's name, the four modes and every workflow setting
     // (› Workflow modes).
@@ -1978,8 +2060,16 @@ fn icon_hint(button: IconButton, keymap: &crate::keymap::Keymap) -> String {
 enum Effect {
     Move(f64, i32),
     Resize(f64),
+    /// Beats the selection's starts move by, their ends kept.
+    ResizeStart(f64),
     Select(Rect),
     Velocity(f64),
+    /// A line in the velocity lane from `from` to `to`, and the velocity each stem it spans takes.
+    VelocityLine {
+        from: Pos2,
+        to: Pos2,
+        set: Vec<(usize, f64)>,
+    },
     /// The note a draw drag makes.
     Draw(Option<Note>),
     /// A slice: the beat the cut is at, and the notes it crosses.
@@ -2010,6 +2100,16 @@ fn effect(
                 .get(*grabbed)
                 .map_or(Effect::Resize(0.0), |g| Effect::Resize(resize_by(raw, g, chosen, grid, free)))
         }
+        Gesture::ResizeStart { from, grabbed } => {
+            let raw = f64::from((now.x - from.x) / layout.beat_width);
+            clip.notes
+                .get(*grabbed)
+                .map_or(Effect::ResizeStart(0.0), |g| Effect::ResizeStart(start_by(raw, g, chosen, grid, free)))
+        }
+        Gesture::NoteVelocity { from, grabbed } => {
+            Effect::Velocity(gestures::velocity_by(*from, now, clip.notes.get(*grabbed)))
+        }
+        Gesture::VelocityLine { from } => gestures::velocity_line(layout, &clip.notes, *from, now),
         Gesture::Select { from, .. } => Effect::Select(Rect::from_two_pos(*from, now)),
         Gesture::Velocity { grabbed, .. } => {
             // The grabbed bar follows the pointer's height; the other selected notes change by
@@ -2103,23 +2203,46 @@ fn commit(
     let mut params = clip.address.clone();
     params["notes"] = json!(notes);
     match (gesture, effect) {
-        (Gesture::Move { .. }, Effect::Move(beats, keys)) if !notes.is_empty() && (beats != 0.0 || keys != 0) => {
+        (Gesture::Move { copy, .. }, Effect::Move(beats, keys)) if !notes.is_empty() && (beats != 0.0 || keys != 0) => {
+            let moved: Vec<Note> = notes.iter().filter_map(|i| clip.notes.get(*i).copied()).collect();
+            state.audition_moved(&moved, keys);
             params["beats"] = json!(round_beat(beats));
             params["semitones"] = json!(keys);
-            actions.push(Action::new("note.move", params));
+            if *copy {
+                // Ctrl+drag: one `note.duplicate` puts the copies where the drag let go; the
+                // copies are appended, so they are the next indices, and they are selected.
+                actions.push(Action::new("note.duplicate", params));
+                state.selected = (clip.notes.len()..clip.notes.len() + notes.len()).collect();
+            } else {
+                actions.push(Action::new("note.move", params));
+            }
         }
         (Gesture::Resize { .. }, Effect::Resize(by)) if !notes.is_empty() && by != 0.0 => {
             params["by"] = json!(round_beat(by));
             actions.push(Action::new("note.resize", params));
         }
-        (Gesture::Velocity { .. }, Effect::Velocity(by)) if !notes.is_empty() && by != 0.0 => {
+        (Gesture::ResizeStart { .. }, Effect::ResizeStart(by)) if !notes.is_empty() && by != 0.0 => {
+            params["startBy"] = json!(round_beat(by));
+            actions.push(Action::new("note.resize", params));
+        }
+        (Gesture::Velocity { .. } | Gesture::NoteVelocity { .. }, Effect::Velocity(by))
+            if !notes.is_empty() && by != 0.0 =>
+        {
             params["by"] = json!(by);
+            actions.push(Action::new("note.setVelocity", params));
+        }
+        // The velocity line: one `note.setVelocity` with a value for each stem it spans.
+        (Gesture::VelocityLine { .. }, Effect::VelocityLine { set, .. }) if !set.is_empty() => {
+            let mut params = clip.address.clone();
+            params["notes"] = set.iter().map(|(i, _)| json!(i)).collect();
+            params["velocities"] = set.iter().map(|(_, v)| json!(v)).collect();
             actions.push(Action::new("note.setVelocity", params));
         }
         (Gesture::Draw { .. }, Effect::Draw(Some(note))) => {
             actions.push(Action::new("note.add", add_params(clip, &[note])));
             state.selected = BTreeSet::from([clip.notes.len()]);
             state.remember(&note);
+            state.audition_keys([note.key]);
         }
         // Shift and Draw: one `note.add` for the whole stroke, the notes it drew.
         (Gesture::DrawRun, _) => {
@@ -2130,6 +2253,7 @@ fn commit(
             if !stroke.is_empty() {
                 actions.push(Action::new("note.add", add_params(clip, &stroke)));
                 state.selected = (clip.notes.len()..clip.notes.len() + stroke.len()).collect();
+                state.audition_keys(stroke.iter().map(|n| n.key));
                 if let Some(last) = stroke.last() {
                     state.remember(last);
                 }
@@ -2153,6 +2277,7 @@ fn commit(
             if !stroke.is_empty() {
                 actions.push(Action::new("note.add", add_params(clip, &stroke)));
                 state.selected = (clip.notes.len()..clip.notes.len() + stroke.len()).collect();
+                state.audition_keys(stroke.iter().map(|n| n.key));
             }
         }
         (Gesture::Erase, _) if !state.erasing.is_empty() => {
@@ -2208,11 +2333,13 @@ fn round_beat(beat: f64) -> f64 {
     (beat * 1e6).round() / 1e6
 }
 
-/// How tall the velocity lane is with `room` under the ruler: 72 px, at most 30 % of the room,
-/// never so tall that fewer than five key rows of `key_height` are left, and left out when that
-/// leaves it under 12 px (› Layout in `docs/spec/ui-clip-editor.md`).
-fn velocity_lane_height(room: f32, key_height: f32) -> f32 {
-    let lane = VELOCITY_LANE.min(room * 0.3).min(room - LEAST_KEY_ROWS * key_height);
+/// How tall the velocity lane is with `room` under the ruler: 72 px, at most 30 % of the room
+/// (`wanted`, the height its top edge was dragged to, instead of both), never so tall that fewer
+/// than five key rows of `key_height` are left, and left out when that leaves it under 12 px
+/// (› Layout in `docs/spec/ui-clip-editor.md`).
+fn velocity_lane_height(room: f32, key_height: f32, wanted: Option<f32>) -> f32 {
+    let most = room - LEAST_KEY_ROWS * key_height;
+    let lane = wanted.unwrap_or(VELOCITY_LANE.min(room * 0.3)).min(most);
     if lane.is_finite() && lane >= LEAST_LANE { lane } else { 0.0 }
 }
 
@@ -2437,6 +2564,12 @@ fn draw(
 
     // Notes, where a drag in progress puts them.
     let shown = |i: usize, note: &Note| -> Note {
+        if let Some(Effect::VelocityLine { set, .. }) = &preview {
+            return match set.iter().find(|(index, _)| *index == i) {
+                Some((_, midi)) => Note { velocity: (midi.clamp(1.0, 127.0) / 127.0) as f32, ..*note },
+                None => *note,
+            };
+        }
         if !state.selected.contains(&i) {
             return *note;
         }
@@ -2447,6 +2580,9 @@ fn draw(
                 ..*note
             },
             Some(Effect::Resize(by)) => Note { duration: (note.duration + by).max(MIN_LENGTH), ..*note },
+            Some(Effect::ResizeStart(by)) => {
+                Note { time: note.time + by, duration: (note.duration - by).max(MIN_LENGTH), ..*note }
+            }
             Some(Effect::Velocity(by)) => {
                 let midi = (f64::from(suhina_session::midi_velocity(note.velocity)) + by).clamp(1.0, 127.0);
                 Note { velocity: (midi / 127.0) as f32, ..*note }
@@ -2458,6 +2594,10 @@ fn draw(
         Some(Effect::Select(rect)) => Some(rect),
         _ => None,
     };
+    // The velocity line being drawn, over the lane.
+    if let Some(Effect::VelocityLine { from, to, .. }) = &preview {
+        lane_painter.line_segment([*from, *to], Stroke::new(1.0, theme::accent()));
+    }
     for (i, note) in clip.notes.iter().enumerate() {
         let note = shown(i, note);
         let rect = layout.note_rect(&note);
@@ -2517,8 +2657,8 @@ fn draw(
         grid_painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_secondary()), StrokeKind::Inside);
     }
     // Notes a draw or paint drag is making, outlined until they are added.
-    let drawn = match preview {
-        Some(Effect::Draw(Some(note))) => vec![note],
+    let drawn = match &preview {
+        Some(Effect::Draw(Some(note))) => vec![*note],
         _ => state.stroke.clone(),
     };
     for note in &drawn {
