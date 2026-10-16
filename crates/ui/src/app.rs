@@ -3615,6 +3615,9 @@ impl App {
                     }),
                 ) {
                     Ok(out) => {
+                        // The command ran under this call, not under `run`: the revision bump
+                        // is explicit, so the views rebuild with the moved clip.
+                        self.revision += 1;
                         let verb = if out["swapped"].as_bool().unwrap_or(false) { "Swapped" } else { "Moved" };
                         let label = format!(
                             "{verb} {} to {}, scene {}",

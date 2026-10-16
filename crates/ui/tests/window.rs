@@ -3841,6 +3841,9 @@ fn a_slot_drag_to_another_slot_moves_it_ctrl_drags_copy_and_an_occupied_one_swap
     let (first, target, _) = slots(&harness);
     assert!(first.is_none(), "the source slot emptied");
     assert!(target.is_some(), "the clip is in scene 4 now");
+    // The grid rebuilt: the moved clip's slot shows it, the emptied one is a stop control.
+    assert!(harness.query_by_label("Launch Walk on Bass (scene 4)").is_some(), "the grid shows the moved clip");
+    assert!(harness.query_by_label("Stop Bass (scene 2)").is_some(), "the source's slot is empty again");
     assert!(
         matches!(harness.state().status(), Status::Done(text) if text.contains("Moved")),
         "{:?}",
