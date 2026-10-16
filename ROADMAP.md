@@ -529,6 +529,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/cue-output.md)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
+- The Session view's channel strip shows where each track plays ("→ Main" or a group) once the
+  mixer is 192 px or taller, and its dropdown routes the track (`track.setOutput`, one undo step).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
   stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
   sub-rows ([spec](docs/spec/arrangement-editing.md)).

@@ -8,6 +8,7 @@
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::json;
+use suhina_engine::model::TrackId;
 
 use crate::colour_picker;
 use crate::grid::{Column, ColumnKind};
@@ -34,6 +35,10 @@ const COLOUR_BAND: f32 = 5.0;
 /// The name row and the gap under it.
 const NAME: f32 = 16.0;
 const UNDER_NAME: f32 = 2.0;
+/// The output row ("→" and the dropdown), the arrow's width, and the gap under the row.
+const OUTPUT: f32 = 16.0;
+const ARROW: f32 = 14.0;
+const UNDER_OUTPUT: f32 = 4.0;
 /// A row of the device list, the least number of rows it shows, and the gap under it.
 const DEVICE_ROW: f32 = 16.0;
 const LEAST_DEVICES: f32 = 4.0;
@@ -50,12 +55,15 @@ pub const FADER_AT: f32 = 96.0;
 pub const PAN_AT: f32 = 122.0;
 pub const SENDS_AT: f32 = 148.0;
 pub const NAME_AT: f32 = 166.0;
-pub const DEVICES_AT: f32 = 240.0;
+pub const OUTPUT_AT: f32 = 192.0;
+pub const DEVICES_AT: f32 = 260.0;
 
 /// Where each part of a strip goes; a part that does not fit at this height is `None`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
     pub name: Option<Rect>,
+    /// Where the track's audio goes: "→" and the output dropdown.
+    pub output: Option<Rect>,
     pub devices: Option<Rect>,
     pub sends: Option<Rect>,
     pub pan: Option<Rect>,
@@ -78,6 +86,7 @@ pub fn layout(rect: Rect, has_sends: bool) -> Layout {
     let height = rect.height();
     let mut parts = Layout {
         name: None,
+        output: None,
         devices: None,
         sends: None,
         pan: None,
@@ -99,6 +108,10 @@ pub fn layout(rect: Rect, has_sends: bool) -> Layout {
     if height >= NAME_AT {
         parts.name = Some(row(top, NAME));
         top += NAME + UNDER_NAME;
+    }
+    if height >= OUTPUT_AT {
+        parts.output = Some(row(top, OUTPUT));
+        top += OUTPUT + UNDER_OUTPUT;
     }
     let pan = height >= PAN_AT;
     let sends = height >= SENDS_AT && has_sends;
@@ -139,13 +152,14 @@ pub fn layout(rect: Rect, has_sends: bool) -> Layout {
 }
 
 /// One column's strip in `rect`: what [`layout`] gives this height, drawn with `painter` (clipped
-/// to the mixer), the meter included.
+/// to the mixer), the meter included. `groups` are the group tracks the output can name.
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &Ui,
     painter: &egui::Painter,
     rect: Rect,
     column: &Column,
+    groups: &[(TrackId, String)],
     track_number: usize,
     state: &mut SessionViewState,
     id: Id,
@@ -171,6 +185,9 @@ pub fn show(
     let parts = layout(rect, !column.sends.is_empty());
     if let Some(name) = parts.name {
         name_row(ui, painter, name, column, id);
+    }
+    if let Some(row) = parts.output {
+        output_row(ui, painter, row, column, groups, id, actions);
     }
     if let Some(list) = parts.devices {
         devices(ui, painter, list, column, state, id);
@@ -209,6 +226,46 @@ fn name_row(ui: &Ui, painter: &egui::Painter, rect: Rect, column: &Column, id: I
         theme::ui_font(theme::TEXT),
         theme::text_on(fill),
     );
+}
+
+/// Where the track's audio goes: "→" and a dropdown of "Main" and the group tracks; picking one
+/// runs `track.setOutput`. A track cannot play into itself, so a group is not offered its own name.
+fn output_row(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    column: &Column,
+    groups: &[(TrackId, String)],
+    id: Id,
+    actions: &mut Vec<Action>,
+) {
+    let current = column.output.and_then(|t| groups.iter().find(|(g, _)| *g == t)).map_or("Main", |(_, name)| name);
+    let arrow = Rect::from_min_size(rect.min, Vec2::new(ARROW, rect.height()));
+    widgets::text_in(painter, arrow, Align2::LEFT_CENTER, "→", theme::ui_font(theme::TEXT_SMALL), theme::text_hint());
+    let field = Rect::from_min_max(Pos2::new(arrow.right(), rect.top()), rect.max);
+    let response = widgets::button_area(
+        ui,
+        field.intersect(painter.clip_rect()),
+        id.with("strip-output"),
+        format!("{} strip output: {current}", column.name),
+    );
+    widgets::dropdown(ui, painter, field, &response, current);
+    let mut picked = None;
+    egui::Popup::menu(&response).show(|ui| {
+        let text = |t: &str| egui::RichText::new(t).font(theme::ui_font(theme::TEXT_SMALL));
+        if ui.selectable_label(column.output.is_none(), text("Main")).clicked() && column.output.is_some() {
+            picked = Some(serde_json::Value::from("main"));
+        }
+        for (group, name) in groups.iter().filter(|(g, _)| *g != column.track) {
+            if ui.selectable_label(column.output == Some(*group), text(name)).clicked() && column.output != Some(*group)
+            {
+                picked = Some(serde_json::Value::from(group.0));
+            }
+        }
+    });
+    if let Some(to) = picked {
+        actions.push(Action::new("track.setOutput", json!({ "track": column.track.0, "to": to })));
+    }
 }
 
 /// The track's devices and plug-ins, one row each; the wheel scrolls them, a click shows the
@@ -658,6 +715,7 @@ mod tests {
         let mut parts = Vec::new();
         for (name, part) in [
             ("name", layout.name),
+            ("output", layout.output),
             ("devices", layout.devices),
             ("sends", layout.sends),
             ("pan", layout.pan),
@@ -679,18 +737,21 @@ mod tests {
         assert_eq!(shows(&strip(PAN_AT)), ["pan", "fader"]);
         assert_eq!(shows(&strip(SENDS_AT)), ["sends", "pan", "fader"]);
         assert_eq!(shows(&strip(NAME_AT)), ["name", "sends", "pan", "fader"]);
-        assert_eq!(shows(&strip(DEVICES_AT - 1.0)), ["name", "sends", "pan", "fader"]);
-        assert_eq!(shows(&strip(DEVICES_AT)), ["name", "devices", "sends", "pan", "fader"]);
+        assert_eq!(shows(&strip(OUTPUT_AT - 1.0)), ["name", "sends", "pan", "fader"]);
+        assert_eq!(shows(&strip(OUTPUT_AT)), ["name", "output", "sends", "pan", "fader"]);
+        assert_eq!(shows(&strip(DEVICES_AT - 1.0)), ["name", "output", "sends", "pan", "fader"]);
+        assert_eq!(shows(&strip(DEVICES_AT)), ["name", "output", "devices", "sends", "pan", "fader"]);
     }
 
     #[test]
     fn parts_never_overlap_and_the_fader_is_never_shorter_than_its_least() {
         for height in (46..600).map(|h| h as f32) {
             let parts = strip(height);
-            let mut rows: Vec<Rect> = [parts.name, parts.devices, parts.sends, parts.pan, parts.readout, parts.fader]
-                .into_iter()
-                .flatten()
-                .collect();
+            let mut rows: Vec<Rect> =
+                [parts.name, parts.output, parts.devices, parts.sends, parts.pan, parts.readout, parts.fader]
+                    .into_iter()
+                    .flatten()
+                    .collect();
             rows.push(parts.toggles);
             for pair in rows.windows(2) {
                 assert!(pair[0].bottom() <= pair[1].top(), "{height}: {pair:?}");
