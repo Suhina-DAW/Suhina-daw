@@ -503,7 +503,12 @@ the four modes as selectable rows, a divider, and one row per workflow setting (
 note: Deletes it") opening a submenu of its choices, the chosen one highlighted; it is left out when
 the toolbar is too narrow for it and the grid menu.
 At the right end
-"Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`), then the
+"Grid" in 10 px `text.hint` and a 76 px grid menu button (its value in 10 px mono `text.value` and
+a ▾). Its menu lists, in 10 px text and separated by dividers: **Snap to grid**; the heading
+"Adaptive grid" in `text.hint` and the five widths; the heading "Fixed grid" and the nine values;
+**Narrow grid** and **Widen grid**; **Triplet grid**. Each entry's key is right-aligned in 10 px
+mono `text.hint`; the chosen entries are highlighted as selected, and an entry the control bar
+cannot hold is greyed out while the piano roll follows it. Then the
 **Hide editor** button: a box as tall as the tool buttons with a 1.1 px × in `text.secondary`
 (`text.primary` on `control.hoverBackground` hovered), 3 px from the right edge. The piano roll's
 least height is 120 px of detail area (the toolbar, the 16 px ruler and five 12 px key rows; the

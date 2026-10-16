@@ -27,6 +27,7 @@ pub mod missing_files;
 pub mod motion;
 pub mod nesting;
 pub mod piano_roll;
+pub mod piano_roll_grid;
 pub mod pick;
 pub mod project_dialog;
 pub mod sample_map;

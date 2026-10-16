@@ -98,11 +98,12 @@ CHAPTERS = [
      "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
      "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
      "automation envelope."),
-    (10, "Editing MIDI", 41, 0.38, "started",
+    (10, "Editing MIDI", 41, 0.39, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
      "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute "
      "tools (keys 1 to 6, the wheel with the right button held steps through them) and "
-     "its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, "
+     "its own grid value (one grid menu: snap on or off, adaptive widths that follow the zoom, fixed "
+     "values, finer and coarser, triplets, Ctrl+1 to Ctrl+4), pulled up to the full height, copies, cuts, pastes and duplicates them, "
      "splits them at a drawn cut line (note.split splits every note the line crosses), plays keys "
      "through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is "
      "never played, in the model, the project file and an imported Live Set), "

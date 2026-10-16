@@ -47,8 +47,6 @@ const QUANTIZATION: [&str; 14] = [
 ];
 /// The quantisation of a session before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
-/// The piano roll's own grid value before one is picked.
-const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
@@ -228,7 +226,7 @@ pub struct App {
     editor_closed: bool,
     last_clip: Option<ClipRef>,
     /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
-    piano_grid: &'static str,
+    piano_grid: crate::piano_roll_grid::PianoGrid,
     detail_width: f32,
     page: PageState,
     settings: Settings,
@@ -336,7 +334,7 @@ impl App {
             detail_drag: None,
             editor_closed: false,
             last_clip: None,
-            piano_grid: DEFAULT_PIANO_GRID,
+            piano_grid: crate::piano_roll_grid::PianoGrid::default(),
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
@@ -1738,11 +1736,13 @@ impl App {
             picked.apply(&mut self.keymap);
             self.keymap_changed = true;
         }
-        // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
-        // the piano roll follows it.
+        // A grid value picked in the piano roll's grid menu or with its keys: its own, or the
+        // control bar's when the piano roll follows it.
         if let Some(picked) = self.piano_roll.grid_picked.take() {
             if self.settings.piano_grid_follows {
-                actions.push(Action::new("launcher.setQuantization", json!({ "value": picked })));
+                if let Some(value) = picked.control_bar_value() {
+                    actions.push(Action::new("launcher.setQuantization", json!({ "value": value })));
+                }
             } else {
                 self.piano_grid = picked;
             }
@@ -1808,8 +1808,9 @@ impl App {
     /// The piano roll for the shown clip: an arrangement clip's, or the Session view's selected
     /// slot's clip.
     fn piano_clip(&self, clip: Option<detail_view::ClipRef>) -> Option<piano_roll::PianoClip> {
-        let grid = self.piano_grid_name();
-        let quantization = suhina_session::parse_quantization(grid).ok()?;
+        let follows = self.settings.piano_grid_follows;
+        let control_bar = self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()));
+        let quantization = suhina_session::parse_quantization(control_bar).ok()?;
         let mut piano = match clip? {
             detail_view::ClipRef::Arrangement(track, index) => {
                 piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?
@@ -1818,7 +1819,13 @@ impl App {
                 piano_roll::launcher_clip(self.session()?.project(), track, scene, quantization)?
             }
         };
-        piano.grid_name = grid;
+        if follows {
+            piano.grid_menu = crate::piano_roll_grid::PianoGrid::from_value(control_bar);
+        } else {
+            piano.grid_menu = self.piano_grid;
+            piano.grid = self.piano_grid.fixed_step(piano.bar_beats);
+        }
+        piano.grid_follows = follows;
         Some(piano)
     }
 
@@ -1829,15 +1836,6 @@ impl App {
             View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
         };
         self.piano_clip(clip).map(|c| c.address)
-    }
-
-    /// The grid value the piano roll uses.
-    fn piano_grid_name(&self) -> &'static str {
-        if self.settings.piano_grid_follows {
-            self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()))
-        } else {
-            self.piano_grid
-        }
     }
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.

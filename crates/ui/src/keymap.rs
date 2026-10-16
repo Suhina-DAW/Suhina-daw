@@ -86,7 +86,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 56] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 60] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -146,6 +146,10 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 56] = [
     ("pianoRoll.tool5", "Choose the Slice tool", PIANO_ROLL),
     ("marker.addAtPlayhead", "Add an arrangement marker at the playhead", "Edit"),
     ("pianoRoll.tool6", "Choose the Mute tool", PIANO_ROLL),
+    ("pianoRoll.gridNarrow", "Make the piano roll's grid finer", PIANO_ROLL),
+    ("pianoRoll.gridWiden", "Make the piano roll's grid coarser", PIANO_ROLL),
+    ("pianoRoll.gridTriplet", "Turn the piano roll's triplet grid on or off", PIANO_ROLL),
+    ("pianoRoll.gridSnap", "Turn snapping to the piano roll's grid on or off", PIANO_ROLL),
     ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
@@ -373,7 +377,7 @@ const PRESET_KEY: &str = "preset";
 /// The duplicate key of Draw-first, and the browser's key otherwise.
 const CTRL_B: Shortcut = Shortcut::new(Modifiers::COMMAND, Key::B);
 
-const DEFAULTS: [(&str, &[&str]); 57] = [
+const DEFAULTS: [(&str, &[&str]); 61] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -431,6 +435,10 @@ const DEFAULTS: [(&str, &[&str]); 57] = [
     ("pianoRoll.tool4", &["4"]),
     ("pianoRoll.tool5", &["5"]),
     ("pianoRoll.tool6", &["6"]),
+    ("pianoRoll.gridNarrow", &["Ctrl+1"]),
+    ("pianoRoll.gridWiden", &["Ctrl+2"]),
+    ("pianoRoll.gridTriplet", &["Ctrl+3"]),
+    ("pianoRoll.gridSnap", &["Ctrl+4"]),
 ];
 
 impl Default for Keymap {
@@ -761,6 +769,23 @@ mod tests {
             let number = (index + 1).to_string();
             assert_eq!(Keymap::default().label(id).as_deref(), Some(number.as_str()), "{id}");
         }
+    }
+
+    #[test]
+    fn the_grid_keys_are_ctrl_and_one_to_four_in_the_piano_roll() {
+        let known = actions();
+        for (id, key) in [
+            ("pianoRoll.gridNarrow", "Ctrl+1"),
+            ("pianoRoll.gridWiden", "Ctrl+2"),
+            ("pianoRoll.gridTriplet", "Ctrl+3"),
+            ("pianoRoll.gridSnap", "Ctrl+4"),
+        ] {
+            let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(action.group, PIANO_ROLL);
+            assert!(piano_roll_only(id), "{id} is read only while the piano roll has the keyboard");
+            assert_eq!(Keymap::default().label(id).as_deref(), Some(key), "{id}");
+        }
+        assert!(Keymap::default().conflicts().is_empty());
     }
 
     #[test]

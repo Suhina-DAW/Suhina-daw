@@ -14,6 +14,7 @@ use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
 
 use crate::grid::default_track_colour;
 use crate::midi_tools::ToolSettings;
+use crate::piano_roll_grid::{FIXED_VALUES, GridMode, PianoGrid, Width};
 use crate::settings::ToolbarSize;
 use crate::theme;
 use crate::widgets::{self, Action};
@@ -86,12 +87,16 @@ pub struct PianoClip {
     pub color: Color32,
     /// Beats in a bar.
     pub bar_beats: f64,
-    /// The grid step in beats (the control bar's grid value); 0 is none.
+    /// The fixed grid step in beats (the piano roll's own value or the control bar's); 0 is none
+    /// or an adaptive grid, whose step [`grid_menu`](Self::grid_menu) gives at each zoom.
     pub grid: f64,
     /// Where the clip is on the arrangement, to find the playhead in its content.
     pub placement: Placement,
-    /// The grid value as the toolbar's menu shows it (`1/16`, `1 bar`, `none`).
-    pub grid_name: &'static str,
+    /// The grid value as the toolbar's grid menu shows it and ticks it, and whether things snap.
+    pub grid_menu: PianoGrid,
+    /// The grid is the control bar's (Settings › Piano roll grid): the menu offers only what the
+    /// control bar can hold.
+    pub grid_follows: bool,
 }
 
 /// Where a clip plays its content on the arrangement.
@@ -210,7 +215,8 @@ fn piano_clip_from(project: &Project, track: TrackId, clip: &Clip, quantization:
             offset: clip.offset,
             loop_range: clip.loop_range.map(|l| (l.start, l.end)),
         },
-        grid_name: "",
+        grid_menu: PianoGrid::default(),
+        grid_follows: false,
     })
 }
 
@@ -286,11 +292,6 @@ impl Tool {
         (Self::Mute, "Mute"),
     ];
 }
-
-/// The grid values the toolbar's menu offers, as `launcher.setQuantization` takes them.
-pub const GRID_VALUES: [&str; 14] = [
-    "none", "8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32",
-];
 
 /// A drag in progress, from where it started.
 #[derive(Debug, Clone, PartialEq)]
@@ -370,8 +371,9 @@ pub struct PianoRollState {
     /// The wheel stepped the tools while the right button was held: letting it go over a note
     /// then deletes nothing (› Zoom and scroll).
     right_stepped: bool,
-    /// A grid value picked in the toolbar this frame, for the window to keep.
-    pub grid_picked: Option<&'static str>,
+    /// A grid value picked in the toolbar's grid menu or with its keys this frame, for the window
+    /// to keep.
+    pub grid_picked: Option<PianoGrid>,
     /// The toolbar's Hide editor button was clicked this frame: the window hides the editor.
     pub hide_requested: bool,
     /// The key rows were scrolled by hand (the wheel, a pan, zooming the key height) since the
@@ -525,11 +527,17 @@ impl PianoRollState {
                 }
                 return None;
             }
+            "pianoRoll.gridNarrow" | "pianoRoll.gridWiden" | "pianoRoll.gridTriplet" | "pianoRoll.gridSnap" => {
+                if let Some(picked) = grid_key(action, clip) {
+                    self.grid_picked = Some(picked);
+                }
+                return None;
+            }
             _ if chosen.is_empty() => return None,
             _ => {}
         }
         params["notes"] = json!(self.selected.iter().collect::<Vec<_>>());
-        let grid = NoteGrid::new(clip.grid, self.beat_width);
+        let grid = note_grid(clip, self.beat_width);
         let moves = |beats: f64, keys: i32| {
             let (beats, moved) = move_delta(beats, keys, &chosen, grid, false);
             // A pitch move that does not fit leaves the pitch alone, so no note changes its name.
@@ -651,7 +659,7 @@ impl PianoRollState {
         let length = if self.last_length > 0.0 {
             self.last_length
         } else if grid.snaps && !free {
-            clip.grid.max(MIN_LENGTH)
+            chosen_step(clip, self.beat_width).max(MIN_LENGTH)
         } else {
             FREE_LENGTH
         };
@@ -932,6 +940,32 @@ impl Layout {
         let top = self.y_of(note.key);
         Rect::from_min_max(Pos2::new(left, top + 1.0), Pos2::new(right - 1.0, top + self.key_height))
     }
+}
+
+/// The grid step chosen for `clip` at `beat_width` points per beat, before it is made coarser to
+/// keep lines apart: the fixed value, or the adaptive grid's step at this zoom.
+fn chosen_step(clip: &PianoClip, beat_width: f32) -> f64 {
+    if clip.grid_menu.is_adaptive() { clip.grid_menu.step(beat_width, clip.bar_beats) } else { clip.grid }
+}
+
+/// The grid `clip` is edited on at `beat_width`: snapping only while the menu's Snap to grid is on.
+fn note_grid(clip: &PianoClip, beat_width: f32) -> NoteGrid {
+    let grid = NoteGrid::new(chosen_step(clip, beat_width), beat_width);
+    NoteGrid { snaps: grid.snaps && clip.grid_menu.snap, ..grid }
+}
+
+/// The grid a grid key (Ctrl+1 to Ctrl+4 by default) makes of `clip`'s; `None` when the grid
+/// follows the control bar and it has no such value.
+fn grid_key(action: &str, clip: &PianoClip) -> Option<PianoGrid> {
+    let grid = clip.grid_menu;
+    let picked = match action {
+        "pianoRoll.gridNarrow" => grid.narrower(),
+        "pianoRoll.gridWiden" => grid.wider(),
+        "pianoRoll.gridTriplet" => grid.toggle_triplet(),
+        "pianoRoll.gridSnap" => grid.toggle_snap(),
+        _ => return None,
+    };
+    (!clip.grid_follows || picked.control_bar_value().is_some()).then_some(picked)
 }
 
 /// The grid as drawn at this zoom: its step (the chosen one, doubled until lines are far
@@ -1236,7 +1270,7 @@ pub fn show(
         beat_width: state.beat_width,
         key_height: state.key_height,
     };
-    let grid = NoteGrid::new(clip.grid, state.beat_width);
+    let grid = note_grid(clip, state.beat_width);
     let gesture = Gestures { layout: &layout, clip, grid };
 
     // The grid's gestures: one widget for the whole grid, so a note under the pointer and the
@@ -1689,7 +1723,7 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
         state.hide_requested = true;
     }
     let row = Rect::from_min_max(row.min, Pos2::new(hide.left() - gap - 2.0, row.bottom()));
-    let menu = Rect::from_min_max(Pos2::new(row.right() - 64.0, row.top()), row.max);
+    let menu = Rect::from_min_max(Pos2::new(row.right() - GRID_MENU, row.top()), row.max);
     if menu.left() < x + 40.0 {
         return;
     }
@@ -1703,24 +1737,77 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
         theme::ui_font(theme::TEXT_SMALL),
         theme::text_hint(),
     );
-    let mono = theme::mono_font(theme::TEXT_SMALL);
-    let mut chosen = clip.grid_name;
-    let shown = chosen;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(menu), |ui| {
-        let menu = egui::ComboBox::from_id_salt("piano-roll-grid")
-            .width(menu.width())
-            .selected_text(egui::RichText::new(shown).font(mono.clone()).color(theme::text_value()))
-            .show_ui(ui, |ui| {
-                for value in GRID_VALUES {
-                    ui.selectable_value(&mut chosen, value, egui::RichText::new(value).font(mono.clone()));
-                }
-            });
-        menu.response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Grid value {shown}")));
-    });
-    if chosen != clip.grid_name {
-        state.grid_picked = Some(chosen);
+    if let Some(picked) = grid_menu(ui, menu, clip, keymap) {
+        state.grid_picked = Some(picked);
     }
+}
+
+/// How wide the toolbar's grid menu button is, in points.
+const GRID_MENU: f32 = 76.0;
+
+/// The toolbar's grid menu (› Grid and snapping): its button shows the grid value; its menu holds
+/// Snap to grid, the adaptive widths, the fixed values, Narrow grid, Widen grid and Triplet grid,
+/// each with its key, the chosen ones ticked. While the grid follows the control bar, an entry the
+/// control bar cannot hold is greyed out. Returns the grid picked this frame.
+fn grid_menu(ui: &mut Ui, rect: Rect, clip: &PianoClip, keymap: &crate::keymap::Keymap) -> Option<PianoGrid> {
+    let grid = clip.grid_menu;
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let mono = theme::mono_font(theme::TEXT_SMALL);
+    let shown = grid.label();
+    let mut picked = None;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        let text = egui::RichText::new(format!("{shown} \u{25be}")).font(mono.clone()).color(theme::text_value());
+        let menu = ui.menu_button(text, |ui| {
+            // One entry: its text, the key its action has, ticked when `ticked` says so.
+            let mut entry = |ui: &mut Ui, name: &str, action: Option<&str>, ticked: Option<bool>, result: PianoGrid| {
+                let enabled = !clip.grid_follows || result.control_bar_value().is_some();
+                let key = action.and_then(|a| keymap.label(a)).unwrap_or_default();
+                let text = egui::RichText::new(name).font(font.clone());
+                let button = egui::Button::selectable(ticked.unwrap_or(false), text)
+                    .shortcut_text(egui::RichText::new(key.as_str()).font(mono.clone()).color(theme::text_hint()));
+                let response = ui.add_enabled(enabled, button);
+                // Its accessible label is its name and its key, as the icon buttons' are.
+                let label = if key.is_empty() { name.to_string() } else { format!("{name} ({key})") };
+                response.widget_info(|| match ticked {
+                    Some(on) => egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, &label),
+                    None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label),
+                });
+                if response.clicked() {
+                    picked = Some(result);
+                    ui.close();
+                }
+            };
+            let heading = |ui: &mut Ui, text: &str| {
+                ui.label(egui::RichText::new(text).font(font.clone()).color(theme::text_hint()));
+            };
+            entry(ui, "Snap to grid", Some("pianoRoll.gridSnap"), Some(grid.snap), grid.toggle_snap());
+            ui.separator();
+            heading(ui, "Adaptive grid");
+            for width in Width::ALL {
+                let name = format!("Adaptive {}", width.name().to_lowercase());
+                let result = PianoGrid { mode: GridMode::Adaptive(width), ..grid };
+                entry(ui, &name, None, Some(grid.mode == GridMode::Adaptive(width)), result);
+            }
+            ui.separator();
+            heading(ui, "Fixed grid");
+            for (index, value) in FIXED_VALUES.iter().enumerate() {
+                // Picking a value while following the control bar turns snapping back on: its
+                // none is snap off.
+                let snap = grid.snap || clip.grid_follows;
+                let result = PianoGrid { mode: GridMode::Fixed(index), snap, ..grid };
+                entry(ui, value, None, Some(grid.mode == GridMode::Fixed(index)), result);
+            }
+            ui.separator();
+            entry(ui, "Narrow grid", Some("pianoRoll.gridNarrow"), None, grid.narrower());
+            entry(ui, "Widen grid", Some("pianoRoll.gridWiden"), None, grid.wider());
+            ui.separator();
+            entry(ui, "Triplet grid", Some("pianoRoll.gridTriplet"), Some(grid.triplet), grid.toggle_triplet());
+        });
+        let label = format!("Grid value {shown}");
+        menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        menu.response.on_hover_text("The grid: snapping, adaptive or fixed lines, triplets");
+    });
+    picked.filter(|p| *p != grid)
 }
 
 /// How wide the toolbar's workflow menu is, in points.
@@ -2608,12 +2695,35 @@ mod tests {
             bar_beats: 4.0,
             grid: 0.25,
             placement: Placement { start: 16.0, length: 8.0, offset: 0.0, loop_range: None },
-            grid_name: "1/16",
+            grid_menu: PianoGrid::default(),
+            grid_follows: false,
         }
     }
 
     fn focused_on(clip: &PianoClip) -> PianoRollState {
         PianoRollState { shown: Some(clip.address.clone()), focused: true, ..PianoRollState::default() }
+    }
+
+    #[test]
+    fn the_grid_keys_leave_a_new_grid_for_the_window_and_snap_off_snaps_nothing() {
+        let mut piano = clip(Vec::new());
+        let mut state = focused_on(&piano);
+        assert_eq!(state.key_action("pianoRoll.gridWiden", &piano, 0.0, None), None);
+        assert_eq!(state.grid_picked.take().map(|g| g.label()).as_deref(), Some("1/8"));
+        state.key_action("pianoRoll.gridSnap", &piano, 0.0, None);
+        let free = state.grid_picked.take().unwrap_or_default();
+        assert!(!free.snap);
+        piano.grid_menu = free;
+        let grid = note_grid(&piano, 40.0);
+        assert_eq!((grid.step, grid.snaps), (0.25, false), "the lines stay, nothing snaps");
+        assert_eq!(grid.nearest_line(1.1), 1.1);
+        // Following the control bar, a key whose grid it cannot hold does nothing.
+        piano.grid_menu = PianoGrid::from_value("1/32");
+        piano.grid_follows = true;
+        state.key_action("pianoRoll.gridTriplet", &piano, 0.0, None);
+        assert_eq!(state.grid_picked, None);
+        state.key_action("pianoRoll.gridNarrow", &piano, 0.0, None);
+        assert_eq!(state.grid_picked.map(|g| g.label()).as_deref(), Some("1/32"));
     }
 
     #[test]

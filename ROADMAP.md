@@ -663,6 +663,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `keymap.json`. A double-click is counted by the piano roll itself, so it works right after
   another click, adds one note in Mouse-first instead of adding and deleting it, and mutes or
   erases one note in the Mute and Erase tools.
+- **The piano roll's grid menu** ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)): the
+  grid value at the right end of the piano roll's toolbar opens one menu with **Snap to grid**, an
+  **adaptive grid** in five widths whose lines get finer as the view zooms in and coarser as it
+  zooms out, the **fixed** values from 8 bars to 1/32, **Narrow grid** and **Widen grid**, and
+  **Triplet grid**, each with its key: Ctrl+1 and Ctrl+2 make the grid finer and coarser, Ctrl+3
+  toggles triplets and Ctrl+4 snapping (in the keymap). With snapping off the lines stay and notes
+  are placed freely.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the

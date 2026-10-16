@@ -1,11 +1,12 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, grid menu, adaptive grid, fixed grid, snap to grid, snap off, triplet grid, narrow grid, widen grid, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes
 type: spec
 status: draft
 last_verified: 2026-10-16
 covers:
   - crates/ui/src/piano_roll.rs
+  - crates/ui/src/piano_roll_grid.rs
   - crates/ui/src/midi_tools.rs
   - crates/ui/src/detail_view.rs
   - crates/session/src/notes.rs
@@ -107,7 +108,8 @@ bottom:
    is nothing to act on: no note selected for Cut, Copy and Duplicate, nothing copied for Paste.
    The **MIDI tools** icon (three horizontal sliders) shows and hides the MIDI tools column
    (› Other note tools); it is highlighted while the column shows, and a click on it is window
-   state only, not a command. The grid value stays at the right end of the toolbar; the quantise
+   state only, not a command. The grid menu stays at the right end of the toolbar (› Grid and
+   snapping); the quantise
    controls are in the clip's properties column (› Quantise).
 2. **Ruler** (built): bar numbers and bar lines. **Later ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)):** the
    clip's loop region with draggable start and end, the clip's start and end markers.
@@ -187,24 +189,52 @@ pull up.
 
 ## Grid and snapping
 
-- **Built ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)):** the piano roll has its own
-  grid value, the menu at the right end of its toolbar (none, 8 bars to 1 bar, 1/2 to 1/32 and the
-  triplets), 1/16 until another is picked; it lives in the window, not the project. The control
-  bar's grid value (the launch quantisation, `launcher.setQuantization`) then applies to the
-  Arrangement view only. Settings › General › Piano roll › **Piano roll grid** set to **Control
-  bar** makes the piano roll use the control bar's value instead, and its menu then sets the
-  control bar's. The same value draws the
+- **Built ([#442](https://github.com/suhina-daw/suhina-daw/issues/442), [#346](https://github.com/suhina-daw/suhina-daw/issues/346)):**
+  the piano roll has its own grid value; it lives in the window, not the project, and is a
+  snapping 1/16 until another is picked. The control bar's grid value (the launch quantisation,
+  `launcher.setQuantization`) applies to the Arrangement view only. The grid value draws the
   vertical lines and is the step that notes snap to. When lines would be closer than a few pixels,
   every second line is left out until they are far enough apart (snapping uses the same, coarser
-  step, so what snaps is what is drawn). `none` draws beats and bars and does not snap.
+  step, so what snaps is what is drawn).
+- **Built ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)): the grid menu.** The
+  button at the right end of the toolbar, after the word **Grid**, shows the value (`1/16`,
+  `1/8T`, `2 bars`, `Adaptive`, `Adaptive T`, with ` off` after it while snapping is off; its
+  accessible label is `Grid value` and that text). It opens one menu that holds everything about
+  the grid, in this order, each entry with its key on the right (the key the keymap has bound to
+  it now, also in the entry's accessible label, such as `Narrow grid (Ctrl+1)`) and the chosen
+  ones ticked:
+  1. **Snap to grid** (Ctrl+4): on or off. Off, the lines are still drawn and nothing snaps:
+     drawing, moving, resizing and slicing place notes freely, as with Alt held, and a new note
+     takes the length of the note last drawn or clicked, else a 1/16.
+  2. **Adaptive grid**: **Adaptive widest**, **wide**, **medium**, **narrow**, **narrowest**. The
+     lines follow the zoom: the step is the finest note value of 1/32, 1/16, 1/8, 1/4 and 1/2
+     (the ones shorter than a bar), then 1 bar, 2 bars, 4 bars and on doubling, whose lines are at
+     least 96, 48, 24, 12 or 6 points apart (widest to narrowest). Zooming in makes it finer,
+     zooming out coarser; it is never finer than 1/32.
+  3. **Fixed grid**: **8 bars**, **4 bars**, **2 bars**, **1 bar**, **1/2**, **1/4**, **1/8**,
+     **1/16**, **1/32**. A note value is that part of a 4/4 bar (1/4 is a beat); a bar is the time
+     signature's bar.
+  4. **Narrow grid** (Ctrl+1) and **Widen grid** (Ctrl+2): one fixed value finer or coarser, or
+     one adaptive width narrower or wider; the finest and the coarsest stay where they are.
+  5. **Triplet grid** (Ctrl+3): on or off. On, every note value is two thirds as long (1/8T is a
+     third of a beat), adaptive ones too; bar values stay as they are.
+
+  The keys work after a click in the piano roll, like its other keys (› Shortcuts). The grid value
+  and its steps are the `piano_roll_grid` module of the `ui` crate (`crates/ui/src/piano_roll_grid.rs`).
+- **Built:** Settings › General › Piano roll › **Piano roll grid** set to **Control bar** makes the
+  piano roll use the control bar's value instead, and its menu and keys then set the control
+  bar's (`launcher.setQuantization`). The control bar has no adaptive grid and no 1/32 triplet,
+  so an entry whose result it cannot hold is greyed out and its key does nothing: the adaptive
+  widths always, and Triplet grid or Narrow grid where they would reach a 1/32 triplet. Snap to
+  grid off is the control bar's `none` (the button shows `1/16 off`); picking a fixed value snaps
+  again.
+- **Choice left open:** the issue proposed the adaptive grid as the default; the default stays a
+  snapping fixed 1/16, as before the menu, until that is decided.
 - **Built:** starts and ends of drawn, moved and resized notes snap to the grid. Holding **Alt**
   while drawing or dragging places them freely (no snapping). A move keeps a note's distance to the
   grid: the drag snaps the **offset** to whole grid steps, so a note that was off the grid stays
   just as far off (it keeps a played-in groove).
-- **Later ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)):** an adaptive grid that
-  follows the zoom (finer when zoomed in), triplet and off toggles, keyboard shortcuts to make the
-  grid finer or coarser (Ctrl+1 and Ctrl+2) and to toggle snapping (Ctrl+4) and triplets (Ctrl+3).
-  Once the Arrangement view's grid (pull request #320) lands, the piano roll uses its line logic.
+- **Later:** the same grid menu in the Arrangement view, for its own grid.
 - **Later ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)):** "magnetic" snapping to other notes' starts and ends within a few pixels.
 
 ## Zoom and scroll
@@ -607,6 +637,9 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 | Drag a note | Moves the selection (time snapped by grid steps, pitch by semitones) |
 | Drag a note's right edge | Changes the selection's length |
 | Alt while drawing or dragging | No snapping |
+| Ctrl+1, Ctrl+2 | Makes the grid finer, coarser (Narrow grid, Widen grid; after a click in the piano roll) |
+| Ctrl+3 | Turns the triplet grid on or off (after a click in the piano roll) |
+| Ctrl+4 | Turns snapping to the grid on or off (after a click in the piano roll) |
 | Drag a bar in the velocity lane | Sets its note's velocity to the pointer's height (the selection by the same amount) |
 | Delete, Backspace | Deletes the selected notes (after a click in the piano roll) |
 | Ctrl+U | Quantises the selected notes, or every note, with the last settings |
@@ -630,13 +663,12 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 
 The keys after a click in the piano roll are keymap actions ([`docs/shortcuts.md`](../shortcuts.md)):
 the `selection.*` ones the window has anyway, and `pianoRoll.selectAll`, `.deselect`, `.earlier`,
-`.later`, `.up`, `.down`, `.octaveUp`, `.octaveDown`, `.shorter`, `.longer`, `.draw` and
-`.tool1` … `.tool6`, which are read only
+`.later`, `.up`, `.down`, `.octaveUp`, `.octaveDown`, `.shorter`, `.longer`, `.draw`,
+`.tool1` … `.tool6`, `.gridNarrow`, `.gridWiden`, `.gridTriplet` and `.gridSnap`, which are read only
 while the piano roll has the keyboard, so they can be changed like the rest. `pianoRoll.quantize`
 (Ctrl+U) means nothing elsewhere, so it works whenever the piano roll shows a clip.
 
-Later: Ctrl+G (glue), Ctrl+1 to Ctrl+4 (grid), Z (zoom to
-selection), added to the keymap when built.
+Later: Ctrl+G (glue), Z (zoom to selection), added to the keymap when built.
 
 ## Workflow modes
 
