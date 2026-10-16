@@ -326,36 +326,18 @@ fn a_choice_is_found_by_its_host_and_device() {
 /// A project with two tracks whose first launcher slots hold looping clips.
 fn launcher_project() -> Project {
     let mut p = project();
-    let note = suhina_model::Note {
-        time: 0.0,
-        duration: 0.25,
-        key: 60,
-        velocity: 1.0,
-        release_velocity: 0.5,
-        channel: 0,
-        muted: false,
-    };
+    let note = suhina_model::Note::new(0.0, 0.25, 60, 1.0);
     p.contents.push(suhina_model::ClipContent {
         id: suhina_model::ContentId(900),
         name: "loop".into(),
         length: 4.0,
         lanes: vec![suhina_model::ContentLane { target: None, data: suhina_model::LaneData::Notes(vec![note]) }],
         extensions: suhina_model::Extensions::default(),
+        scale: None,
     });
     let clip = suhina_model::Clip {
-        content: suhina_model::ContentId(900),
-        start: 0.0,
-        length: 4.0,
-        offset: 0.0,
         loop_range: Some(suhina_model::LoopRange { start: 0.0, end: 4.0 }),
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        extensions: suhina_model::Extensions::default(),
-        launch: Default::default(),
+        ..suhina_model::Clip::new(suhina_model::ContentId(900), 0.0, 4.0)
     };
     for column in p.launcher.columns.iter_mut().take(2) {
         if let Some(slot) = column.slots.first_mut() {

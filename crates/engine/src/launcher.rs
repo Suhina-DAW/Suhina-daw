@@ -1779,6 +1779,7 @@ mod tests {
             length: 4.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
             extensions: Extensions::default(),
+            scale: None,
         }
     }
 
@@ -2364,6 +2365,7 @@ mod tests {
             length: 2.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
             extensions: Extensions::default(),
+            scale: None,
         };
         // Loop beats 0..1 (0..0.5 s of the file), starting at beat 0.5.
         let c = Clip { offset: 0.5, ..clip(1, 1.0, true) };
@@ -2405,6 +2407,7 @@ mod tests {
             length: 1.5,
             lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
             extensions: Extensions::default(),
+            scale: None,
         };
         let launch = [(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })];
         let looping = project(vec![content.clone()], vec![vec![with(clip(1, 1.5, true))]]);
@@ -2448,6 +2451,7 @@ mod tests {
             length: 2.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
             extensions: Extensions::default(),
+            scale: None,
         };
         (project(vec![content], vec![vec![with(clip(1, 2.0, true))]]), audio)
     }

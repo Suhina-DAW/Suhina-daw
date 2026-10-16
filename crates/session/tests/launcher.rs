@@ -57,6 +57,7 @@ fn project() -> Project {
             }]),
         }],
         extensions: Extensions::default(),
+        scale: None,
     };
     let clip = |content: u32, enabled: bool| Clip {
         content: ContentId(content),
@@ -608,6 +609,25 @@ fn a_key_column_note_plays_until_it_is_let_go() {
     assert_eq!(session.project(), &before);
 }
 
+/// The piano roll's audition plays the notes a drag moved together: `preview.noteOn` with `keys`.
+#[test]
+fn a_chord_plays_until_it_is_let_go() {
+    let (mut session, mut renderer) = playing();
+    run(&mut session, "device.add", json!({ "track": "Drums", "id": "fm-synth" })).unwrap();
+    advance(&mut renderer, 2);
+    let before = session.project().clone();
+    let on = run(&mut session, "preview.noteOn", json!({ "track": "Drums", "keys": [64, 60, 60, 67], "velocity": 90 }))
+        .unwrap();
+    assert_eq!(on, json!({ "track": 1, "keys": [60, 64, 67], "velocity": 90.0 }));
+    let held = beat_peaks(&mut renderer, 2)[1];
+    assert!(held > 0.01, "the chord plays: {held}");
+    run(&mut session, "preview.noteOff", json!({ "track": "Drums" })).unwrap();
+    let tail = beat_peaks(&mut renderer, 2)[1];
+    assert!(tail < held * 0.05, "released: {tail} of {held}");
+    assert!(!session.player().unwrap().preview_monitor().playing());
+    assert_eq!(session.project(), &before);
+}
+
 #[test]
 fn bad_key_column_notes_are_refused_and_change_nothing() {
     let (mut session, mut renderer) = playing();
@@ -620,6 +640,12 @@ fn bad_key_column_notes_are_refused_and_change_nothing() {
         ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 0 })),
         ("preview.noteOn", json!({ "track": "Drums", "key": 60, "velocity": 128 })),
         ("preview.noteOn", json!({ "track": "Nope", "key": 60 })),
+        ("preview.noteOn", json!({ "track": "Drums", "key": 60, "keys": [60] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": [] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": [60, 128] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": [-1] })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": 60 })),
+        ("preview.noteOn", json!({ "track": "Drums", "keys": vec![60; 129] })),
         ("preview.noteOff", json!({ "track": "Drums", "key": 200 })),
         ("preview.noteOff", json!({ "track": "Nope" })),
     ];
@@ -707,4 +733,27 @@ fn stopping_a_scene_stops_its_rows_clips_and_leaves_the_empty_slots_tracks() {
     assert_eq!(state["tracks"][2]["queued"], Value::Null);
     // A scene that does not exist is refused.
     assert!(run(&mut session, "scene.stop", json!({ "scene": 99 })).is_err());
+}
+
+/// Pressing play and stop quickly (#506) costs the session next to nothing: each press is a
+/// message to the audio thread, with no undo step, no change to the project (so no backup or
+/// save follows) and no new graph. Prints what a press took; the numbers in #506 come from
+/// `cargo test -p suhina-session --release --test launcher quick_presses -- --nocapture`.
+#[test]
+fn quick_presses_of_play_and_stop_cost_the_session_next_to_nothing() {
+    let (mut session, mut renderer) = playing();
+    let before = session.project().clone();
+    let mut took = Vec::with_capacity(1000);
+    for n in 0..1000 {
+        let id = if n % 2 == 0 { "transport.play" } else { "transport.stop" };
+        let started = std::time::Instant::now();
+        run(&mut session, id, json!({})).unwrap();
+        took.push(started.elapsed());
+        advance(&mut renderer, 256);
+        assert_eq!(renderer.monitor().running(), n % 2 == 0, "press {n} reached the audio thread");
+    }
+    assert!(!session.can_undo(), "a press is not an undo step");
+    assert!(session.project() == &before, "a press does not change the project");
+    took.sort();
+    println!("1000 presses of play and stop: median {:?}, 99 % {:?}, longest {:?}", took[500], took[990], took[999]);
 }

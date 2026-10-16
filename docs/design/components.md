@@ -1,6 +1,6 @@
 ---
 description: Measurements, states and tokens of every UI component, from the minimal v3 mockups
-read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
+read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout, audition button, velocity lane top edge, ghost menu, ghost notes look, Scale menu, scale rows, key column mark, folded rows
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -322,6 +322,8 @@ A page starts with its title (10 px `text.hint` over a 1 px `border`), level wit
 the list; each setting is a 34 px row with its name (11 px `text.primary`), a note under it
 (10 px `text.secondary`) and its control on the right: a segmented control of 64 px per part, or a 260 px dropdown
 (Settings › Audio). A read-only setting (Audio › Now: Output, Latency) shows its value as the note.
+The page is drawn under the title only; the General page, taller than a small window, scrolls with
+the wheel over it, as far as its last row and no further.
 
 | Page | Setting | Values |
 |---|---|---|
@@ -337,7 +339,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | General › Transport | Play from | Marker (default): Play and Space start from the play start marker; Selected clip: from the start of the clip selected in the Arrangement view, the marker moving there ([spec](../spec/arrangement-editing.md) › Play position) |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | General › Piano roll | Toolbar size: Normal, Large (default), Larger; the toolbar's box, gaps and icon strokes scale with it ([clip editor spec](../spec/ui-clip-editor.md) › Layout) |
-| General › Piano roll | Left click draws, Right click deletes a note, Shift+right click splits, Alt+right plays from the point: the four mouse switches of the **Mouse-first** preset, each on or off on its own, kept in `keymap.json` ([shortcuts](../shortcuts.md) › Presets) |
+| General › Piano roll | Click on empty grid, Right click on a note, Shift+right drag, Alt+right button, Duplicate key, Double-click on empty grid, Double-click on a note: the workflow settings, one segmented control each (64 px a part, short choices such as Selects and Draws); changing one makes the workflow Custom; kept in `keymap.json` ([shortcuts](../shortcuts.md) › Presets) |
 | Interface | Animations | On (default), Off |
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |
 | Interface | Double-click makes a clip | On (default): a double-click on an empty slot (Session view) or an empty spot of a lane (Arrangement view) of a track that plays notes makes an empty MIDI clip (`clip.create`); Off: it does nothing ([spec](../spec/ui-session-view.md) › Clip slots) |
@@ -531,11 +533,16 @@ eases over 120 ms. The clip's name keeps 6 px clear of it and is shortened with 
 
 ## Clip editor (MIDI)
 
-Built so far (`crates/ui/src/piano_roll.rs`): the 16 px ruler with bar numbers and lines, the 36 px
+Built so far (`crates/ui/src/piano_roll.rs`, the ruler in `crates/ui/src/piano_roll_ruler.rs`): the 24 px ruler (the 8 px clip loop row over 16 px of bar numbers and lines, with the start and end markers), the 36 px
 key column, the note rows, notes and the velocity lane (72 px, or 30 % of the detail area's height
 when that is less, with 127 and 1 in its scale column). Rows are drawn as white-key rows
-(`panel.background`) and black-key rows (`window.background`) until the clip has a scale; the
-grid's lines are `border`, bar lines `border.strong`; the grid past the clip's end is darkened.
+(`panel.background`) and black-key rows (`window.background`) until the clip has a scale; with
+one, the rows of the keys in the scale are `control.background`, its root's `control.hoverBackground`,
+and the others `window.background`, and each key in the scale has a 2 px mark at the right edge of
+the key column, 1 px in from the column's line, in `text.secondary` (the root's `text.value`); the
+grid's lines are `border`, bar lines `border.strong`; the grid outside the part of the content the
+clip plays (before its start marker or loop, past its loop's end or end marker) is darkened, and
+the notes there are drawn at 0.45 of their opacity.
 A rectangle being dragged is a 1 px `text.secondary` outline. The toolbar is built too
 ([#442](https://github.com/suhina-daw/suhina-daw/issues/442), icons
 [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
@@ -555,13 +562,49 @@ arrow, an arrow. After a 1 px `border.strong` divider and 5 px,
 the note clipboard's Cut, Copy, Paste and Duplicate icons, greyed out (`text.hint`, no highlight)
 when there is nothing to act on; then the quantise icon (notes snapping onto a line), which shows
 the MIDI tools column with the quantise block open, and the **MIDI tools** icon (three horizontal
-sliders, `control.activeBackground` while the column shows), which shows and hides that column.
+sliders, `control.activeBackground` while the column shows), which shows and hides that column,
+and the **Audition** icon (headphones: a 1.1 px band over two filled 3 × 5 px cups,
+`control.activeBackground` with a `text.primary` shape while on, off at start; accessible label
+"Audition"), which makes drawn and moved notes sound once.
+4 px after it the 96 px **workflow menu**: the mode's name in 10 px `text.value`, its menu
+the four modes as selectable rows, a divider, and one row per workflow setting ("Double-click on a
+note: Deletes it") opening a submenu of its choices, the chosen one highlighted; it is left out when
+the toolbar is too narrow for it and the grid menu.
+After it the 64 px **ghost menu**: "Ghosts" in 10 px `text.value` (`text.hint` while it
+shows none), its accessible label and tooltip naming what it shows ("Ghost notes Playing
+together"); its menu the rows None, Playing together and This track, the chosen one highlighted, a
+divider, and **Clip…** opening a submenu of every other MIDI clip ("Walk on Bass at bar 17"),
+scrolling past 320 px. It is left out, before the workflow menu, when the toolbar is too narrow for
+it and the grid menu. **Ghost notes** are plain rectangles in their own track's colour at 0.25,
+under the clip's notes, with no name, edge or velocity stem
+([clip editor spec](../spec/ui-clip-editor.md) › Ghost notes).
+After it the **Scale menu** (at most 56 px): "Scale" in 10 px `text.value` (`text.hint` while the
+clip has no scale), its accessible label and tooltip naming the scale ("Scale D dorian", "Scale
+off"); its menu the row Off, a divider, **Root: D** and **Mode: Dorian** opening submenus of the
+twelve roots and the modes, a divider, and the toggles **Fold** and **Fold to scale** (greyed out
+without a scale), the chosen ones highlighted. The workflow, ghost and Scale menus each take the
+width their button needs, 4 px after the one before; the Scale menu is left out when the grid
+value would not fit after it, and the "Grid" caption is left out first when it needs the room.
+Folded, the rows are drawn the same way with no gap for the keys left out, and every key-column
+row is named in 9 px mono `text.secondary` when it is at least 8 px tall
+([clip editor spec](../spec/ui-clip-editor.md) › Scale and key).
+Each toolbar menu's button ends in a small filled triangle, 6 px wide, drawn as a shape 7 px from
+its right edge in the button's text colour.
 At the right end
-"Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`), then the
+"Grid" in 10 px `text.hint` and a 76 px grid menu button (its value in 10 px mono `text.value`). Its menu lists, in 10 px text and separated by dividers: **Snap to grid**; the heading
+"Adaptive grid" in `text.hint` and the five widths; the heading "Fixed grid" and the nine values;
+**Narrow grid** and **Widen grid**; **Triplet grid**. Each entry's key is right-aligned in 10 px
+mono `text.hint`; the chosen entries are highlighted as selected, and an entry the control bar
+cannot hold is greyed out while the piano roll follows it. Then the
 **Hide editor** button: a box as tall as the tool buttons with a 1.1 px × in `text.secondary`
 (`text.primary` on `control.hoverBackground` hovered), 3 px from the right edge. The piano roll's
-least height is 120 px of detail area (the toolbar, the 16 px ruler and five 12 px key rows; the
-velocity lane is left out when it would leave fewer than five rows or be under 12 px). Notes a draw or
+least height is 120 px of detail area (the toolbar, the 24 px ruler and five 12 px key rows; the
+velocity lane is left out when it would leave fewer than five rows or be under 12 px). The lane's
+top edge (the 1 px `border.strong` line over it) is grabbed within 3 px either side, the pointer a
+vertical resize cursor: dragged, the lane is 24 to 480 px tall, never leaving fewer than five key
+rows. A velocity line being drawn in the lane is 1 px `accent`; an Alt+drag on a note shows its
+velocity over it, "Velocity 112" in 9 px mono `text.primary` on a 76 × 14 px `control.background`
+box with 2 px corners. Notes a draw or
 paint drag is making are the track colour at 0.7 with a 1 px `text.primary` inset; notes an erase
 drag has passed over fade to 0.12; the cut line of a slice drag is 1 px `accent`, and a note it
 would split is marked with a 1 px `accent` line over it. A key with the pointer over it, or one
@@ -584,8 +627,8 @@ The rest of this table is planned.
 | Clip properties | 20 px title with 2 px clip-colour strip; 6 px padding and group gap; each pair = labels row (10 px `text.secondary`) and values row (15 px mono fields); Loop as a 15 px toggle; with notes selected, a Notes row "N of M" and, under it, From, To, Pitch and Velocity rows in the same pair shape, all 10 px/15 px |
 | MIDI tools | 112 px on `panel.background` with a 1 px `border` on its right; 10 px head ("Selected notes" / "Whole clip") with a 10 px `text.hint` count under it; the quantise block (above); Transpose as a 64 px value field with −/+ steppers; then a two-column grid of 18 px buttons (×2, ÷2, Fit scale, Invert, Humanise, Reverse, Legato, and the velocity Randomise) plus a Ramp row of two 48 px fields (From, To) |
 | Toolbar | 22 px at Toolbar size Normal, 28 px at Large, 33 px at Larger (built: the six tool icons, the clipboard's four, the quantise icon, the MIDI tools icon and the grid value); later also tabs (current has a 1 px underline), divider, Fold, Scale (on = `#C9C4BB`), scale name |
-| Ruler | 16 px; bar numbers `#C9C4BB`, beats `text.hint`; bar lines `#5A5751`, beat lines `#34332F` |
-| Clip loop | 8 px row, 4 px bar `control.activeBackground`, 2 × 8 handles `text.primary` |
+| Ruler | 24 px: the 8 px clip loop row, then 16 px of bar numbers (10 px mono `text.value`) and `border.strong` bar lines (built); later beats `text.hint` and beat lines `#34332F`. The start marker is a 1 px `text.primary` line down the bar-number row with a 6 × 7 px flag at its top pointing right; the end marker (a clip that does not loop) the same flag pointing left. Within 4 px of a marker a press drags it (the cursor shows resizing); anywhere else a drag zooms time (up out, down in) and scrolls it (sideways) (built) |
+| Clip loop | 8 px row on `window.background` with a 1 px `border` under it; a 4 px bar, centred, from the loop start to the loop end: looping, `control.activeBackground` with a 1 px `text.secondary` inset and 2 × 8 px handles `text.primary`; not looping, where turning the loop on would put it, `control.background` with a `text.hint` inset and handles. Within 4 px of a handle a press drags it, the middle moves the loop (the cursor grabs), on the piano roll's grid, Alt for free; a click on the bar turns the loop on or off (built) |
 | Key column | 36 px; white keys `control.background`, black keys `window.background`; the key under the pointer or playing `control.hoverBackground`; 2 px scale mark `#6E6A63`; C labels with octave (C3 = MIDI 60) |
 | Note rows | Scale rows `#23221F`, others `#1A1917`; 1 px row lines `#2A2926`, under C `border.strong` |
 | Note | Track colour; opacity 0.4 + 0.6 × velocity / 127; name in 9 px when ≥ 2 beats wide; 1 px gap to neighbours; selected = 1 px `text.primary` inset |

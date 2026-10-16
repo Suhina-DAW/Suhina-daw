@@ -345,8 +345,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   another and answers once, which at small buffers takes about a third of the time of a round
   trip each, with the same sound
   ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)).
-- Still to do: waiting for each chain's plug-in as it answers
-  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), checking an imported Live Set
+- Each track's chain goes on to its next plug-in as soon as its own plug-in answers, while the
+  other tracks' plug-ins are still working, so heavy plug-ins on different tracks cost a block
+  about one heavy plug-in, and a slow or hung plug-in holds up only its own track
+  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)).
+- Still to do: checking an imported Live Set
   with real plug-ins ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and
   macOS editors, VST2 hosting (not decided).
 
@@ -676,6 +679,53 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
   (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
   their own, kept in `keymap.json`.
+- **Piano roll workflow modes** ([#490](https://github.com/suhina-daw/suhina-daw/issues/490)): a
+  workflow menu in the piano roll's toolbar switches between Select-first, Draw-first, Mouse-first
+  and **Custom** at any time; every behaviour that differs between them (click on empty grid,
+  right-click on a note, Shift+right, Alt+right, the duplicate key, double-click on empty grid and
+  on a note) is a setting of its own, and changing one makes the mode Custom, kept in
+  `keymap.json`. A double-click is counted by the piano roll itself, so it works right after
+  another click, adds one note in Mouse-first instead of adding and deleting it, and mutes or
+  erases one note in the Mute and Erase tools.
+- **The piano roll's grid menu** ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)): the
+  grid value at the right end of the piano roll's toolbar opens one menu with **Snap to grid**, an
+  **adaptive grid** in five widths whose lines get finer as the view zooms in and coarser as it
+  zooms out, the **fixed** values from 8 bars to 1/32, **Narrow grid** and **Widen grid**, and
+  **Triplet grid**, each with its key: Ctrl+1 and Ctrl+2 make the grid finer and coarser, Ctrl+3
+  toggles triplets and Ctrl+4 snapping (in the keymap). With snapping off the lines stay and notes
+  are placed freely.
+- **The piano roll's ruler** ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)): an
+  8 px loop row shows the clip's loop as a bar with a handle at each end, and the bar numbers under
+  it the clip's start marker and, for a clip that does not loop, its end marker; dragging a handle,
+  the bar or a marker changes the loop, the start or the length on the piano roll's grid (Alt
+  free), one undo step each (`clip.setLoop {start, end}`, which now takes arrangement clips too,
+  `clip.setStart`, `clip.setLength`), and a click on the bar turns the loop on or off. Notes
+  outside the part the clip plays are shaded like the grid past its end. Dragging the ruler up and
+  down zooms time, sideways scrolls it; **Z** zooms to the selected notes and **Shift+Z** to the
+  whole clip.
+- **The piano roll's note gestures** ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):
+  dragging a note's left edge moves the selection's starts and keeps their ends (on the grid, Alt
+  free; `note.resize {startBy}`); Ctrl+drag (Cmd on macOS) copies the selection to where it is let
+  go and selects the copies (`note.duplicate {beats, semitones}`); Alt+drag on a note changes the
+  selection's velocity and shows the value; a drag from an empty spot of the velocity lane draws a
+  line that sets every stem it spans in one step (`note.setVelocity {velocities}`); the lane's top
+  edge drags it taller or shorter; and the toolbar's **Audition** button (off at start) makes drawn
+  and moved notes sound once through the track's instrument (`preview.noteOn {keys}`).
+- **Ghost notes in the piano roll** ([#348](https://github.com/suhina-daw/suhina-daw/issues/348)):
+  the notes of other clips are drawn faintly behind the edited clip's, in their own track's colour,
+  so a part can be written against another (a bass line against the chords). The toolbar's
+  **Ghosts** menu shows the clips playing at the same time (the default; for a slot's clip, the
+  other slots of its scene), the other clips of the same track, one clip picked from a list, or
+  none. Ghost notes are mapped through each clip's start, offset and loop, never take a click, and
+  the choice is a view setting kept until Suhina closes, not saved with the project.
+- **Clip scales and folding in the piano roll** ([#347](https://github.com/suhina-daw/suhina-daw/issues/347)):
+  a MIDI clip can have a scale (a root, C to B, and a mode: major, minor, harmonic and melodic
+  minor, the church modes, the pentatonics and blues), saved with the project. The toolbar's
+  **Scale** menu sets it (`clip.setScale`, one undo step) and the rows of its keys are lighter, with
+  a mark on the key column; **Fold** shows only the keys that have notes and **Fold to scale** the
+  scale's keys (and any key with a note), and clicks, drawing and drags work on the rows shown. The
+  project's default scale (`project.setDefaultScale`) is taken by new MIDI clips, and
+  `note.fitToScale` fits to the clip's scale when given none.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the

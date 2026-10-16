@@ -35,25 +35,11 @@ fn max_diff(a: &[f32], b: &[f32], skip: Option<std::ops::Range<usize>>) -> f32 {
 }
 
 fn note(time: f64, duration: f64, key: u8) -> Note {
-    Note { time, duration, key, velocity: 0.8, release_velocity: 0.5, channel: 0, muted: false }
+    Note::new(time, duration, key, 0.8)
 }
 
 fn clip(content: u32, start: f64, length: f64) -> Clip {
-    Clip {
-        content: ContentId(content),
-        start,
-        length,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-    }
+    Clip::new(ContentId(content), start, length)
 }
 
 /// The blank project with a notes content on track 1 ("1 MIDI") placed by `clips`.
@@ -65,6 +51,7 @@ fn midi_project(notes: Vec<Note>, clips: Vec<Clip>) -> Project {
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     let lane = p.arrangement.lanes.iter_mut().find(|l| l.track == Some(TrackId(1))).unwrap();
     lane.clips = clips;

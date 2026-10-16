@@ -29,6 +29,10 @@ pub mod mixer_strip;
 pub mod motion;
 pub mod nesting;
 pub mod piano_roll;
+pub mod piano_roll_ghosts;
+pub mod piano_roll_grid;
+pub mod piano_roll_ruler;
+pub mod piano_roll_scale;
 pub mod pick;
 pub mod project_dialog;
 pub mod sample_map;
@@ -46,5 +50,6 @@ pub mod timeline;
 pub mod view_settings;
 pub mod waveform;
 pub mod widgets;
+pub mod workflow;
 
 pub use app::{App, NewProject, OpenAs, Status, View};

@@ -118,12 +118,21 @@ class UpdateReport(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.doc = Path(self.tmp.name) / "report.md"
+        # main() sets the command count from the list it reads; restore it for the other tests.
+        patcher = mock.patch.object(score, "COMMANDS", score.COMMANDS)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         # The figures and the headline read target/parity/ when it exists; point them at an empty
         # directory so the test does not depend on a local measurement.
         patcher = mock.patch.object(update_report, "REPO", Path(self.tmp.name))
         patcher.start()
         self.addCleanup(patcher.stop)
         self.keys = list(update_report.values(self.devices()).keys())
+        self.commands = Path(self.tmp.name) / "commands.md"
+        self.commands.write_text(
+            "# Commands\n\n| Command | Kind | What it does | Parameters |\n|---|---|---|---|\n"
+            "| `a.one` | edit | One | none |\n| `a.two` | edit | Two | none |\n"
+            "| `a.three` | read | Three | none |\n", encoding="utf-8")
 
     @staticmethod
     def devices():
@@ -139,7 +148,7 @@ class UpdateReport(unittest.TestCase):
         return "".join(parts)
 
     def run_main(self, *args):
-        argv = ["update_report.py", "--doc", str(self.doc), *args]
+        argv = ["update_report.py", "--doc", str(self.doc), "--commands", str(self.commands), *args]
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.object(sys, "argv", argv), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -179,6 +188,39 @@ class UpdateReport(unittest.TestCase):
         self.assertEqual(code, 0)
         self.run_main()
         self.assertEqual(self.doc.read_text(encoding="utf-8"), once)
+
+    def test_check_inputs_passes_on_stale_and_on_current_sections(self):
+        # A pull request passes whether it left the marked sections stale or regenerated them.
+        text = self.stale_doc()
+        self.doc.write_text(text, encoding="utf-8")
+        code, _ = self.run_main("--check-inputs")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.doc.read_text(encoding="utf-8"), text)
+        self.run_main()
+        code, _ = self.run_main("--check-inputs")
+        self.assertEqual(code, 0)
+
+    def test_check_inputs_still_refuses_a_missing_marker(self):
+        text = self.stale_doc().replace(
+            "<!-- parity:begin gap-table -->stale<!-- parity:end -->", "")
+        self.doc.write_text(text, encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            self.run_main("--check-inputs")
+        self.assertIn("no marker for gap-table", str(caught.exception.code))
+
+    def test_command_count_comes_from_the_generated_list(self):
+        self.doc.write_text(self.stale_doc(), encoding="utf-8")
+        self.run_main()
+        self.assertIn("| Commands | **3**,", self.doc.read_text(encoding="utf-8"))
+
+    def test_command_count_counts_only_table_rows(self):
+        self.assertEqual(update_report.command_count(self.commands), 3)
+        empty = Path(self.tmp.name) / "empty.md"
+        empty.write_text("# Commands\n\nNo `table` here.\n", encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            update_report.command_count(empty)
+        with self.assertRaises(SystemExit):
+            update_report.command_count(Path(self.tmp.name) / "missing.md")
 
     def test_unknown_marker_is_refused(self):
         self.doc.write_text(self.stale_doc(

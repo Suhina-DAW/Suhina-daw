@@ -1318,7 +1318,7 @@ mod tests {
         assert!(with_value > parameter_height(&parameter));
     }
     use crate::demo::demo_project;
-    use suhina_engine::model::{Device, DeviceParam, Extensions};
+    use suhina_engine::model::{Device, DeviceParam};
 
     #[test]
     fn a_selected_clip_shows_its_properties() {
@@ -1358,13 +1358,9 @@ mod tests {
     fn a_selected_track_shows_its_devices() {
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
-            name: "Utility".into(),
-            kind: DeviceKind::Builtin("utility".into()),
             enabled: false,
-            state: None,
             params: vec![DeviceParam::new("gain", -3.5)],
-            automation: Vec::new(),
-            extensions: Extensions::default(),
+            ..Device::new("Utility", DeviceKind::Builtin("utility".into()))
         });
         let Detail::Devices(chain) = build(&project, Some(TrackId(1)), None) else { panic!() };
         assert_eq!(chain.devices.len(), 1);
@@ -1397,13 +1393,8 @@ mod tests {
             vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
-            name: "Example Gain".into(),
-            kind: DeviceKind::Sd,
-            enabled: true,
             state: graph.to_sd().ok().map(String::into_bytes),
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
+            ..Device::new("Example Gain", DeviceKind::Sd)
         });
         let Detail::Devices(chain) = build(&project, Some(TrackId(1)), None) else { panic!() };
         assert_eq!(chain.devices[0].kind, "AudioEffect");
@@ -1448,15 +1439,9 @@ mod tests {
             graph.nodes = vec![Node::audio_input("in"), Node::gain("gain", "gain"), Node::audio_output("out")];
             graph.connections = vec![Connection::new("in", "gain"), Connection::new("gain", "out")];
             let mut project = demo_project();
-            project.channels[0].devices.push(Device {
-                name: "UI".into(),
-                kind: DeviceKind::Sd,
-                enabled: true,
-                state: Some(graph.to_sd().unwrap().into_bytes()),
-                params: Vec::new(),
-                automation: Vec::new(),
-                extensions: Extensions::default(),
-            });
+            project.channels[0]
+                .devices
+                .push(Device { state: Some(graph.to_sd().unwrap().into_bytes()), ..Device::new("UI", DeviceKind::Sd) });
             let detail = build(&project, Some(TrackId(1)), None);
             let ctx = egui::Context::default();
             theme::install(&ctx);
@@ -1504,13 +1489,8 @@ mod tests {
         }
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
-            name: graph.name.clone(),
-            kind: DeviceKind::Sd,
-            enabled: true,
             state: Some(graph.to_sd().unwrap().into_bytes()),
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
+            ..Device::new(graph.name.clone(), DeviceKind::Sd)
         });
         let detail = build(&project, Some(TrackId(1)), None);
         let mut harness =
@@ -1533,13 +1513,8 @@ mod tests {
         let graph = custom_panel::build().unwrap();
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
-            name: graph.name.clone(),
-            kind: DeviceKind::Sd,
-            enabled: true,
             state: Some(graph.to_sd().unwrap().into_bytes()),
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
+            ..Device::new(graph.name.clone(), DeviceKind::Sd)
         });
         let detail = build(&project, Some(TrackId(1)), None);
         let mut harness =
@@ -1562,13 +1537,8 @@ mod tests {
         let graph = custom_panel::build().unwrap();
         let mut project = demo_project();
         project.channels[0].devices.push(Device {
-            name: graph.name.clone(),
-            kind: DeviceKind::Sd,
-            enabled: true,
             state: Some(graph.to_sd().unwrap().into_bytes()),
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
+            ..Device::new(graph.name.clone(), DeviceKind::Sd)
         });
         let detail = build(&project, Some(TrackId(1)), None);
         if let Detail::Devices(chain) = &detail {
@@ -1608,15 +1578,9 @@ mod tests {
 
     fn with_plugin() -> Project {
         let mut project = demo_project();
-        project.channels[0].devices.push(Device {
-            name: "Verb".into(),
-            kind: DeviceKind::Vst3 { id: "ABC".into() },
-            enabled: true,
-            state: Some(vec![1, 2]),
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
-        });
+        project.channels[0]
+            .devices
+            .push(Device { state: Some(vec![1, 2]), ..Device::new("Verb", DeviceKind::Vst3 { id: "ABC".into() }) });
         project
     }
 

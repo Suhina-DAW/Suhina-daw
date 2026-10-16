@@ -18,63 +18,22 @@ const BEAT: usize = SR as usize / 2;
 /// an empty slot without a stop button in scene 1 and a loop in scene 2.
 fn project() -> Project {
     let track = |id: u32, name: &str| Track {
-        id: TrackId(id),
-        name: name.into(),
-        color: None,
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
-        parent: None,
-        extensions: Extensions::default(),
-        audio_input: Default::default(),
-        midi_input: Default::default(),
+        ..Track::new(TrackId(id), name)
     };
-    let channel = |id: u32| Channel {
-        id: ChannelId(id),
-        name: format!("C{id}"),
-        role: ChannelRole::Regular,
-        volume: 1.0,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices: Vec::new(),
-        extensions: Extensions::default(),
-        automation: Vec::new(),
-    };
+    let channel = |id: u32| Channel::new(ChannelId(id), format!("C{id}"));
     let content = |id: u32| ClipContent {
         id: ContentId(id),
         name: format!("Loop {id}"),
         length: 1.0,
-        lanes: vec![ContentLane {
-            target: None,
-            data: LaneData::Notes(vec![Note {
-                time: 0.0,
-                duration: 0.25,
-                key: 60,
-                velocity: 1.0,
-                release_velocity: 0.5,
-                channel: 0,
-                muted: false,
-            }]),
-        }],
+        lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 0.25, 60, 1.0)]) }],
         extensions: Extensions::default(),
+        scale: None,
     };
     let clip = |content: u32| Clip {
-        content: ContentId(content),
-        start: 0.0,
-        length: 1.0,
-        offset: 0.0,
         loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-        follow_action: Default::default(),
+        ..Clip::new(ContentId(content), 0.0, 1.0)
     };
     Project {
         tracks: vec![track(1, "Drums"), track(2, "Bass")],

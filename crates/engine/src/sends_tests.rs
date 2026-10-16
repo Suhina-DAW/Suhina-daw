@@ -9,34 +9,14 @@ use crate::chain_tests::{SR, blocks, device, left, max_diff, peak};
 use crate::{Renderer, render_offline};
 
 fn channel(id: u32, role: ChannelRole, devices: Vec<Device>) -> Channel {
-    Channel {
-        id: ChannelId(id),
-        name: format!("C{id}"),
-        role,
-        volume: 1.0,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices,
-        automation: Vec::new(),
-        extensions: Extensions::default(),
-    }
+    Channel { role, devices, ..Channel::new(ChannelId(id), format!("C{id}")) }
 }
 
 fn track(id: u32, notes: bool) -> Track {
     Track {
-        id: TrackId(id),
-        name: format!("T{id}"),
-        color: None,
         content: ContentKinds { notes, audio: false },
         channel: Some(ChannelId(id)),
-        parent: None,
-        extensions: Extensions::default(),
-        audio_input: Default::default(),
-        midi_input: Default::default(),
+        ..Track::new(TrackId(id), format!("T{id}"))
     }
 }
 
@@ -45,21 +25,7 @@ fn track(id: u32, notes: bool) -> Track {
 fn sending(level: f64, pre_fader: bool, return_devices: Vec<Device>) -> Project {
     let mut source = channel(1, ChannelRole::Regular, vec![]);
     source.sends.push(Send { target: ChannelId(2), level, pre_fader });
-    let clip = Clip {
-        content: ContentId(1),
-        start: 0.0,
-        length: 1.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        extensions: Extensions::default(),
-        launch: Default::default(),
-    };
+    let clip = Clip::new(ContentId(1), 0.0, 1.0);
     Project {
         tracks: vec![track(1, true), track(2, false), track(3, false)],
         channels: vec![
@@ -76,6 +42,7 @@ fn sending(level: f64, pre_fader: bool, return_devices: Vec<Device>) -> Project 
                 data: LaneData::Notes(vec![crate::chain_tests::note(0.0, 1.0, 69)]),
             }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip] }],

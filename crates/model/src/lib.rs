@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 pub mod automation;
+mod build;
 mod tempo;
 
 pub use tempo::{
@@ -20,8 +21,10 @@ pub use tempo::{
 
 mod launch;
 mod mapping;
+mod scale;
 pub use launch::{LaunchMode, LaunchQuantization, LaunchSettings};
 pub use mapping::{KEY_NAME_MAX, LaunchMapping, MappingSource, MappingTarget};
+pub use scale::{ROOT_NAMES, Scale, ScaleMode};
 
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -51,6 +54,9 @@ pub struct Project {
     pub arrangement: Arrangement,
     pub launcher: Launcher,
     pub extensions: Extensions,
+    /// The scale a new MIDI clip takes, if any; clips made before it was set keep theirs
+    /// ([ADR 0001](../../docs/decisions/0001-daw-neutral-model.md) › Amendment: clip scales).
+    pub default_scale: Option<Scale>,
 }
 
 /// The song's tempo and time signature: `tempo_bpm` and `time_signature` hold from the start,
@@ -321,6 +327,9 @@ pub struct ClipContent {
     pub length: f64,
     pub lanes: Vec<ContentLane>,
     pub extensions: Extensions,
+    /// The scale the notes are written in, if any: the piano roll marks its keys
+    /// ([ADR 0001](../../docs/decisions/0001-daw-neutral-model.md) › Amendment: clip scales).
+    pub scale: Option<Scale>,
 }
 
 /// One lane of a clip content. `target` is `None` when the lane plays on whichever track the
@@ -1062,57 +1071,23 @@ mod tests {
     use super::*;
 
     fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.25, key, velocity: 0.8, release_velocity: 0.5, channel: 0, muted: false }
+        Note::new(time, 0.25, key, 0.8)
     }
 
     fn track(id: u32, channel: u32) -> Track {
         Track {
-            id: TrackId(id),
-            name: format!("Track {id}"),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(channel)),
-            parent: None,
-            midi_input: Default::default(),
-            audio_input: Default::default(),
-            extensions: Extensions::default(),
+            ..Track::new(TrackId(id), format!("Track {id}"))
         }
     }
 
     fn channel(id: u32) -> Channel {
-        Channel {
-            id: ChannelId(id),
-            name: format!("Channel {id}"),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: Vec::new(),
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }
+        Channel::new(ChannelId(id), format!("Channel {id}"))
     }
 
     fn clip(content: u32, start: f64) -> Clip {
-        Clip {
-            content: ContentId(content),
-            start,
-            length: 4.0,
-            offset: 0.0,
-            loop_range: None,
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
-            follow_action: Default::default(),
-            launch: Default::default(),
-            extensions: Extensions::default(),
-        }
+        Clip::new(ContentId(content), start, 4.0)
     }
 
     #[test]
@@ -1158,6 +1133,7 @@ mod tests {
                     length: 4.0,
                     lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note(0.0, 36)]) }],
                     extensions: Extensions::default(),
+                    scale: None,
                 },
                 ClipContent {
                     id: ContentId(2),
@@ -1165,6 +1141,7 @@ mod tests {
                     length: 4.0,
                     lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note(1.0, 38)]) }],
                     extensions: Extensions::default(),
+                    scale: None,
                 },
             ],
             arrangement: Arrangement {
@@ -1204,6 +1181,7 @@ mod tests {
                 ContentLane { target: Some(TrackId(2)), data: LaneData::Notes(vec![note(1.0, 38), note(3.0, 38)]) },
             ],
             extensions: Extensions::default(),
+            scale: None,
         };
         let project = Project {
             tracks: vec![track(1, 1), track(2, 2)],
@@ -1314,6 +1292,7 @@ mod tests {
             length: 4.0,
             lanes: Vec::new(),
             extensions: Extensions::default(),
+            scale: None,
         };
         let project = Project {
             contents: vec![content],
