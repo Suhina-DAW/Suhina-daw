@@ -1,9 +1,9 @@
 ---
-description: Automation envelopes - lanes of points over the arrangement for a track's volume, pan and mute and every device parameter, curves and jumps, how the engine plays them, a manual change turning a lane off, and the automation.* commands
+description: Automation envelopes - lanes of points over the arrangement for a track's volume, pan and mute and every built-in, .sd and plug-in parameter, curves and jumps, how the engine plays them, a manual change turning a lane off, and the automation.* commands
 read_when: automation, envelope, automation lane, automation lanes view, show automation, automation.movePoints, automation.deletePoints, select points, breakpoint, automation point, curve, automation.addPoint, automation.movePoint, automation.deletePoint, automation.clear, automation.setEnabled, automation.list, device.setAutomation, automation off, re-enable automation, volume automation, pan automation, mute automation, device parameter automation, AutomationLane, AutomationPoint, MixLanes, DeviceLanes, Envelope
 type: spec
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/model/src/automation.rs
   - crates/engine/src/automation.rs
@@ -34,6 +34,7 @@ MCP) and drawn and edited in the Arrangement view (#420, [below](#in-the-arrange
 | A track's pan | `pan` | -1 (left) to 1 (right) |
 | A track's mute | `mute` | 0 (sounding) or 1 (muted), a step |
 | A built-in effect or instrument's parameter | its stable id (`devices.list`) | in the parameter's unit, kept in its range as `device.setParam` keeps it |
+| A data-only `.sd` device's parameter | its stable id in the `.sd` graph | in its unit and range; discrete controls step |
 | A plug-in's parameter | its id, a number (`device.pluginParams`) | in the plug-in's own range (#109) |
 
 Send levels get lanes once sends play (#396). The master channel's mixer is not automated yet.
@@ -72,12 +73,13 @@ The engine runs one render path (offline renders and playback alike), turns lane
 arrangement frames when the graph is built (at the project's tempo), and allocates nothing on the
 audio thread.
 
-- **Device parameters** (built-in): while the transport runs, the parameter is set at every point
+- **Device parameters** (built-in and `.sd`): while the transport runs, the parameter is set at every point
   that falls inside a block and at every 64th frame of the arrangement (1.3 ms at 48 kHz) where its
   value changed, and at a block's first frame when the transport has just started or moved. The
   device's chain splits its block there, so a jump lands on its frame and the device smooths the
-  change as it smooths any parameter (ADR 0004, decision 5). A fresh device starts at the lane's
-  value at beat 0. While stopped, a parameter keeps its last value.
+  change as it smooths any parameter (ADR 0004, decision 5). `.sd` processors receive the same
+  changes through their parameter API; integer, toggle, button and choice controls step. A fresh
+  device starts at the lane's value at beat 0. While stopped, a parameter keeps its last value.
 - **Plug-in parameters**: as #109 built them (ADR 0006 › 3): a value at the block's start, at
   each point and every 64 frames while it moves, as parameter events at their frames; the curve
   and the enabled flag apply too.
@@ -111,7 +113,7 @@ mixer) and `param`. Values are in the unit of the parameter's set command.
 | `automation.clear {track, device?, param?}` | removes a lane, or every lane of the mixer or the device |
 | `automation.setEnabled {track, device?, param, enabled}` | turns a lane off or on again |
 | `automation.list {track}` | the track's lanes: `mixer` and `devices` (index, name, lanes), each with `param`, `enabled` and `points` (`beat`, `value`, `curve`) |
-| `device.setAutomation {track, device, param, points}` | replaces a device lane with straight segments (`points` a flat list of beat and value; `[]` removes it), built-in devices as well as plug-ins |
+| `device.setAutomation {track, device, param, points}` | replaces a device lane with straight segments (`points` a flat list of beat and value; `[]` removes it), for built-in devices, `.sd` devices and plug-ins |
 
 Refused, changing nothing: an unknown track, device or parameter; a beat below 0 or past the
 arrangement's limit; a value out of range for the mixer (a volume above +6 dB, a pan outside -1 to
@@ -128,10 +130,9 @@ the main track have no lanes yet.
 
 A lane is 40 px tall across the timeline, with a header under the track's:
 
-- **The parameter**, a dropdown of the track's volume, pan and mute and each built-in effect or
-  instrument's parameters, grouped by device; a parameter with points is marked " •". Choosing
-  one shows it in this lane. Plug-in parameters are listed once their ranges are known to the
-  view (not yet).
+- **The parameter**, a dropdown of the track's volume, pan and mute and each built-in or `.sd`
+  device's parameters, grouped by device; a parameter with points is marked " •". Choosing one
+  shows it in this lane. Plug-in parameters can be set by command but are not yet in this dropdown.
 - **On/Off** (lanes with points): whether the lane plays. A manual change to the parameter turns
   it off (the envelope is drawn in `text.hint` and the header says "Off: set by hand"); a click
   turns it on again (`automation.setEnabled`), or off.

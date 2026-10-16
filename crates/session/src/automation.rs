@@ -13,7 +13,7 @@ use suhina_model::automation::{MAX_POINTS, MAX_VOLUME, MUTE, VOLUME, mixer_range
 use suhina_model::{AutomationLane, AutomationPoint, DeviceKind, TrackId};
 
 use crate::commands::{channel_param, number, to_db, track_id};
-use crate::devices::{device_index, is_plugin, plugin_param_id, plugin_value};
+use crate::devices::{device_index, is_plugin, plugin_param_id, plugin_value, sd_graph};
 use crate::{CommandError, Session};
 
 /// Below this many decibels a volume point is silence, as for `track.setVolume`.
@@ -37,6 +37,8 @@ enum Kind {
     Plain,
     /// A built-in device parameter, limited and rounded as the device takes it.
     Builtin(&'static suhina_device_api::ParamInfo),
+    /// A data-only device parameter's range and discrete behavior.
+    Sd { min: f64, max: f64, control: suhina_device_sdk::ParameterControl },
     /// A plug-in parameter by its id.
     Plugin(u32),
 }
@@ -63,16 +65,30 @@ fn target(session: &Session, params: &Value) -> Result<Target, CommandError> {
                 let id = plugin_param_id(param)?;
                 return Ok(Target { track, device: Some(index), param: id.to_string(), kind: Kind::Plugin(id) });
             }
-            let DeviceKind::Builtin(id) = &device.kind else {
-                return Err("this device has no parameters Suhina can automate (it is from another program)".into());
+            let kind = match &device.kind {
+                DeviceKind::Builtin(id) => {
+                    let info = suhina_device_registry::info(id)
+                        .ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
+                    let spec = info
+                        .param_index(param)
+                        .and_then(|i| info.params.get(i))
+                        .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
+                    Kind::Builtin(spec)
+                }
+                DeviceKind::Sd => {
+                    let graph = sd_graph(device)?;
+                    let spec = graph
+                        .parameters
+                        .iter()
+                        .find(|p| p.id == param)
+                        .ok_or_else(|| format!("{} has no parameter {param:?}", graph.name))?;
+                    Kind::Sd { min: spec.min, max: spec.max, control: spec.control }
+                }
+                _ => {
+                    return Err("this device has no parameters Suhina can automate (it is from another program)".into());
+                }
             };
-            let info =
-                suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
-            let spec = info
-                .param_index(param)
-                .and_then(|i| info.params.get(i))
-                .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
-            Ok(Target { track, device: Some(index), param: param.into(), kind: Kind::Builtin(spec) })
+            Ok(Target { track, device: Some(index), param: param.into(), kind })
         }
     }
 }
@@ -101,6 +117,24 @@ impl Target {
                 Ok(if self.param == MUTE { value.round() } else { value })
             }
             Kind::Builtin(spec) => Ok(spec.clamp(value)),
+            Kind::Sd { min, max, control } => {
+                let value =
+                    if value.is_finite() { value.clamp(min, max) } else { return Err("value must be finite".into()) };
+                Ok(
+                    if matches!(
+                        control,
+                        suhina_device_sdk::ParameterControl::Integer
+                            | suhina_device_sdk::ParameterControl::Toggle
+                            | suhina_device_sdk::ParameterControl::Button
+                            | suhina_device_sdk::ParameterControl::Choice
+                            | suhina_device_sdk::ParameterControl::Radio
+                    ) {
+                        value.round().clamp(min, max)
+                    } else {
+                        value
+                    },
+                )
+            }
             Kind::Plugin(id) => plugin_value(session, self.track, self.device.unwrap_or(0), id, value),
         }
     }
@@ -281,7 +315,7 @@ impl Target {
                 let (min, max) = mixer_range(&self.param).unwrap_or((value, value));
                 self.store(session, (value + delta).clamp(min, max))
             }
-            Kind::Builtin(_) | Kind::Plugin(_) => self.store(session, value + delta),
+            Kind::Builtin(_) | Kind::Sd { .. } | Kind::Plugin(_) => self.store(session, value + delta),
         }
     }
 }

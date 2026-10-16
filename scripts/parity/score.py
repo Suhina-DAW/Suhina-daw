@@ -169,8 +169,8 @@ CHAPTERS = [
     (25, "Instrument, Drum and Effect Racks", 20, 0.03, "absent",
      "A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/"
      "chain zones, drum pads or rack presets."),
-    (26, "Automation and Editing Envelopes", 22, 0.45, "partial",
-     "Envelopes for track volume, pan and mute, built-in device and plug-in parameters: breakpoints "
+    (26, "Automation and Editing Envelopes", 22, 0.46, "partial",
+     "Envelopes for track volume, pan and mute, built-in and .sd device parameters: breakpoints "
      "with curved segments and jumps, saved, played in playback and renders (64-frame steps, ramped "
      "mixer gains), a manual change turning a lane off until re-enabled. Lanes under each track in "
      "the Arrangement: a parameter chooser, points added, moved on the grid, selected and moved or "

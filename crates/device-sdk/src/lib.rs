@@ -921,7 +921,7 @@ mod tests {
         graph.connections = vec![Connection::new("in", "shift"), Connection::new("shift", "out")];
         let encoded = graph.to_sd().expect("valid MIDI graph serializes");
         assert_eq!(DeviceGraph::from_sd(&encoded).map(|g| g.role), Ok(DeviceRole::MidiEffect));
-        let prepared = graph.compile_midi().expect("valid MIDI graph");
+        let mut prepared = graph.compile_midi().expect("valid MIDI graph");
         let input = [
             (5, NoteEvent::On { key: 60, velocity: 0.75 }),
             (9, NoteEvent::Off { key: 60, velocity: 0.25 }),

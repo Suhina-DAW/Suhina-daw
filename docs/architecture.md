@@ -237,14 +237,15 @@ values at their frames while the transport runs. Each span the slot runs hands i
 the processor (`PluginProcessor::automate`), and the session's `Hosted` merges them with the
 block's notes for the host, which applies them sample-accurately.
 
-**Automation of built-in devices and the mixer** (#395, [spec](spec/automation.md)):
+**Automation of built-in and `.sd` devices and the mixer** (#395, [spec](spec/automation.md)):
 `engine::automation` turns lanes into arrangement frames when the graph is built. A chain's
 `DeviceLanes` plan each block's parameter changes with the plug-in events, and the chain splits
-its built-in devices' blocks at them; a track whose mixer has lanes gets a chain (one without
-devices when it has none) whose `MixLanes` give its gains frame by frame after its devices. The
-graph is built from a copy of the project with those mixer parameters at rest (volume 1, centred,
-not muted), so routing and gains need no second path. A manual change to an automated parameter
-turns its lane off, which is an edit that builds a new graph rather than a parameter message.
+its built-in and `.sd` devices' blocks at them; `.sd` processors receive parameter changes through
+the SDK's allocation-free setters. A track whose mixer has lanes gets a chain (one without devices
+when it has none) whose `MixLanes` give its gains frame by frame after its devices. The graph is
+built from a copy of the project with those mixer parameters at rest (volume 1, centred, not muted),
+so routing and gains need no second path. A manual change to an automated parameter turns its lane
+off, which is an edit that builds a new graph rather than a parameter message.
 
 **Plug-ins** (ADR 0006): `Projects::poll_plugins` (the window calls it every frame, commands
 call it too) keeps the active project's running plug-ins in line with it. A new plug-in device
@@ -281,8 +282,8 @@ renderer without a deadline.
   launched clips' stretch voices still run on the audio thread.
 - **Project files:** autosave, and a
   package that carries its audio ([ADR 0010](decisions/0010-project-files.md) › Not decided yet).
-- **Device automation and more chains:** drawing lanes in the UI, automation of sends and the
-  master channel, and a chain on the master channel
+- **Device automation and more chains:** automation of sends and the master channel, and a chain
+  on the master channel
   ([ADR 0004](decisions/0004-built-in-devices.md) › Not decided yet). Chains on tracks, groups
   and returns run, with plug-ins, sends and latency compensation; lanes play on devices and
   track mixers since #395, and `device.*` commands edit the chains.

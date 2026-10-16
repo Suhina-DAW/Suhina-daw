@@ -204,7 +204,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   files saved before October 2026, open in the app,
   `suhina-cli` and MCP like Live Sets do ([ADR 0010](docs/decisions/0010-project-files.md),
   [spec](docs/spec/suhina-format.md)).
-- Automation envelopes for a track's volume, pan and mute and every built-in device parameter:
+- Automation envelopes for a track's volume, pan and mute and every built-in and `.sd` device parameter:
   lanes of points with curves and jumps, edited point by point with `automation.addPoint`,
   `movePoint`, `deletePoint`, `clear`, `setEnabled` and `list`, saved in the project and followed by
   playback and renders (device parameters split at their points and every 64 frames, mixer gains
@@ -212,7 +212,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   turned on again ([#395](https://github.com/suhina-daw/suhina-daw/issues/395),
   [spec](docs/spec/automation.md)).
 - Automation lanes in the Arrangement view: the envelope button on a track header shows lanes
-  under the track, one per chosen parameter (volume, pan, mute, each built-in device parameter);
+  under the track, one per chosen parameter (volume, pan, mute, each built-in or `.sd` device parameter);
   a click adds a point on the grid (Alt: free), points are dragged, selected (a box, Shift-click)
   and moved or deleted together, a segment's curve is bent by dragging it, and a lane a manual
   change turned off is turned on again from its header; each edit one undo step through the
@@ -335,7 +335,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   project) and `device.setAutomation` draws a lane of beats and values over the arrangement,
   which playback and renders follow to the frame (a value every 64 frames while it moves)
   ([#109](https://github.com/suhina-daw/suhina-daw/issues/109)). Their lanes are set by command;
-  the Arrangement's lanes show built-in parameters only so far.
+  the Arrangement's lanes show built-in and `.sd` parameters only so far.
 - The render thread and the plug-in hosts' audio threads get real-time scheduling on Linux
   without setup: `SCHED_FIFO` where the user has real-time rights, otherwise through rtkit, the
   desktop's own service for it; on Windows they join MMCSS "Pro Audio". Where the system refuses,

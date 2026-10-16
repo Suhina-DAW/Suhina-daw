@@ -56,8 +56,14 @@ fn midi_transpose_parameter_updates_without_recompiling() {
     assert_eq!(effect.process(&input, &mut output), 1);
     assert_eq!(output[0].1, NoteEvent::On { key: 72, velocity: 0.8 });
     effect.set_parameter(0, -80.0);
+    assert_eq!(effect.process(&[(17, NoteEvent::Off { key: 60, velocity: 0.3 })], &mut output), 1);
+    assert_eq!(output[0], (17, NoteEvent::Off { key: 72, velocity: 0.3 }));
     assert_eq!(effect.process(&input, &mut output), 1);
     assert_eq!(output[0].1, NoteEvent::On { key: 36, velocity: 0.8 });
+    effect.set_parameter(0, 12.0);
+    assert_eq!(effect.process(&[(0, NoteEvent::On { key: 120, velocity: 0.8 })], &mut output), 0);
+    effect.set_parameter(0, 0.0);
+    assert_eq!(effect.process(&[(1, NoteEvent::Off { key: 120, velocity: 0.3 })], &mut output), 0);
 }
 
 #[test]

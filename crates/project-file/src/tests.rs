@@ -90,7 +90,11 @@ fn everything() -> Project {
             enabled: true,
             state: Some(br#"{"format":"suhina-device","version":1}"#.to_vec()),
             params: vec![DeviceParam::new("gain", 0.5)],
-            automation: Vec::new(),
+            automation: vec![AutomationLane {
+                param: "gain".into(),
+                points: vec![AutomationPoint::new(0.0, 0.5), AutomationPoint::new(4.0, 1.0)],
+                enabled: true,
+            }],
             extensions: Extensions::default(),
         },
         Device {
