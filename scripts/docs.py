@@ -10,6 +10,8 @@ and checks on the front matter.
   python scripts/docs.py check            front matter, covered paths, and links between documents
   python scripts/docs.py impact [BASE]    documents that describe code changed since BASE
                                           (default origin/main) but were not changed themselves
+  python scripts/docs.py stamp            move each document's last_verified up to the day of its
+                                          last change on main (the workflow on main does this)
 
 Front matter, at the top of each document:
 
@@ -18,7 +20,8 @@ Front matter, at the top of each document:
   read_when: the words someone would look for it with
   type: system | decision | spec | howto | plan
   status: current | draft | planned | superseded
-  last_verified: yyyy-mm-dd (the day the text was last checked against the code or sources)
+  last_verified: yyyy-mm-dd (the day the text was last checked against the code or sources;
+                 stamped on main, see below)
   covers:
     - crates/engine/src/launcher.rs   (paths or globs of the code it describes; optional)
   ---
@@ -26,6 +29,14 @@ Front matter, at the top of each document:
 docs/INDEX.md and docs/commands.md are generated on main after every merge
 (.github/workflows/docs-generated.yml), so pull requests leave them alone and never conflict on
 them. `index` without `--write` only prints, so a local look never ends up in a commit.
+
+last_verified is stamped on main too: a pull request that changes a document has checked it against
+the code it changes, so after the merge `stamp` moves the document's date up to the day of that
+change. Pull requests leave the line alone, so two of them that touch one document do not conflict
+on it. Someone who checks a document without changing anything else in it still sets the date by
+hand. Commits made before STAMP_FROM, the docs bot's own commits ("Docs: regenerate ...") and
+commits whose message has a line `Last-verified: keep` (a rename across every document, say) do not
+count as a check.
 
 Standard library only, so CI needs nothing but Python.
 """
@@ -52,6 +63,11 @@ REQUIRED = ("description", "read_when", "type", "status", "last_verified")
 TYPES = ("system", "decision", "spec", "howto", "plan")
 STATUSES = ("current", "draft", "planned", "superseded")
 STALE_AFTER_DAYS = 90
+# `stamp` reads history from this day on: before it, pull requests set last_verified by hand.
+STAMP_FROM = "2026-10-17"
+# Commits that change documents without checking them: the docs bot's, and those that say so.
+STAMP_SKIP = ("^Docs: regenerate", "^Last-verified: keep")
+LAST_VERIFIED = re.compile(r"^last_verified:[ \t]*(\S*)[ \t]*$")
 # A file covered by this many documents or more is a hub (the session's or the window's main file):
 # a change to it alone does not make `impact` warn about each of them, only list them.
 HUB_DOCS = 3
@@ -299,6 +315,14 @@ def impact(base: str) -> int:
         rel = path.relative_to(ROOT).as_posix()
         if rel in changed:
             print(f"::warning file={rel}::GENERATED: {rel} is regenerated on main after every merge; leave it out of the change so it does not conflict")
+    for rel in changed:
+        if not (rel.startswith("docs/") and rel.endswith(".md")):
+            continue
+        diff = subprocess.run(
+            ["git", "diff", "-U0", fork.stdout.strip(), "--", rel], cwd=ROOT, capture_output=True, text=True, check=False
+        ).stdout
+        if re.search(r"^\+last_verified:", diff, re.M) and re.search(r"^-last_verified:", diff, re.M):
+            print(f"::notice file={rel}::LAST_VERIFIED: last_verified is stamped on main after the merge for every document a pull request changes; leaving the line alone keeps two pull requests from conflicting on it")
     docs = documents()
     # How many documents cover each changed file: a hub alone only gets the documents listed.
     covering = {f: sum(1 for d in docs if any(matches(p, f) for p in d.covers)) for f in changed}
@@ -322,6 +346,65 @@ def impact(base: str) -> int:
     return 0
 
 
+def git(*args: str) -> str:
+    out = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=False)
+    if out.returncode != 0:
+        raise SystemExit(f"git {' '.join(args)}: {out.stderr.strip()}")
+    return out.stdout
+
+
+def last_changed(rel: str) -> str | None:
+    """The day (yyyy-mm-dd) of the last commit since STAMP_FROM that changed `rel`, not counting
+    the commits STAMP_SKIP matches; None when there is none."""
+    skip = [f"--grep={pattern}" for pattern in STAMP_SKIP]
+    day = git("log", "-1", "--format=%cs", f"--since={STAMP_FROM}T00:00:00Z", "--invert-grep",
+              "--extended-regexp", *skip, "--", rel).strip()
+    return day or None
+
+
+def stamped(text: str, day: str) -> str | None:
+    """`text` with last_verified in its front matter set to `day`, or None when it would not move
+    forward (already that day or later, no front matter, no valid date)."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return None
+        match = LAST_VERIFIED.match(line)
+        if not match:
+            continue
+        try:
+            current = date.fromisoformat(match.group(1))
+        except ValueError:
+            return None
+        if current >= date.fromisoformat(day):
+            return None
+        lines[i] = f"last_verified: {day}"
+        return "\n".join(lines)
+    return None
+
+
+def stamp() -> int:
+    if git("rev-parse", "--is-shallow-repository").strip() == "true":
+        # A shallow clone's oldest commit seems to add every file, so every document would move.
+        raise SystemExit("stamp needs the whole history: fetch it first (git fetch --unshallow)")
+    moved = 0
+    for d in documents():
+        day = last_changed(d.rel)
+        if day is None:
+            continue
+        text = d.path.read_text(encoding="utf-8")
+        new = stamped(text, day)
+        if new is None:
+            continue
+        d.path.write_text(new, encoding="utf-8", newline="\n")
+        print(f"{d.rel}: last_verified {day}")
+        moved += 1
+    print(f"{moved} document(s) stamped." if moved else "Every last_verified is current.")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     command = argv[1] if len(argv) > 1 else ""
     if command == "index":
@@ -336,6 +419,8 @@ def main(argv: list[str]) -> int:
         return check()
     if command == "impact":
         return impact(argv[2] if len(argv) > 2 else "origin/main")
+    if command == "stamp":
+        return stamp()
     print(__doc__)
     return 2
 

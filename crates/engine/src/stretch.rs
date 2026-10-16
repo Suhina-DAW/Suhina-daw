@@ -541,35 +541,18 @@ mod tests {
 
     fn region(markers: &[(f64, f64)], mode: StretchMode) -> AudioRegion {
         AudioRegion {
-            file: "sine.wav".into(),
-            absolute_file: None,
-            sample_rate: None,
-            channels: None,
-            duration_seconds: None,
             warped: true,
             stretch: mode,
             warp_markers: markers.iter().map(|&(time, audio_time)| WarpMarker { time, audio_time }).collect(),
-            gain: 1.0,
-            transpose: 0.0,
-            stream: None,
+            ..AudioRegion::new("sine.wav")
         }
     }
 
     fn clip(length: f64, offset: f64, loop_range: Option<(f64, f64)>) -> Clip {
         Clip {
-            content: ContentId(1),
-            start: 0.0,
-            length,
             offset,
             loop_range: loop_range.map(|(start, end)| LoopRange { start, end }),
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
-            follow_action: Default::default(),
-            launch: Default::default(),
-            extensions: Extensions::default(),
+            ..Clip::new(ContentId(1), 0.0, length)
         }
     }
 

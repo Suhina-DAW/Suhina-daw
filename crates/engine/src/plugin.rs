@@ -443,18 +443,10 @@ impl Delay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suhina_model::{Device, Extensions};
+    use suhina_model::Device;
 
     fn plug(kind: DeviceKind) -> Device {
-        Device {
-            name: "P".into(),
-            kind,
-            enabled: true,
-            state: None,
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
-        }
+        Device::new("P", kind)
     }
 
     #[test]
