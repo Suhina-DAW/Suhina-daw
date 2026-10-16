@@ -785,7 +785,6 @@ impl Rack {
     /// making an editor's window that waits for the session's own window). It comes back
     /// through [`Rack::take_returned`].
     fn lend(&mut self, key: u64, work: impl FnOnce(&mut Plugin) -> Done + Send + 'static) -> Result<(), CommandError> {
-        eprintln!("PROBE lend {key}");
         let instance = self.instances.get_mut(&key).ok_or("the device's plug-in is not running")?;
         let mut control = instance.control.take().ok_or("the plug-in is busy; try again in a moment")?;
         let (sender, generation) = (self.returned_sender.clone(), instance.generation);
