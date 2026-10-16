@@ -219,6 +219,11 @@ pub struct App {
     /// and the detail area's height a splitter drag has reached so far, unclamped.
     detail_max: bool,
     detail_drag: Option<f32>,
+    /// The detail area was closed as an editor (the splitter dragged down, the toolbar's ×, View ›
+    /// Hide editor): selecting a clip opens it again. And the clip shown last frame, to tell when
+    /// another is selected (`docs/spec/ui-clip-editor.md` › Least height and closing).
+    editor_closed: bool,
+    last_clip: Option<ClipRef>,
     /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
     piano_grid: &'static str,
     detail_width: f32,
@@ -326,6 +331,8 @@ impl App {
             detail_height: DETAIL_HEIGHT,
             detail_max: false,
             detail_drag: None,
+            editor_closed: false,
+            last_clip: None,
             piano_grid: DEFAULT_PIANO_GRID,
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
@@ -1350,6 +1357,17 @@ impl App {
             let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
             let view_area = inner;
             self.detail_drop = None;
+            // A clip selected (or clicked) while the editor was closed by hand opens it again.
+            let shown_clip = self.shown_clip();
+            let clicked = std::mem::take(&mut self.arrangement.clip_clicked);
+            if self.editor_closed
+                && !self.detail_open
+                && shown_clip.is_some()
+                && (clicked || shown_clip != self.last_clip)
+            {
+                self.show_editor();
+            }
+            self.last_clip = shown_clip;
             let inner = if grid.is_some() && self.detail_open {
                 self.detail_area(ui, inner, &mut actions)
             } else {
@@ -1357,7 +1375,12 @@ impl App {
                 // A hidden piano roll does not keep the keyboard, nor the view to one track.
                 self.piano_roll.focused = false;
                 self.arrangement.focus = None;
-                inner
+                // In a row under the view, the splitter stays along the bottom, to drag it open.
+                if grid.is_some() && self.settings.device_layout != DeviceLayout::Stack {
+                    self.collapsed_splitter(ui, inner)
+                } else {
+                    inner
+                }
             };
             // A drag from the browser, or files from the system: the views say what is under the
             // pointer.
@@ -1556,6 +1579,7 @@ impl App {
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
         let piano = self.piano_clip(clip);
+        let least = self.least_detail_height();
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
         let focus = match clip {
@@ -1576,11 +1600,11 @@ impl App {
                 Rect::from_min_max(Pos2::new(x, area.top()), area.max),
             )
         } else {
-            self.detail_height = self.detail_height.clamp(80.0, (area.height() - MIN_VIEW).max(80.0));
+            self.detail_height = self.detail_height.clamp(least, (area.height() - MIN_VIEW).max(least));
             let y = if pulled {
                 // Above it only the edited track, or nothing.
                 let above = focus.map_or(0.0, |t| self.arrangement.focus_height(t));
-                (area.top() + above.min(area.height() - 80.0) + SPLITTER).min(area.bottom() - 80.0)
+                (area.top() + above.min(area.height() - least) + SPLITTER).min(area.bottom() - least)
             } else {
                 area.bottom() - self.detail_height
             };
@@ -1609,8 +1633,13 @@ impl App {
                 let height = self.detail_drag.unwrap_or(detail.height()) - delta.y;
                 self.detail_drag = Some(height);
                 self.detail_max = pullable && height > area.height() - MIN_VIEW;
-                if !self.detail_max {
-                    self.detail_height = height;
+                if height < least / 2.0 {
+                    // Dragged down past half its least height, the detail area closes; the same
+                    // drag going back up opens it again (`collapsed_splitter`).
+                    self.detail_max = false;
+                    self.hide_editor();
+                } else if !self.detail_max {
+                    self.detail_height = height.max(least);
                 }
             }
         } else {
@@ -1700,6 +1729,10 @@ impl App {
             }
         });
         self.place_editors(&places);
+        // The toolbar's × hides the editor.
+        if std::mem::take(&mut self.piano_roll.hide_requested) {
+            self.hide_editor();
+        }
         // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
         // the piano roll follows it.
         if let Some(picked) = self.piano_roll.grid_picked.take() {
@@ -1710,6 +1743,59 @@ impl App {
             }
         }
         view
+    }
+
+    /// The splitter along the bottom while the detail area is hidden: dragged up past half the
+    /// least height, the detail area opens at the height the drag reaches. Returns the room left
+    /// above it for the view.
+    fn collapsed_splitter(&mut self, ui: &mut Ui, area: Rect) -> Rect {
+        let splitter = Rect::from_min_max(Pos2::new(area.left(), (area.bottom() - SPLITTER).max(area.top())), area.max);
+        let response = ui
+            .interact(splitter, Id::new("detail-splitter"), Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::ResizeVertical);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Detail area splitter"));
+        if response.dragged_by(egui::PointerButton::Primary) {
+            let height = self.detail_drag.unwrap_or(0.0) - response.drag_delta().y;
+            self.detail_drag = Some(height);
+            let least = self.least_detail_height();
+            if height >= least / 2.0 {
+                self.show_editor();
+                self.detail_height = height.max(least);
+            }
+        } else {
+            self.detail_drag = None;
+        }
+        let painter = ui.painter_at(splitter);
+        painter.rect_filled(splitter, 0.0, theme::control_background());
+        painter.rect_filled(Rect::from_center_size(splitter.center(), Vec2::new(32.0, 2.0)), 0.0, theme::text_hint());
+        Rect::from_min_max(area.min, Pos2::new(area.right(), splitter.top()))
+    }
+
+    /// The least height of the detail area in a row: the piano roll's while it shows one, else
+    /// 80 px.
+    fn least_detail_height(&self) -> f32 {
+        let piano = self.settings.device_layout != DeviceLayout::Stack && self.piano_clip(self.shown_clip()).is_some();
+        if piano { piano_roll::LEAST_HEIGHT } else { 80.0 }
+    }
+
+    /// The clip the detail area shows: the Arrangement view's selected clip, or the Session view's
+    /// selected slot's.
+    fn shown_clip(&self) -> Option<ClipRef> {
+        match self.shown {
+            View::Session => self.view.selected_slot.map(|(t, s)| ClipRef::Slot(t, s)),
+            View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| ClipRef::Arrangement(t, i)),
+        }
+    }
+
+    /// Hides the detail area as an editor: selecting a clip opens it again.
+    fn hide_editor(&mut self) {
+        self.detail_open = false;
+        self.editor_closed = true;
+    }
+
+    fn show_editor(&mut self) {
+        self.detail_open = true;
+        self.editor_closed = false;
     }
 
     /// The piano roll for the selected arrangement clip, when it is a MIDI clip; its grid is its
@@ -2271,6 +2357,13 @@ impl App {
                 let label = if self.detail_open { "Hide detail area" } else { "Show detail area" };
                 if ui.add_enabled(has_project, egui::Button::new(label).shortcut_text(keys("view.detail"))).clicked() {
                     self.detail_open = !self.detail_open;
+                    self.editor_closed = false;
+                }
+                // The selected clip's editor (› Least height and closing in ui-clip-editor.md).
+                let label = if self.detail_open { "Hide editor" } else { "Show editor" };
+                let clip = has_project && self.shown_clip().is_some();
+                if ui.add_enabled(clip, egui::Button::new(label).shortcut_text(keys("view.editor"))).clicked() {
+                    self.toggle_editor();
                 }
                 ui.separator();
                 let (zoom, limits) = (self.settings.zoom, crate::settings::ZOOMS);
@@ -2510,7 +2603,12 @@ impl App {
                 self.shown = View::Session;
                 self.close_large_map();
             }
-            "view.detail" => self.detail_open = !self.detail_open,
+            "view.detail" => {
+                self.detail_open = !self.detail_open;
+                self.editor_closed = false;
+            }
+            "view.editor" if self.shown_clip().is_some() => self.toggle_editor(),
+            "view.editor" => {}
             "view.mappingMode" => self.toggle_mapping_mode(),
             "view.arrangement" => {
                 self.shown = View::Arrangement;
@@ -2785,6 +2883,15 @@ impl App {
     pub fn set_browser_open(&mut self, open: bool) {
         if self.settings.browser_open != open {
             self.toggle_browser();
+        }
+    }
+
+    /// Hides the selected clip's editor (the detail area), or shows it again.
+    fn toggle_editor(&mut self) {
+        if self.detail_open {
+            self.hide_editor();
+        } else {
+            self.show_editor();
         }
     }
 

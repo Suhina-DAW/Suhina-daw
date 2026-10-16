@@ -22,6 +22,13 @@ const TOOLBAR: f32 = 22.0;
 const KEYS: f32 = 36.0;
 const RULER: f32 = 16.0;
 const VELOCITY_LANE: f32 = 72.0;
+/// The velocity lane is left out under this height, and leaves at least this many key rows.
+const LEAST_LANE: f32 = 12.0;
+const LEAST_KEY_ROWS: f32 = 5.0;
+/// The least height of the detail area while it shows the piano roll: the toolbar, the ruler and
+/// five key rows at the default row height, and beside them the clip column's title and its five
+/// rows (`docs/spec/ui-clip-editor.md` › Least height and closing).
+pub const LEAST_HEIGHT: f32 = 120.0;
 /// The toolbar's icon size and the space between its buttons, in points.
 const TOOL_ICON: f32 = 14.0;
 const TOOL_GAP: f32 = 3.0;
@@ -358,6 +365,13 @@ pub struct PianoRollState {
     right_stepped: bool,
     /// A grid value picked in the toolbar this frame, for the window to keep.
     pub grid_picked: Option<&'static str>,
+    /// The toolbar's Hide editor button was clicked this frame: the window hides the editor.
+    pub hide_requested: bool,
+    /// The key rows were scrolled by hand (the wheel, a pan, zooming the key height) since the
+    /// clip was shown: until then a change in the editor's height centres the notes again.
+    scrolled_by_hand: bool,
+    /// The grid's height the notes were last centred for.
+    centred_for: f32,
     /// The key the key column is playing, if any, and where the pointer last was on it: the
     /// window turns a change into `preview.noteOn` and `preview.noteOff`.
     playing_key: Option<u8>,
@@ -391,6 +405,9 @@ impl Default for PianoRollState {
             right_playing: false,
             right_stepped: false,
             grid_picked: None,
+            hide_requested: false,
+            scrolled_by_hand: false,
+            centred_for: 0.0,
             playing_key: None,
             hover_key: None,
         }
@@ -689,6 +706,8 @@ enum IconButton {
     Duplicate,
     Quantise,
     MidiTools,
+    /// The × at the right end: hides the editor.
+    Hide,
 }
 
 impl IconButton {
@@ -707,6 +726,7 @@ impl IconButton {
             Self::Duplicate => "Duplicate",
             Self::Quantise => "Quantise",
             Self::MidiTools => "MIDI tools",
+            Self::Hide => "Hide editor",
         }
     }
 
@@ -723,6 +743,7 @@ impl IconButton {
             Self::Copy => "selection.copy",
             Self::Paste => "selection.paste",
             Self::Duplicate => "selection.duplicate",
+            Self::Hide => "view.editor",
             Self::Quantise | Self::MidiTools => return None,
         })
     }
@@ -840,6 +861,11 @@ impl IconButton {
                     painter.rect_filled(Rect::from_center_size(at(x, y), size(4.0, 3.0)), 0.0, color);
                     line((x, y + 1.5), (x, 5.5));
                 }
+            }
+            // A cross: hides the editor.
+            Self::Hide => {
+                line((-4.0, -4.0), (4.0, 4.0));
+                line((-4.0, 4.0), (4.0, -4.0));
             }
             // Three horizontal sliders: the MIDI tools column's toggle.
             Self::MidiTools => {
@@ -1128,12 +1154,12 @@ pub fn show(
 ) {
     let Context { options, keymap, copied, playhead } = cx;
     let scale = options.toolbar_size.scale();
-    if state.shown.as_ref() != Some(&clip.address) {
+    let fresh = state.shown.as_ref() != Some(&clip.address);
+    if fresh {
         state.shown = Some(clip.address.clone());
         state.selected.clear();
         state.gesture = None;
         state.playing_key = None;
-        fit(state, area, clip, scale);
     }
     // Keys run before the piano roll is drawn, and their commands after it: notes a paste or a
     // duplicate selected this frame exist from the next frame on.
@@ -1146,7 +1172,7 @@ pub fn show(
     let toolbar_rect = Rect::from_min_max(area.min, Pos2::new(area.right(), area.top() + band));
     let whole = area;
     let area = Rect::from_min_max(Pos2::new(area.left(), toolbar_rect.bottom()), area.max);
-    let lane_height = VELOCITY_LANE.min((area.height() - RULER) * 0.3).max(0.0);
+    let lane_height = velocity_lane_height(area.height() - RULER, state.key_height);
     let keys = Rect::from_min_max(
         Pos2::new(area.left(), area.top() + RULER),
         Pos2::new(area.left() + KEYS, area.bottom() - lane_height),
@@ -1157,6 +1183,13 @@ pub fn show(
     toolbar(ui, toolbar_rect, ToolbarCx { clip, keymap, copied, scale }, state, actions);
     if grid_rect.width() <= 1.0 || grid_rect.height() <= 1.0 {
         return;
+    }
+    // A newly shown clip fits the width with its notes in the middle; until the rows are scrolled
+    // by hand, a change in height centres the notes again, so they are in view at any height.
+    if fresh {
+        fit(state, grid_rect, clip);
+    } else if !state.scrolled_by_hand && (grid_rect.height() - state.centred_for).abs() > 0.5 {
+        centre_notes(state, grid_rect.height(), clip);
     }
 
     let inputs = Inputs {
@@ -1569,7 +1602,13 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
         state.tools_open = !state.tools_open;
     }
     let x = x.get();
-    // The grid value, at the right end.
+    // At the very end the × that hides the editor, then the grid value before it.
+    let hide =
+        Rect::from_min_size(Pos2::new(row.right() - side, row.top() + (row.height() - side) / 2.0), Vec2::splat(side));
+    if hide.left() >= x && paint.place(hide, IconButton::Hide, false, true) {
+        state.hide_requested = true;
+    }
+    let row = Rect::from_min_max(row.min, Pos2::new(hide.left() - gap - 2.0, row.bottom()));
     let menu = Rect::from_min_max(Pos2::new(row.right() - 64.0, row.top()), row.max);
     if menu.left() < x + 40.0 {
         return;
@@ -1887,22 +1926,45 @@ fn round_beat(beat: f64) -> f64 {
     (beat * 1e6).round() / 1e6
 }
 
-/// A newly shown clip: the whole clip fits the width, and its notes are in the middle.
-fn fit(state: &mut PianoRollState, area: Rect, clip: &PianoClip, scale: f32) {
-    let width = (area.width() - KEYS).max(1.0);
+/// How tall the velocity lane is with `room` under the ruler: 72 px, at most 30 % of the room,
+/// never so tall that fewer than five key rows of `key_height` are left, and left out when that
+/// leaves it under 12 px (› Layout in `docs/spec/ui-clip-editor.md`).
+fn velocity_lane_height(room: f32, key_height: f32) -> f32 {
+    let lane = VELOCITY_LANE.min(room * 0.3).min(room - LEAST_KEY_ROWS * key_height);
+    if lane.is_finite() && lane >= LEAST_LANE { lane } else { 0.0 }
+}
+
+/// A newly shown clip: the whole clip fits the `grid`'s width, and its notes are in the middle.
+fn fit(state: &mut PianoRollState, grid: Rect, clip: &PianoClip) {
+    let width = grid.width().max(1.0);
     state.beat_width = (width / clip.length.max(1.0) as f32).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
     state.scroll.x = 0.0;
+    state.scrolled_by_hand = false;
+    centre_notes(state, grid.height(), clip);
+}
+
+/// Scrolls the key rows so the middle of the clip's lowest and highest note (C3 for an empty
+/// clip) is in the middle of a grid `height` tall.
+fn centre_notes(state: &mut PianoRollState, height: f32, clip: &PianoClip) {
     let (low, high) = clip.notes.iter().fold((u8::MAX, 0u8), |(lo, hi), n| (lo.min(n.key), hi.max(n.key)));
     let middle = if low <= high { (f32::from(low) + f32::from(high)) / 2.0 } else { 60.0 };
-    let editor = area.height() - (TOOLBAR * scale).min(area.height());
-    let height = (editor - RULER - VELOCITY_LANE.min((editor - RULER) * 0.3)).max(1.0);
+    let height = height.max(1.0);
     state.scroll.y = (127.0 - middle) * state.key_height + state.key_height / 2.0 - height / 2.0;
+    state.centred_for = height;
 }
 
 /// The wheel scrolls, with Ctrl it zooms time and with Ctrl+Shift or Alt key height, around
 /// the pointer; the middle button pans. While the right button is held over the grid, a wheel
 /// step chooses the next or the previous tool instead, and the toolbar and the cursor follow.
 fn scroll_and_zoom(ui: &Ui, state: &mut PianoRollState, area: Rect, grid: Rect, inputs: Inputs) {
+    let (before, key_height) = (state.scroll.y, state.key_height);
+    scroll_and_zoom_by_hand(ui, state, area, grid, inputs);
+    if state.scroll.y != before || state.key_height != key_height {
+        state.scrolled_by_hand = true;
+    }
+}
+
+fn scroll_and_zoom_by_hand(ui: &Ui, state: &mut PianoRollState, area: Rect, grid: Rect, inputs: Inputs) {
     let pointer = widgets::pointer_over(ui, area);
     let (zoom, wheel) = ui.input(|i| (i.zoom_delta(), i.smooth_scroll_delta()));
     // The right button and the wheel: the next tool for a step one way, the previous for the

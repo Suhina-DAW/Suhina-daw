@@ -1119,7 +1119,12 @@ fn clip_properties(ui: &Ui, painter: &egui::Painter, area: Rect, info: &ClipInfo
     }
     .intersect(area);
     painter.rect_filled(column, 0.0, theme::panel_background());
+    // Rows that do not fit under the column's bottom are left out rather than cut in half, the
+    // title last; text never wraps (› Clip column in `docs/spec/ui-clip-editor.md`).
     let title = Rect::from_min_size(column.min, Vec2::new(column.width(), ROW));
+    if title.bottom() > column.bottom() + 0.5 {
+        return column;
+    }
     widgets::text_in(
         painter,
         title.shrink2(Vec2::new(PAD, 0.0)),
@@ -1132,6 +1137,9 @@ fn clip_properties(ui: &Ui, painter: &egui::Painter, area: Rect, info: &ClipInfo
     for (label, value) in rows {
         let row = Rect::from_min_max(Pos2::new(column.left() + PAD, y), Pos2::new(column.right() - PAD, y + PARAM_ROW));
         y += PARAM_ROW;
+        if row.bottom() > column.bottom() + 0.5 {
+            break;
+        }
         // The row is named for a reader and a test ("Notes: 1 of 4"), as the piano roll's notes
         // are, so what the column says can be found by name.
         let response = ui.interact(row, egui::Id::new(("clip-property", label)), Sense::hover());
