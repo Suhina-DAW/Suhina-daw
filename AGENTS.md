@@ -188,6 +188,21 @@ Several agents often run at once, so an agent never starts work that exists alre
 
 - **Before opening an issue**, search the open issues for the same problem; when one exists,
   comment there instead.
+- **Open an issue as the bot.** An agent with write access to this repository opens issues
+  through the [Open issue](.github/workflows/open-issue.yml) workflow, not as the person it runs
+  for, so the issue's author is `suhina[bot]`. Start it with the GitHub MCP's `actions_run_trigger`
+  or with `gh`, then read the issue number from the run's log (`OPENED_ISSUE=#N <url>`):
+
+  ```sh
+  gh workflow run open-issue.yml -f title="Piano roll: snap notes to the grid" \
+    -f body="$(cat issue.md)" -f type=enhancement -f labels="ui" -f parent=123
+  gh run list --workflow open-issue.yml --limit 1 --json databaseId,displayTitle
+  gh run watch <run id> --exit-status && gh run view <run id> --log | grep OPENED_ISSUE
+  ```
+
+  `type` is one of `enhancement`, `bug`, `documentation`, `chore`, `epic` and sets the type label
+  and the issue type; `labels` are the area and platform labels; `parent` is an open epic. Set the
+  board's Priority and Phase afterwards. Pull requests and comments stay under the person's account.
 - **Before writing code**, comment `/claim` with the plan and a `Touches:` line naming the paths
   you will change (`Touches: crates/ui/src/piano_roll, crates/session`), and read the bot's answer.
   When it says the work is taken, that it is blocked by another issue, or that it is already yours

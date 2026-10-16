@@ -1,0 +1,162 @@
+name: Open issue
+run-name: "Open issue: ${{ inputs.title }}"
+
+# Opens an issue as the GitHub App `Suhina` (`suhina[bot]`) rather than as the person who starts
+# the run. Agent sessions write to GitHub with the account of the person who runs them; issues they
+# open through this workflow show the bot as their author (AGENTS.md › Tasks). The Discord bot
+# writes as the same App (epic #537). Pull requests, comments and merges stay under the person's
+# account.
+#
+# Start it from Actions › Open issue › Run workflow, with `gh workflow run open-issue.yml -f ...`
+# or with the GitHub MCP's `actions_run_trigger`. The run prints `OPENED_ISSUE=#<number> <url>` in
+# its log and puts the link in its summary.
+#
+# Setup, by a maintainer only: the App `Suhina` has Repository permissions › Issues: Read and
+# write, Pull requests: Read-only, Organization permissions › Projects: Read and write, and is
+# installed on this repository only. The environment `suhina-bot` (Settings › Environments),
+# limited to the `main` branch, holds its App ID as SUHINA_BOT_APP_ID and a private key as
+# SUHINA_BOT_PRIVATE_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: Title (at most 256 characters)
+        required: true
+        type: string
+      body:
+        description: Body in Markdown (at most 60 000 characters)
+        required: true
+        type: string
+      type:
+        description: Type; adds its label and sets the issue type
+        required: true
+        type: choice
+        options: [enhancement, bug, documentation, chore, epic]
+      labels:
+        description: Other labels, comma-separated (areas, platforms), e.g. "ui, engine"
+        required: false
+        type: string
+        default: ""
+      parent:
+        description: Number of an open epic to add the issue under (optional)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    environment: suhina-bot
+    steps:
+      # Everything the run was given is checked before the App's key is touched. Inputs reach the
+      # scripts only through `env`, never interpolated into a script.
+      - name: Check the inputs and who started the run
+        id: check
+        uses: actions/github-script@v9
+        env:
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+          TYPE: ${{ inputs.type }}
+          LABELS: ${{ inputs.labels }}
+          PARENT: ${{ inputs.parent }}
+          # Only whether the secrets are set; the values stay out of this step.
+          HAS_SUHINA_BOT_APP_ID: ${{ secrets.SUHINA_BOT_APP_ID != '' }}
+          HAS_SUHINA_BOT_PRIVATE_KEY: ${{ secrets.SUHINA_BOT_PRIVATE_KEY != '' }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const fail = (message) => { core.setFailed(message); throw new Error(message); };
+
+            for (const name of ["SUHINA_BOT_APP_ID", "SUHINA_BOT_PRIVATE_KEY"]) {
+              if (process.env[`HAS_${name}`] !== "true") {
+                fail(`The secret ${name} is missing from the environment suhina-bot.`);
+              }
+            }
+
+            // Starting a workflow already needs write access; this says so in the run as well.
+            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner, repo, username: context.actor,
+            });
+            if (!["admin", "maintain", "write"].includes(permission.role_name)) {
+              fail(`@${context.actor} has no write access to ${owner}/${repo}.`);
+            }
+
+            const title = process.env.TITLE.trim();
+            const body = process.env.BODY;
+            if (title.length === 0 || title.length > 256) fail("The title must be 1 to 256 characters.");
+            if (body.trim().length === 0 || body.length > 60000) fail("The body must be 1 to 60 000 characters.");
+
+            // The type: its label, and the organization's issue type it maps to (none for an epic).
+            const TYPES = { enhancement: "Feature", bug: "Bug", documentation: "Task", chore: "Task", epic: null };
+            const type = process.env.TYPE;
+            if (!(type in TYPES)) fail(`Unknown type "${type}".`);
+
+            const labels = [type];
+            for (const raw of process.env.LABELS.split(",")) {
+              const label = raw.trim();
+              if (label === "") continue;
+              if (!/^[a-z0-9][a-z0-9 .:-]{0,49}$/.test(label)) fail(`"${label}" is not a plain label name.`);
+              if (label in TYPES) fail(`"${label}" is a type; give it as the type input instead.`);
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: label });
+              } catch (error) {
+                if (error.status === 404) fail(`The label "${label}" does not exist.`);
+                throw error;
+              }
+              if (!labels.includes(label)) labels.push(label);
+            }
+
+            let parent = null;
+            const parentInput = process.env.PARENT.trim().replace(/^#/, "");
+            if (parentInput !== "") {
+              if (!/^[0-9]{1,7}$/.test(parentInput)) fail(`"${parentInput}" is not an issue number.`);
+              const { data: epic } = await github.rest.issues.get({ owner, repo, issue_number: Number(parentInput) });
+              if (epic.pull_request) fail(`#${parentInput} is a pull request, not an epic.`);
+              if (epic.state !== "open") fail(`#${parentInput} is closed.`);
+              if (!epic.labels.some((l) => (typeof l === "string" ? l : l.name) === "epic")) {
+                fail(`#${parentInput} is not labelled epic.`);
+              }
+              parent = epic.number;
+            }
+
+            core.setOutput("request", JSON.stringify({ title, labels, issueType: TYPES[type], parent }));
+
+      - name: Token of the Suhina App
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.SUHINA_BOT_APP_ID }}
+          private-key: ${{ secrets.SUHINA_BOT_PRIVATE_KEY }}
+          permission-issues: write
+
+      - name: Open the issue
+        uses: actions/github-script@v9
+        env:
+          REQUEST: ${{ steps.check.outputs.request }}
+          BODY: ${{ inputs.body }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const { title, labels, issueType, parent } = JSON.parse(process.env.REQUEST);
+
+            const payload = { owner, repo, title, body: process.env.BODY, labels };
+            if (issueType) payload.type = issueType;
+            const { data: issue } = await github.request("POST /repos/{owner}/{repo}/issues", payload);
+
+            if (parent !== null) {
+              await github.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+                owner, repo, issue_number: parent, sub_issue_id: issue.id,
+              });
+            }
+
+            console.log(`OPENED_ISSUE=#${issue.number} ${issue.html_url}`);
+            core.setOutput("number", issue.number);
+            core.setOutput("url", issue.html_url);
+            await core.summary
+              .addRaw(`Opened [#${issue.number} ${issue.title}](${issue.html_url})`)
+              .addRaw(parent !== null ? ` under #${parent}.` : ".")
+              .write();
