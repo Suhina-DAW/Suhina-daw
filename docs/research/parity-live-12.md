@@ -72,11 +72,11 @@ documentation and UI). The scope decision it leads to is
 | The manual it was measured from | 43 chapters, 1039 PDF pages, 999 pages of feature text |
 | Page-weighted coverage of everything the manual documents | **about 22 %** |
 | Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 26 %** |
-| Same, over the scope the roadmap aims at (also without accessibility) | **about 26 %** |
+| Same, over the scope the roadmap aims at (also without accessibility) | **about 27 %** |
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **186**, every one reachable from the UI, the CLI and MCP |
+| Commands | **191**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
