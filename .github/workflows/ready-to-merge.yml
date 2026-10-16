@@ -173,7 +173,8 @@ jobs:
             exit 0
           fi
           stop_merge
-          # main's rule restricts no one from dismissing reviews, so the app may dismiss its own.
+          # main's rule restricts no one from dismissing reviews, so the app may dismiss its own; if
+          # it ever does, the app must be allowed there (docs/releasing.md) or this fails visibly.
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/reviews" \
             --jq ".[] | select(.user.login == \"$APP[bot]\" and .state == \"APPROVED\") | .id" |
           while read -r review; do
