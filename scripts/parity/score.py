@@ -28,9 +28,10 @@ MEASURED_COMMIT = "eeb8899"
 # including the workflow that regenerates them on main.
 SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 
-# The manual the measurement was read from, and the command count the report quotes. Both are kept
-# by hand: the manual is not in the repository, and docs/commands.md is regenerated on main, so a
-# pull request cannot read the count of a command it just added from it.
+# The manual the measurement was read from, kept by hand: the manual is not in the repository.
+# COMMANDS below is a placeholder that pull requests leave alone: update_report.py replaces it with
+# the count of docs/commands.md, generated from the command registry on main. It stays until the
+# pull requests opened before that change have merged, so the ones that changed it do not conflict.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
 COMMANDS = 190

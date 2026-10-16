@@ -13,19 +13,14 @@ fn everything() -> Project {
     let ext =
         |key: &str| Extensions(vec![Extension { format: "als".into(), key: key.into(), data: vec![0, 1, 2, 255] }]);
     let clip = |content: u32, start: f64| Clip {
-        content: ContentId(content),
-        start,
-        length: 4.0,
         offset: 0.5,
         loop_range: Some(LoopRange { start: 0.0, end: 2.0 }),
-        enabled: true,
         fade_in: 0.25,
         fade_out: 1.0,
         fade_in_curve: FadeCurve { shape: FadeShape::SCurve, curve: -0.5 },
         fade_out_curve: FadeCurve { shape: FadeShape::EqualPower, curve: 0.75 },
-        follow_action: Default::default(),
         launch: LaunchSettings { mode: LaunchMode::Gate, legato: true, quantization: LaunchQuantization::Triplet(8) },
-        extensions: Extensions::default(),
+        ..Clip::new(ContentId(content), start, 4.0)
     };
     let follow = FollowAction {
         enabled: true,
@@ -37,19 +32,13 @@ fn everything() -> Project {
         chance_b: 70,
     };
     let channel = |id: u32, role: ChannelRole, output: Option<u32>| Channel {
-        id: ChannelId(id),
-        name: format!("Channel {id}"),
         role,
         volume: 0.5,
         pan: -0.25,
         mute: id == 2,
-        solo: false,
         cue: id == 2,
         output: output.map(ChannelId),
-        sends: Vec::new(),
-        devices: Vec::new(),
-        extensions: Extensions::default(),
-        automation: Vec::new(),
+        ..Channel::new(ChannelId(id), format!("Channel {id}"))
     };
     let mut keys = channel(2, ChannelRole::Regular, Some(4));
     keys.sends.push(Send { target: ChannelId(3), level: 0.7, pre_fader: true });
@@ -63,50 +52,27 @@ fn everything() -> Project {
     ];
     keys.devices = vec![
         Device {
-            name: "FM".into(),
-            kind: DeviceKind::Builtin("fm-synth".into()),
-            enabled: true,
-            state: None,
             params: vec![DeviceParam::new("volume", -6.0)],
             automation: vec![AutomationLane {
                 param: "volume".into(),
                 points: vec![AutomationPoint { beat: 1.0, value: -12.0, curve: -0.75 }, AutomationPoint::new(3.5, 0.0)],
                 enabled: false,
             }],
-            extensions: Extensions::default(),
+            ..Device::new("FM", DeviceKind::Builtin("fm-synth".into()))
         },
         Device {
-            name: "Verb".into(),
-            kind: DeviceKind::Vst3 { id: "0123456789ABCDEF0123456789ABCDEF".into() },
             enabled: false,
             state: Some(vec![9, 8, 7, 0, 255]),
-            params: Vec::new(),
-            automation: Vec::new(),
             extensions: ext("Vst3ControllerState"),
+            ..Device::new("Verb", DeviceKind::Vst3 { id: "0123456789ABCDEF0123456789ABCDEF".into() })
         },
         Device {
-            name: "Community Gain".into(),
-            kind: DeviceKind::Sd,
-            enabled: true,
             state: Some(br#"{"format":"suhina-device","version":1}"#.to_vec()),
             params: vec![DeviceParam::new("gain", 0.5)],
-            automation: Vec::new(),
-            extensions: Extensions::default(),
+            ..Device::new("Community Gain", DeviceKind::Sd)
         },
+        Device { state: Some(Vec::new()), ..Device::new("Old", DeviceKind::Vst2 { id: 1_234_567 }) },
         Device {
-            name: "Old".into(),
-            kind: DeviceKind::Vst2 { id: 1_234_567 },
-            enabled: true,
-            state: Some(Vec::new()),
-            params: Vec::new(),
-            automation: Vec::new(),
-            extensions: Extensions::default(),
-        },
-        Device {
-            name: "Clap".into(),
-            kind: DeviceKind::Clap { id: "com.example.clap".into() },
-            enabled: true,
-            state: None,
             params: vec![DeviceParam::new("3", 0.25)],
             automation: vec![AutomationLane {
                 param: "3".into(),
@@ -117,28 +83,19 @@ fn everything() -> Project {
                 ],
                 enabled: true,
             }],
-            extensions: Extensions::default(),
+            ..Device::new("Clap", DeviceKind::Clap { id: "com.example.clap".into() })
         },
         Device {
-            name: "Glue".into(),
-            kind: DeviceKind::Foreign { format: "als".into(), id: "GlueCompressor".into() },
-            enabled: true,
-            state: None,
-            params: Vec::new(),
-            automation: Vec::new(),
             extensions: ext("GlueCompressor"),
+            ..Device::new("Glue", DeviceKind::Foreign { format: "als".into(), id: "GlueCompressor".into() })
         },
     ];
     let track = |id: u32, notes: bool, channel: Option<u32>, parent: Option<u32>| Track {
-        id: TrackId(id),
-        name: format!("Track {id}"),
         color: Some(Rgb(0xD0, 0x8F, 0x6E)),
         content: ContentKinds { notes, audio: !notes },
         channel: channel.map(ChannelId),
         parent: parent.map(TrackId),
-        midi_input: Default::default(),
-        audio_input: Default::default(),
-        extensions: Extensions::default(),
+        ..Track::new(TrackId(id), format!("Track {id}"))
     };
     Project {
         transport: Transport {
@@ -187,24 +144,8 @@ fn everything() -> Project {
                 lanes: vec![ContentLane {
                     target: None,
                     data: LaneData::Notes(vec![
-                        Note {
-                            time: 0.0,
-                            duration: 1.0,
-                            key: 60,
-                            velocity: 0.75,
-                            release_velocity: 0.5,
-                            channel: 0,
-                            muted: false,
-                        },
-                        Note {
-                            time: 1.5,
-                            duration: 0.25,
-                            key: 127,
-                            velocity: 1.0,
-                            release_velocity: 0.0,
-                            channel: 15,
-                            muted: false,
-                        },
+                        Note::new(0.0, 1.0, 60, 0.75),
+                        Note { release_velocity: 0.0, channel: 15, ..Note::new(1.5, 0.25, 127, 1.0) },
                     ]),
                 }],
                 extensions: ext("MidiClip"),
@@ -216,7 +157,6 @@ fn everything() -> Project {
                 lanes: vec![ContentLane {
                     target: Some(TrackId(3)),
                     data: LaneData::Audio(AudioRegion {
-                        file: "Samples/loop.wav".into(),
                         absolute_file: Some("C:/Music/Samples/loop.wav".into()),
                         sample_rate: Some(44_100),
                         channels: Some(2),
@@ -230,6 +170,7 @@ fn everything() -> Project {
                         gain: 0.8,
                         transpose: -1.5,
                         stream: Some(3),
+                        ..AudioRegion::new("Samples/loop.wav")
                     }),
                 }],
                 extensions: Extensions::default(),

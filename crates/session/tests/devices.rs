@@ -8,31 +8,11 @@ use suhina_session::Session;
 fn project() -> Project {
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "Keys".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
-            parent: None,
-            midi_input: Default::default(),
-            audio_input: Default::default(),
-            extensions: Extensions::default(),
+            ..Track::new(TrackId(1), "Keys")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C1".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: Vec::new(),
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel::new(ChannelId(1), "C1")],
         ..Project::default()
     }
 }
