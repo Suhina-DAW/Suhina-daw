@@ -1,17 +1,17 @@
 name: Open issue
 run-name: "Open issue: ${{ inputs.title }}"
 
-# Opens an issue as the GitHub App `Suhina` (`suhina[bot]`) rather than as the person who starts
-# the run. Agent sessions write to GitHub with the account of the person who runs them; issues they
-# open through this workflow show the bot as their author (AGENTS.md › Tasks). The Discord bot
-# writes as the same App (epic #537). Pull requests, comments and merges stay under the person's
+# Opens an issue as the GitHub App `suhina-bot` (`suhina-bot[bot]`) rather than as the person who
+# starts the run. Agent sessions write to GitHub with the account of the person who runs them;
+# issues they open through this workflow show the bot as their author (AGENTS.md › Tasks). The
+# Discord bot writes as the same App (epic #537). Pull requests, comments and merges stay under the person's
 # account.
 #
 # Start it from Actions › Open issue › Run workflow, with `gh workflow run open-issue.yml -f ...`
 # or with the GitHub MCP's `actions_run_trigger`. The run prints `OPENED_ISSUE=#<number> <url>` in
 # its log and puts the link in its summary.
 #
-# Setup, by a maintainer only: the App `Suhina` has Repository permissions › Issues: Read and
+# Setup, by a maintainer only: the App `suhina-bot` has Repository permissions › Issues: Read and
 # write, Pull requests: Read-only, Organization permissions › Projects: Read and write, and is
 # installed on this repository only. The environment `suhina-bot` (Settings › Environments),
 # limited to the `main` branch, holds its App ID as SUHINA_BOT_APP_ID and a private key as
@@ -124,7 +124,7 @@ jobs:
 
             core.setOutput("request", JSON.stringify({ title, labels, issueType: TYPES[type], parent }));
 
-      - name: Token of the Suhina App
+      - name: Token of the suhina-bot App
         id: app-token
         uses: actions/create-github-app-token@v2
         with:

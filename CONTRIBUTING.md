@@ -145,7 +145,7 @@ acceptance criteria, where the code goes. Keep the plan in the issue and the res
 request. An agent searches for an existing issue before it opens one, and for an open pull request
 before it opens one; it continues work that is open rather than starting it again. An agent run
 by someone with write access opens issues through the
-[Open issue](.github/workflows/open-issue.yml) workflow, so they show the bot `suhina[bot]` as
+[Open issue](.github/workflows/open-issue.yml) workflow, so they show the bot `suhina-bot[bot]` as
 their author rather than that person (`AGENTS.md` › Tasks has the commands). The rules in
 [AI-assisted contributions](#ai-assisted-contributions) apply to what the agent wrote.
 

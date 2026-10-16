@@ -190,7 +190,7 @@ Several agents often run at once, so an agent never starts work that exists alre
   comment there instead.
 - **Open an issue as the bot.** An agent with write access to this repository opens issues
   through the [Open issue](.github/workflows/open-issue.yml) workflow, not as the person it runs
-  for, so the issue's author is `suhina[bot]`. Start it with the GitHub MCP's `actions_run_trigger`
+  for, so the issue's author is `suhina-bot[bot]`. Start it with the GitHub MCP's `actions_run_trigger`
   or with `gh`, then read the issue number from the run's log (`OPENED_ISSUE=#N <url>`):
 
   ```sh
