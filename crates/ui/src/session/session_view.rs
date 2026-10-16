@@ -280,12 +280,12 @@ pub fn show(
                 }
                 let top = bands.top + scene as f32 * PITCH;
                 let cell = Rect::from_x_y_ranges(*span, egui::Rangef::new(top, top + ROW)).intersect(column_body);
-                let target = if probe.files {
-                    DropTarget::Slot { track: column.track, scene }
-                } else {
-                    DropTarget::Track(column.track)
-                };
-                probe.offer(if probe.files { cell } else { column_body }, target);
+                // The slot under the pointer is the target, for a dropped file and for a dragged
+                // clip alike: a slot-to-slot drag moves the clip there (Ctrl: a copy).
+                probe.offer(
+                    if probe.files || probe.clip { cell } else { column_body },
+                    DropTarget::Slot { track: column.track, scene },
+                );
             }
         }
         if !probe.clip && empty.width() > 0.0 && empty.contains(probe.pointer) {
