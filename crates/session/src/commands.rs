@@ -708,6 +708,22 @@ static COMMANDS: &[CommandSpec] = &[
         run: move_clip,
     },
     CommandSpec {
+        id: "clip.moveSlot",
+        label: "Move a slot's clip to another track's slot; the two slots swap when the target has a clip",
+        params: &[
+            TRACK,
+            SCENE,
+            optional(
+                "to_track",
+                ParamType::Track,
+                "track to move the clip to (id or name); it must take the clip's kind: notes or audio (default: the same track)",
+            ),
+            optional("to_scene", ParamType::Integer, "the scene to move it to, from 1 (default: the same scene)"),
+        ],
+        kind: CommandKind::Edit,
+        run: move_slot,
+    },
+    CommandSpec {
         id: "project.markers",
         label: "List the arrangement's markers (named positions on the timeline) in beat order, with index, beat and name",
         params: &[],
@@ -3227,6 +3243,87 @@ fn move_clip(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     lane.clips.sort_by(|a, b| a.start.total_cmp(&b.start));
     let new_index = lane.clips.iter().position(|c| *c == clip).unwrap_or_default();
     Ok(json!({ "start": start, "track": to.0, "index": new_index }))
+}
+
+/// `clip.moveSlot`: the dragged slot's clip goes to the target's slot; an occupied target's
+/// clip comes back to the source's slot (the two swap, nothing lost). The target must take the
+/// clip's kind: notes or audio.
+fn move_slot(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let from_column = column_index(session.project(), params)?;
+    let from_scene = scene_index(session.project(), params)?;
+    let to_track = match params.get("to_track") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(track_at(&session.project, params, "to_track")?),
+    };
+    let to_scene: Option<usize> = match params.get("to_scene") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .and_then(|n| n.checked_sub(1))
+                .ok_or("to_scene must be a whole number from 1")?,
+        ),
+    };
+
+    let project = &mut session.project;
+    let from_track = project.launcher.columns.get(from_column).map(|c| c.track).ok_or("the track has no clip slots")?;
+    let to_track = to_track.unwrap_or(from_track);
+    let to_scene = to_scene.unwrap_or(from_scene);
+    if (to_track, to_scene) == (from_track, from_scene) {
+        return Ok(json!({ "moved": false }));
+    }
+    // The clip's kind must be one the target's track plays: notes to a notes track, audio to
+    // an audio track, as `clip.move` checks for the arrangement.
+    let clip = project
+        .launcher
+        .columns
+        .get(from_column)
+        .and_then(|c| c.slots.get(from_scene))
+        .and_then(|s| s.clip.as_ref())
+        .ok_or("the slot has no clip to move")?;
+    let kinds = project.content(clip.content).map_or((false, false), |c| {
+        (
+            c.lanes.iter().any(|l| matches!(l.data, LaneData::Notes(_))),
+            c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))),
+        )
+    });
+    let target = project.tracks.iter().find(|t| t.id == to_track).ok_or("the target track is missing")?;
+    let fits = (!kinds.0 || target.content.notes) && (!kinds.1 || target.content.audio) && (kinds.0 || kinds.1);
+    if !fits {
+        let what = if kinds.1 { "an audio clip" } else { "a MIDI clip" };
+        return Err(format!("track {:?} cannot hold {what}", target.name).into());
+    }
+    let Some(to_column) = project.launcher.columns.iter().position(|c| c.track == to_track) else {
+        return Err(format!("track {:?} has no clip slots", target.name).into());
+    };
+    let from_clip = project
+        .launcher
+        .columns
+        .get_mut(from_column)
+        .and_then(|c| c.slots.get_mut(from_scene))
+        .ok_or("the slot is missing")?
+        .clip
+        .take();
+    let from_clip = match from_clip {
+        Some(clip) => clip,
+        None => return Err("the slot has no clip to move".into()),
+    };
+    let back = project
+        .launcher
+        .columns
+        .get_mut(to_column)
+        .and_then(|c| c.slots.get_mut(to_scene))
+        .ok_or("the slot is missing")?
+        .clip
+        .replace(from_clip);
+    let swapped = back.is_some();
+    project.launcher.columns.get_mut(from_column).ok_or("the slot is missing")?.slots[from_scene].clip = back;
+    Ok(json!({
+        "moved": true,
+        "track": to_track.0,
+        "scene": to_scene + 1,
+        "swapped": swapped,
+    }))
 }
 
 /// Clears `[from, to)` on a lane for a clip placed there (docs/spec/arrangement-editing.md):
