@@ -1738,8 +1738,9 @@ fn clip_box<'a>(
     let split_at = state.split_at;
     // The menu acts on the whole selection when this clip is part of it, else on this clip alone.
     let menu_clips: Vec<(TrackId, usize)> = if state.is_selected(key) { state.selected.clone() } else { vec![key] };
-    response.context_menu(|ui| {
-        menus::clip_menu(ui, &menu_clips, stack, clip.enabled, actions);
+    // The menu stays open on a click inside: the rename's field and button live here.
+    egui::Popup::context_menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        menus::clip_menu(ui, &menu_clips, stack, clip.enabled, &clip.name, actions);
         menus::clip_edit_menu(ui, lane.track, clip.index, (clip.start, clip.length), split_at, actions);
     });
     let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));

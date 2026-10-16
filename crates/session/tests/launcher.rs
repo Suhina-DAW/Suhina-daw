@@ -808,3 +808,75 @@ fn a_slot_clip_moves_to_another_slot_and_swaps_an_occupied_one() {
     let moved = run(&mut session, "clip.moveSlot", json!({ "track": 2, "scene": 2, "to_track": 1, "to_scene": 2 }));
     assert!(moved.is_err(), "an audio track takes no MIDI clips");
 }
+
+#[test]
+fn a_clip_is_renamed_by_scene_or_index_and_undo_brings_the_name_back() {
+    let mut session = Session::new(project());
+    // A slot's clip renamed by scene: its content's name is the clip's. The fixture's track 1
+    // slots share one content, so the two slots' clips share the name, as the model has it.
+    let renamed = run(&mut session, "clip.rename", json!({ "track": 1, "scene": 1, "name": "Drop the beat" })).unwrap();
+    assert_eq!(renamed["name"], "Drop the beat");
+    let p = session.project();
+    let names = |p: &Project, track: u32| -> Vec<String> {
+        p.launcher
+            .columns
+            .iter()
+            .find(|c| c.track == TrackId(track))
+            .map(|c| {
+                c.slots
+                    .iter()
+                    .flat_map(|s| s.clip.as_ref())
+                    .map(|c| p.content(c.content).map(|c| c.name.clone()).unwrap_or_default())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(names(p, 1), vec!["Drop the beat".to_string(); 2], "the shared content's name is both slots'");
+    // An arrangement clip renamed by index: the fixture's arrangement is empty, so a lane with
+    // its own clip goes in first.
+    let mut p = project();
+    p.arrangement.lanes.push(ArrangementLane {
+        name: "Drums".into(),
+        track: Some(TrackId(1)),
+        clips: vec![Clip {
+            content: ContentId(1),
+            start: 0.0,
+            length: 1.0,
+            offset: 0.0,
+            loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
+            enabled: true,
+            fade_in: 0.0,
+            fade_out: 0.0,
+            fade_in_curve: Default::default(),
+            fade_out_curve: Default::default(),
+            follow_action: Default::default(),
+            launch: Default::default(),
+            extensions: Default::default(),
+        }],
+    });
+    let mut session = Session::new(p);
+    run(&mut session, "clip.rename", json!({ "track": 1, "index": 0, "name": "Intro take" })).unwrap();
+    let p = session.project();
+    let arranged = &p.arrangement.lanes[0].clips[0];
+    assert_eq!(p.content(arranged.content).unwrap().name, "Intro take");
+
+    // An empty name clears it.
+    run(&mut session, "clip.rename", json!({ "track": 1, "index": 0, "name": "" })).unwrap();
+    let p = session.project();
+    let arranged = &p.arrangement.lanes[0].clips[0];
+    assert_eq!(p.content(arranged.content).unwrap().name, "");
+
+    // One undo brings the cleared name back, and another, the slot's rename.
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    let p = session.project();
+    let arranged = &p.arrangement.lanes[0].clips[0];
+    assert_eq!(p.content(arranged.content).unwrap().name, "Intro take");
+    run(&mut session, "edit.undo", json!({})).unwrap();
+    let p = session.project();
+    let slot = p.launcher.columns.iter().find(|c| c.track == TrackId(1)).and_then(|c| c.slots.first()).unwrap();
+    assert_eq!(
+        p.content(slot.clip.as_ref().unwrap().content).unwrap().name,
+        "Beat",
+        "the undo walks back to the name the fixture's content had"
+    );
+}

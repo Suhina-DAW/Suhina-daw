@@ -667,17 +667,21 @@ fn column_body(
                     state.slot_drag = Some(key);
                 }
                 // The slot's menu, and a clip's launch settings under it.
-                response.context_menu(|ui| {
-                    menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions);
-                    if let Some(launch) = slot.launch {
-                        ui.separator();
-                        crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions);
-                    }
-                });
+                // The menu stays open on a click inside: the rename's field and button live here.
+                egui::Popup::context_menu(response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(
+                    |ui| {
+                        menus::slot_menu(ui, column.track, number, &slot.name, has_clip, can_paste, actions);
+                        if let Some(launch) = slot.launch {
+                            ui.separator();
+                            crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions);
+                        }
+                    },
+                );
             }
         } else if let (Some(response), Some(launch)) = (&launch, slot.launch) {
-            response
-                .context_menu(|ui| crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions));
+            egui::Popup::context_menu(response)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions));
         }
         let selected = state.selected_slot == Some(key);
         slot_cell(painter, rect, column, slot, hover, pulse, progress, selectable && selected);
