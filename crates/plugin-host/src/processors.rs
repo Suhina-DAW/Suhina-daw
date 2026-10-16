@@ -16,6 +16,8 @@
 //!   (counting from 0) on delays it by `frames` (at most [`MAX_DELAY`]) and reports that as its
 //!   latency, like a plug-in whose lookahead changes while it runs. Stereo, as the engine's
 //!   links are.
+//! - `test:busy:<µs>`: halves the sound, keeping its thread busy for `µs` microseconds (at most
+//!   one second) on every block, like a heavy plug-in.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -59,6 +61,8 @@ pub(crate) fn create(plugin: &str) -> Result<std::sync::Arc<dyn Processor>, Stri
         };
         let frames = frames.min(MAX_DELAY);
         Ok(std::sync::Arc::new(DelayAfter { after, frames, blocks: AtomicU32::new(0), line: Mutex::default() }))
+    } else if let Some(micros) = after("test:busy:") {
+        Ok(std::sync::Arc::new(Busy(Duration::from_micros(u64::from(micros.min(1_000_000))))))
     } else if let Some(n) = after("test:hang-after:") {
         Ok(std::sync::Arc::new(Failing { after: n, blocks: AtomicU32::new(0), hang: true }))
     } else {
@@ -87,6 +91,30 @@ impl Processor for Gain {
             return Err("gain is not a finite number".into());
         }
         self.0.store(gain.to_bits(), Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+/// A `test:busy:<µs>` plug-in: halves the sound, keeping its thread busy for that long on every
+/// block, as a heavy plug-in does (to measure how the engine waits for several, #151).
+struct Busy(Duration);
+
+impl Processor for Busy {
+    fn process(&self, input: &[f32], output: &mut [f32]) {
+        let started = std::time::Instant::now();
+        while started.elapsed() < self.0 {
+            std::hint::spin_loop();
+        }
+        for (o, i) in output.iter_mut().zip(input) {
+            *o = i * 0.5;
+        }
+    }
+
+    fn state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn set_state(&self, _data: &[u8]) -> Result<(), String> {
         Ok(())
     }
 }
@@ -212,5 +240,16 @@ mod tests {
         for bad in ["test:delay-after:1", "test:delay-after:x:2", "test:delay-after:1:-2"] {
             assert!(create(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_busy_plug_in_takes_its_time_and_halves() {
+        let busy = create("test:busy:2000").unwrap();
+        let mut output = [0.0f32; 4];
+        let started = std::time::Instant::now();
+        busy.process(&[1.0, 2.0, 3.0, 4.0], &mut output);
+        assert!(started.elapsed() >= Duration::from_millis(2));
+        assert_eq!(output, [0.5, 1.0, 1.5, 2.0]);
+        assert!(create("test:busy:x").is_err());
     }
 }
