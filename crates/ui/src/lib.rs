@@ -27,6 +27,7 @@ pub mod missing_files;
 pub mod motion;
 pub mod nesting;
 pub mod piano_roll;
+pub mod piano_roll_ghosts;
 pub mod piano_roll_grid;
 pub mod piano_roll_ruler;
 pub mod pick;

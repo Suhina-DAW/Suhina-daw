@@ -14,6 +14,7 @@ use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
 
 use crate::grid::default_track_colour;
 use crate::midi_tools::ToolSettings;
+use crate::piano_roll_ghosts::{self as ghost_view, GhostSource, Ghosts};
 use crate::piano_roll_grid::{FIXED_VALUES, GridMode, PianoGrid, Width};
 use crate::piano_roll_ruler::{self as ruler_view, ClipShape, RulerState};
 use crate::settings::ToolbarSize;
@@ -107,6 +108,9 @@ pub struct PianoClip {
     pub grid_follows: bool,
     /// The clip's start marker, length and loop, as the ruler shows and changes them.
     pub shape: ClipShape,
+    /// The notes of other clips drawn faintly behind this clip's own, and the clips the ghost
+    /// menu offers (› Ghost notes); the window fills them in.
+    pub ghosts: Ghosts,
 }
 
 /// Where a clip plays its content on the arrangement.
@@ -243,6 +247,7 @@ fn piano_clip_from(project: &Project, track: TrackId, clip: &Clip, quantization:
             loop_range: clip.loop_range.map(|l| (l.start, l.end)),
             room: None,
         },
+        ghosts: Ghosts::default(),
     })
 }
 
@@ -440,6 +445,9 @@ pub struct PianoRollState {
     audition_pending: Vec<u8>,
     audition_off: Option<(u64, f64)>,
     audition_sounding: Vec<u8>,
+    /// Which other clips show as ghost notes, picked in the toolbar's ghost menu; kept until
+    /// Suhina closes (› Ghost notes).
+    pub ghost_source: GhostSource,
 }
 
 impl Default for PianoRollState {
@@ -484,6 +492,7 @@ impl Default for PianoRollState {
             audition_pending: Vec::new(),
             audition_off: None,
             audition_sounding: Vec::new(),
+            ghost_source: GhostSource::default(),
         }
     }
 }
@@ -1851,6 +1860,13 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     if workflow.right() + 4.0 + 104.0 < hide_left {
         workflow_menu(ui, workflow, keymap, state);
         x.set(workflow.right() + gap);
+        // The ghost menu after it, when there is room for both (› Ghost notes).
+        let ghosts =
+            Rect::from_min_size(Pos2::new(x.get() + 4.0, row.top()), Vec2::new(ghost_view::MENU_WIDTH, row.height()));
+        if ghosts.right() + 4.0 + 104.0 < hide_left {
+            ghost_view::menu(ui, ghosts, &clip.ghosts, &mut state.ghost_source);
+            x.set(ghosts.right() + gap);
+        }
     }
     let paint = ButtonPaint { ui, painter: &painter, keymap, scale };
     let x = x.get();
@@ -2561,6 +2577,8 @@ fn draw(
     }
     let outside =
         |note: &Note| note.time + note.duration <= played_start + EPSILON || note.time >= played_end - EPSILON;
+    // Ghost notes of other clips, under the clip's own (› Ghost notes).
+    ghost_view::paint(&grid_painter, &clip.ghosts, layout.grid, |g| layout.note_rect(&g.note()));
 
     // Notes, where a drag in progress puts them.
     let shown = |i: usize, note: &Note| -> Note {
@@ -2750,6 +2768,7 @@ fn for_readers(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollStat
     let grid = ui.interact(layout.grid, Id::new("piano-roll-readers"), Sense::hover());
     let count = clip.notes.len();
     grid.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, format!("Piano roll, {count} notes")));
+    ghost_view::for_readers(ui, &clip.ghosts, layout.grid, |g| layout.note_rect(&g.note()));
     for (i, note) in clip.notes.iter().enumerate() {
         let rect = layout.note_rect(note).intersect(layout.grid);
         if !rect.is_positive() {
@@ -2918,6 +2937,7 @@ mod tests {
             grid_menu: PianoGrid::default(),
             grid_follows: false,
             shape: ClipShape { offset: 0.0, length: 8.0, loop_range: None, room: None },
+            ghosts: Ghosts::default(),
         }
     }
 

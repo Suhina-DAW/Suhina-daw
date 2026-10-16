@@ -1,6 +1,6 @@
 ---
 description: Measurements, states and tokens of every UI component, from the minimal v3 mockups
-read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout, audition button, velocity lane top edge
+read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout, audition button, velocity lane top edge, ghost menu, ghost notes look
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -507,6 +507,14 @@ and the **Audition** icon (headphones: a 1.1 px band over two filled 3 × 5 px c
 the four modes as selectable rows, a divider, and one row per workflow setting ("Double-click on a
 note: Deletes it") opening a submenu of its choices, the chosen one highlighted; it is left out when
 the toolbar is too narrow for it and the grid menu.
+After it the 64 px **ghost menu**: "Ghosts" and a ▾ in 10 px `text.value` (`text.hint` while it
+shows none), its accessible label and tooltip naming what it shows ("Ghost notes Playing
+together"); its menu the rows None, Playing together and This track, the chosen one highlighted, a
+divider, and **Clip…** opening a submenu of every other MIDI clip ("Walk on Bass at bar 17"),
+scrolling past 320 px. It is left out, before the workflow menu, when the toolbar is too narrow for
+it and the grid menu. **Ghost notes** are plain rectangles in their own track's colour at 0.25,
+under the clip's notes, with no name, edge or velocity stem
+([clip editor spec](../spec/ui-clip-editor.md) › Ghost notes).
 At the right end
 "Grid" in 10 px `text.hint` and a 76 px grid menu button (its value in 10 px mono `text.value` and
 a ▾). Its menu lists, in 10 px text and separated by dividers: **Snap to grid**; the heading

@@ -1,6 +1,6 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, grid menu, adaptive grid, fixed grid, snap to grid, snap off, triplet grid, narrow grid, widen grid, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes, ruler, loop row, loop region, loop handles, loop start, loop end, clip loop, start marker, end marker, clip length, clip offset, clip.setLoop, clip.setLength, clip.setStart, ruler drag zoom, ruler scroll, zoom to selection, zoom to clip, Z, Shift+Z, notes outside the loop, shaded notes, left edge, resize the start, startBy, Ctrl+drag copies, copy by dragging, Alt+drag velocity, velocity line, draw a line in the velocity lane, velocities, velocity lane height, lane top edge, audition, hear notes while editing, preview.noteOn keys
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, grid menu, adaptive grid, fixed grid, snap to grid, snap off, triplet grid, narrow grid, widen grid, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes, ruler, loop row, loop region, loop handles, loop start, loop end, clip loop, start marker, end marker, clip length, clip offset, clip.setLoop, clip.setLength, clip.setStart, ruler drag zoom, ruler scroll, zoom to selection, zoom to clip, Z, Shift+Z, notes outside the loop, shaded notes, left edge, resize the start, startBy, Ctrl+drag copies, copy by dragging, Alt+drag velocity, velocity line, draw a line in the velocity lane, velocities, velocity lane height, lane top edge, audition, hear notes while editing, preview.noteOn keys, ghost menu, ghost notes of other clips, notes of other clips, playing together, write a bass line against the chords, faint notes behind
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -9,6 +9,7 @@ covers:
   - crates/ui/src/piano_roll_grid.rs
   - crates/ui/src/piano_roll_ruler.rs
   - crates/ui/src/piano_roll_gestures.rs
+  - crates/ui/src/piano_roll_ghosts.rs
   - crates/ui/src/midi_tools.rs
   - crates/ui/src/detail_view.rs
   - crates/session/src/notes.rs
@@ -76,7 +77,8 @@ bottom:
    [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
    [#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the tools, then the note
    clipboard, then the MIDI tools column's toggle and the **Audition** button, then the
-   **workflow menu** (› Workflow modes), and at the right end the piano roll's grid
+   **workflow menu** (› Workflow modes) and the **ghost menu** (› Ghost notes), and at the right
+   end the piano roll's grid
    value (› Grid and snapping), and after it, at the very end, the **×** that hides the editor
    (› Least height and closing). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale
    with the scale name.
@@ -114,7 +116,9 @@ bottom:
    state only, not a command. The **Audition** icon (headphones, built
    [#351](https://github.com/suhina-daw/suhina-daw/issues/351)) after it turns the audition on
    and off (› Playing the keys); it is off when Suhina starts, highlighted while on, and a click
-   on it is window state only, not a command. The grid menu stays at the right end of the toolbar (› Grid and
+   on it is window state only, not a command. The workflow menu and the ghost menu are left out,
+   the ghost menu first, when the toolbar is too narrow for them and the grid menu. The grid menu
+   stays at the right end of the toolbar (› Grid and
    snapping); the quantise
    controls are in the clip's properties column (› Quantise).
 2. **Ruler** (built, the loop row and the markers [#353](https://github.com/suhina-daw/suhina-daw/issues/353)):
@@ -637,11 +641,52 @@ one undo step, so Ctrl+Z (Cmd+Z on macOS) takes back exactly what it did.
 
 ## Ghost notes
 
-- **Later ([#348](https://github.com/suhina-daw/suhina-daw/issues/348)):** the notes of other clips on the same track, and optionally of one other clip the user
-  picks (another track), are drawn faintly behind the clip's own notes and cannot be edited; this
-  is how a bass line is written against the chords. Which clips are shown is a toolbar menu
-  (none, this track, a chosen clip). Clips that play at the same time in the arrangement are the
-  default **(to decide)**.
+**Built ([#348](https://github.com/suhina-daw/suhina-daw/issues/348)).** The notes of other clips
+are drawn faintly behind the edited clip's own notes and cannot be edited, so a part can be
+written against another (a bass line against the chords).
+
+- **The ghost menu** in the toolbar, after the workflow menu (› Layout), reads **Ghosts**, dimmed
+  while nothing is shown; its accessible label and its tooltip name what is shown ("Ghost notes
+  Playing together"). Its entries, the chosen one ticked:
+  - **None**: no ghost notes.
+  - **Playing together** (the default): the clips that play at the same time as the edited clip.
+    For an arrangement clip, every other arrangement clip, on any track, that plays during the
+    edited clip's first pass (below); a clip that is turned off is left out. For a Session slot's
+    clip, the clips in the other slots of the same scene: launching the scene starts them
+    together, so each is laid out from the same launch (a looping slot clip goes on for ever, one
+    that does not loop stops after its length).
+  - **This track**: the other clips of the edited clip's track (the other clips on its lane for an
+    arrangement clip, the other slots of its column for a slot's clip), each laid out as if it
+    started together with the edited clip.
+  - **Clip…**, a submenu listing every other MIDI clip of the project by its name, track and place
+    ("Walk on Bass at bar 17", "Walk on Bass in scene 2"; at most 500): one picked clip, on any
+    track, laid out as if it started together with the edited clip. Picking the edited clip itself
+    is not offered.
+
+  The choice is window state, kept until Suhina closes and across the clips shown: not a command,
+  not saved with the project and not an undo step. A picked clip is named by its place (its
+  track and its index on the lane, or its slot); when that place holds no clip any more, nothing
+  is shown.
+- **The time mapping.** Each other clip is laid out in time through its own start, offset and loop,
+  as the engine plays it: from its start it plays its content from its offset; a looping clip
+  plays on to its loop's end and then round the loop for the rest of its length (an offset at or
+  past the loop's end starts where it falls inside the loop). Only the part of each note that
+  sounds while the edited clip plays is drawn: a note held across the edited clip's start, a
+  loop's end or the other clip's end is cut there. The edited clip's own time is its **first
+  pass**: from its start until its content first reaches its loop's end, or its whole length when
+  it does not loop. A moment of that time maps to the content beat the edited clip plays then (its
+  offset plus the beats since its start), so a looping edited clip shows what plays with its
+  first time round, not every pass on top of each other. Muted notes are not drawn.
+- **Drawing.** Ghost notes are drawn under the clip's own notes and over the grid's rows, as
+  plain rectangles in their own track's colour at 25 % opacity: no name, no edge, no velocity
+  stem. They are never hit-tested: a click, a double-click or a drag on a ghost note does what it
+  does on the empty grid (a click with the Select tool clears the selection, a double-click adds a
+  note there), and a ghost is never selected, moved or listed by `note.list`. For readers and
+  tests each ghost in view is labelled "Ghost note E1 at beat 0 from Bass" (key, content beat,
+  track), a label that only describes and senses nothing.
+- **Limits.** At most 20 000 ghost notes are mapped for one clip and at most 512 of those in view
+  are labelled, so a large project never draws or maps without end.
+- **Later:** ghost notes for an audio clip's editor; a colour or opacity setting.
 
 ## Slicing and gluing
 

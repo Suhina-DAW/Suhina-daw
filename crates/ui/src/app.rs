@@ -1581,7 +1581,11 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let piano = self.piano_clip(clip);
+        let mut piano = self.piano_clip(clip);
+        // The notes of other clips the piano roll draws behind this one's (› Ghost notes).
+        if let (Some(piano), Some(clip), Some(session)) = (piano.as_mut(), clip, self.session()) {
+            piano.ghosts = crate::piano_roll_ghosts::ghosts(session.project(), clip, self.piano_roll.ghost_source);
+        }
         let least = self.least_detail_height();
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;

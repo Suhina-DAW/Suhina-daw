@@ -687,6 +687,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   line that sets every stem it spans in one step (`note.setVelocity {velocities}`); the lane's top
   edge drags it taller or shorter; and the toolbar's **Audition** button (off at start) makes drawn
   and moved notes sound once through the track's instrument (`preview.noteOn {keys}`).
+- **Ghost notes in the piano roll** ([#348](https://github.com/suhina-daw/suhina-daw/issues/348)):
+  the notes of other clips are drawn faintly behind the edited clip's, in their own track's colour,
+  so a part can be written against another (a bass line against the chords). The toolbar's
+  **Ghosts** menu shows the clips playing at the same time (the default; for a slot's clip, the
+  other slots of its scene), the other clips of the same track, one clip picked from a list, or
+  none. Ghost notes are mapped through each clip's start, offset and loop, never take a click, and
+  the choice is a view setting kept until Suhina closes, not saved with the project.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the
