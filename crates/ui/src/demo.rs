@@ -145,6 +145,7 @@ fn content_of(id: ContentId, name: &str, track: u8) -> ClipContent {
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
         extensions: Extensions::default(),
+        scale: None,
     }
 }
 

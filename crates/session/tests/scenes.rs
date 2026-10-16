@@ -27,6 +27,7 @@ fn project() -> Project {
         length: 1.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 0.25, 60, 1.0)]) }],
         extensions: Extensions::default(),
+        scale: None,
     };
     let clip = |content: u32| Clip {
         loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),

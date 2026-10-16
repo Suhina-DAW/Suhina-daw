@@ -40,6 +40,7 @@ pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
             length: 1.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note(0.0, 1.0, 69)]) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: players

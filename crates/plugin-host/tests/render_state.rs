@@ -80,6 +80,7 @@ fn project() -> Project {
             length: 1.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note]) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {

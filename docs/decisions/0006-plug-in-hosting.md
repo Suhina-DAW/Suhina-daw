@@ -3,7 +3,7 @@ description: How third-party plug-ins are hosted out of process (process model, 
 read_when: plug-in, plugin host, CLAP, VST3, VST2, sandbox, out of process, IPC, shared memory, unsafe, plug-in crash, scanning, plug-in editor
 type: decision
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/ipc/**
   - crates/plugins/**
@@ -220,16 +220,35 @@ workspace forbids.
    (`device.plugin`: `blocks`, `late_blocks`, `longest_us`, `no_time`), and the device panel
    shows the share. Even so the sum of 25 plug-ins' times (a heavy synth up to 9 ms a block)
    passed the budget on half the blocks, so the chains no chain plays into now run their
-   plug-ins *at the same time*, a stage at a time: every chain hands its block to its next
-   plug-in (`Link::send_with_events`, `PluginProcessor::send`), then every chain waits for
-   its answer (`Link::wait`, `PluginProcessor::wait`), and so on until every chain is done;
-   a bus runs after the chains that play into it. The budget is then set by the slowest
-   plug-in, not the sum: the same project went from 30 to 50 % of blocks late to none, the
-   longest wait 6 ms. A host still busy with an earlier block (one whose answer came after
-   its deadline) refuses the next (`Sent::Refused`). In real time the engine does not wait
-   for it, since that would spend the deadline every chain shares: the round trip is one
-   miss and the block is lost to the plug-in, so an effect passes the sound through and an
-   instrument is silent for that block, as when it misses its deadline. The chain does not
+   plug-ins *at the same time*: every chain hands its block to its first plug-in
+   (`Link::send_with_events`, `PluginProcessor::send`); then the engine looks at the chains
+   whose blocks are out in turn (`Link::wait_answered`, `PluginProcessor::poll`), takes each
+   answer as it comes (`Link::wait`, `PluginProcessor::wait`) and runs that chain on to its
+   next plug-in at once, while the others are still out, until every chain is done (#151); a
+   bus runs after the chains that play into it. The budget is then set by the slowest chain,
+   not the sum: the same project went from 30 to 50 % of blocks late to none, the longest
+   wait 6 ms. (Until #151 the chains went a stage at a time, every chain waiting for every
+   chain's answer before any went on, so a chain waited once per plug-in for the slowest
+   plug-in of that stage elsewhere: measured with three chains of three plug-ins whose heavy
+   one, 3 ms a block, is at another place in each, see Consequences.) While no answer is in,
+   the render thread sleeps on the first chain still out for at most 50 µs at a time
+   (`ANSWER_SLICE`): that plug-in's answer wakes it at once, another's is seen at most that
+   late. A chain whose plug-in has not answered by the deadline misses that block, as before;
+   the others are not held up by it. An offline render gives each block out `OFFLINE_TIMEOUT`
+   from when it went. `longest_us` is each plug-in's longest round trip, timed from the block's
+   hand-over, since the engine may look at other chains before it takes an answer. A plug-in still at a block it was late with (one whose answer
+   came after its deadline, as when a synthesizer takes longer over the notes of a start or a
+   stop's all-notes-off) is waited for like an answer: its chain hands it the next block as
+   soon as it is done (`PluginProcessor::ready`, `PluginAudio::ready`, `Link::wait_ready`),
+   while the other chains go on, and only until that block's deadline (#506). Only a plug-in
+   late with the block before alone is waited for; one that has not answered several in a row
+   (hung, or far behind) is not. Measured with `measure_quick_play_and_stop` (see
+   Consequences): an instrument that took longer than a whole block over each press of play or
+   stop lost two blocks a press, the late one and the next, refused, with the notes it
+   brought; it now loses the late one only. A host still busy when the deadline comes refuses
+   the block (`Sent::Refused`): the round trip is one miss and the block is lost to the
+   plug-in, so an effect passes the sound through and an instrument is silent for that block,
+   as when it misses its deadline. The chain does not
    try it again through `process`, which would count it a second time and make a slow host
    *hung* after 16 round trips instead of 32 (#188). An offline render waits for the busy
    host, up to `OFFLINE_TIMEOUT` (`PluginProcessor::send`'s patience, `Link::wait_ready`),
@@ -457,6 +476,23 @@ workspace forbids.
   128 frames 395 to 450 µs (99 %: 1.06 to 1.77 ms) against 140 to 165 µs (99 %: 0.32 to
   0.47 ms). The saving grows with the number of plug-ins, as each one left out of the chain of
   round trips is a wake-up of each side less.
+- Measured on Linux (4 cores, a container, hosts at normal priority; test
+  `measure_chains_waiting_for_their_own_plug_ins` in `crates/plugin-host/tests/chain_wait.rs`,
+  release build, three chains of three `test:busy` plug-ins each in its own process, one heavy
+  plug-in of 3 ms a block at another place in each chain, the others 0.3 ms, 1024 frames at
+  48 kHz, a deadline of 12.8 ms, three runs): a block took 10.2 to 10.4 ms on average a stage
+  at a time (99 %: 11.6 to 12.9 ms) and 5.1 to 5.3 ms with each chain going on as its own
+  plug-in answers (99 %: 9.6 to 10.0 ms), #151.
+- Measured on Linux (4 cores, a container; test `measure_quick_play_and_stop` in
+  `crates/plugin-host/tests/quick_play_stop.rs`, release build, `test:burst` instruments that
+  take a set time over each block bringing notes, play and stop pressed every 4 blocks, 2000
+  blocks of 256 frames at 48 kHz, a deadline of 3.2 ms), #506: an instrument taking 6 ms over
+  a press (more than a whole block) was late with 999 blocks for 500 presses, the late block
+  and the next, refused; once a plug-in late with one block is waited for to take the next,
+  501. One taking 4 ms (past the deadline, within the block) loses its late block either way
+  (504 and 499); 2.5 ms and less loses next to none. With four instruments on four tracks,
+  one taking 6 ms and the others 1 ms or less, the others were late with 4 to 8 blocks of
+  2000, about as with 1 ms each on their own.
 - A crash costs the engine one block of the plug-in's output, not the session or the project.
 - Host processes and scan workers start without a window of their own (`host_command`; on
   Windows `CREATE_NO_WINDOW`), so the desktop app, which has no console, does not open a
@@ -484,7 +520,7 @@ workspace forbids.
   all-notes-off, which many plug-ins ignore. Offline (`Renderer::set_offline`, every
   `render_*` function, the CLI's and MCP's WAV renders) each block waits up to 10 s for a
   host still busy with the block before, and up to 10 s for its own answer, through the same
-  staged round trips as playback, so no block of a render is lost to a slow plug-in.
+  round trips as playback, so no block of a render is lost to a slow plug-in.
   Each plug-in device has a key made from its channel, its plug-in and how many of the same
   plug-in come before it on that channel, so it keeps its running plug-in when devices are
   added, removed or moved around it; its processor reaches the audio thread as a message

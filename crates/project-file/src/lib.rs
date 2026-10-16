@@ -29,8 +29,8 @@ use suhina_model::{
     Extensions, FadeCurve, FadeShape, FollowAction, FollowKind, InputChannels, LaneData, LaunchMapping, LaunchMode,
     LaunchQuantization, LaunchSettings, Launcher, LauncherColumn, LoopRange, MAX_CHANGE_BEAT, MAX_INPUT_CHANNEL,
     MAX_TEMPO_CHANGES, MAX_TIME_SIGNATURE_CHANGES, MappingSource, MappingTarget, Marker, MidiInput, MidiPort, Monitor,
-    Note, Project, Rgb, Scene, Send, Slot, StretchMode, TempoPoint, TimeSignature, TimeSignatureChange, Track, TrackId,
-    Transport, WarpMarker, automation, valid_bpm,
+    Note, Project, Rgb, Scale, ScaleMode, Scene, Send, Slot, StretchMode, TempoPoint, TimeSignature,
+    TimeSignatureChange, Track, TrackId, Transport, WarpMarker, automation, valid_bpm,
 };
 
 /// The file extension, without the dot.
@@ -260,6 +260,10 @@ fn project_value(p: &Project) -> Value {
         map.insert("mappings".into(), p.launcher.mappings.iter().map(mapping_value).collect());
     }
     out.insert("launcher".into(), launcher);
+    // Left out when there is none, so a project without one is written as before.
+    if let Some(scale) = p.default_scale {
+        out.insert("default_scale".into(), scale_value(scale));
+    }
     with_extensions(&mut out, &p.extensions);
     Value::Object(out)
 }
@@ -420,9 +424,18 @@ fn content_value(c: &ClipContent) -> Value {
         .collect();
     let mut out = json!({ "id": c.id.0, "name": c.name, "length": number(c.length), "lanes": lanes });
     if let Some(map) = out.as_object_mut() {
+        // Left out when the content has none, so a project without scales is written as before.
+        if let Some(scale) = c.scale {
+            map.insert("scale".into(), scale_value(scale));
+        }
         with_extensions(map, &c.extensions);
     }
     out
+}
+
+/// A scale as the file writes it: `{ "root": 0 to 11, "mode": "<name>" }`.
+fn scale_value(scale: Scale) -> Value {
+    json!({ "root": scale.root(), "mode": scale.mode.name() })
 }
 
 fn audio_value(a: &AudioRegion) -> Value {
@@ -848,7 +861,16 @@ fn read_project(value: &Value) -> Result<Project, ProjectFileError> {
             Launcher { scenes, columns, mappings }
         }
     };
-    Ok(Project { transport, tracks, channels, contents, arrangement, launcher, extensions: extensions(p, "project")? })
+    Ok(Project {
+        transport,
+        tracks,
+        channels,
+        contents,
+        arrangement,
+        launcher,
+        extensions: extensions(p, "project")?,
+        default_scale: read_scale(p, "default_scale", "project")?,
+    })
 }
 
 fn read_track(value: &Value, at: &str) -> Result<Track, ProjectFileError> {
@@ -1094,6 +1116,7 @@ fn read_content(value: &Value, at: &str) -> Result<ClipContent, ProjectFileError
         length: float(c, "length", at)?,
         lanes,
         extensions: extensions(c, at)?,
+        scale: read_scale(c, "scale", at)?,
     })
 }
 
@@ -1253,6 +1276,28 @@ fn read_launch(c: &Obj, at: &str) -> Result<LaunchSettings, ProjectFileError> {
             .ok_or_else(|| ProjectFileError(format!("{at}.quantization: unknown launch quantisation {text:?}")))?,
     };
     Ok(LaunchSettings { mode, legato: flag(l, "legato", false, &at)?, quantization })
+}
+
+/// A scale, `key` in `o`: `None` when missing (files written before scales), else
+/// `{ "root", "mode" }` with a root 0 to 11 and a mode the model knows; anything else is an error
+/// naming where it is.
+fn read_scale(o: &Obj, key: &str, at: &str) -> Result<Option<Scale>, ProjectFileError> {
+    let at = format!("{at}.{key}");
+    let s = match o.get(key) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(value) => object(value, &at)?,
+    };
+    let root = match s.get("root").and_then(Value::as_u64) {
+        Some(root) if root <= 11 => root as u8,
+        Some(root) => return Err(format!("{at}.root: expected 0 to 11, got {root}").into()),
+        None => return Err(format!("{at}.root: expected a whole number 0 to 11").into()),
+    };
+    let mode = match s.get("mode") {
+        Some(Value::String(name)) => ScaleMode::from_name(name)
+            .ok_or_else(|| ProjectFileError(format!("{at}.mode: unknown scale mode {name:?}")))?,
+        _ => return Err(format!("{at}.mode: expected a scale mode name").into()),
+    };
+    Scale::new(root, mode).map(Some).ok_or_else(|| ProjectFileError(format!("{at}.root: expected 0 to 11")))
 }
 
 /// A fade's shape and curve, `<fade>_shape` and `<fade>_curve`: linear and 0 when missing (files
