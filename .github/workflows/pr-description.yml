@@ -1,0 +1,23 @@
+name: Pull request description
+
+# A pull request's description has the sections of .github/pull_request_template.md. This workflow
+# reminds one that leaves sections out with a warning annotation; it never fails, so a
+# contributor's pull request is not held up by its description (scripts/pr_description.py).
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  notice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The description goes through an environment variable, never into the script's text, so
+      # nothing in it runs as shell.
+      - name: The description has the template's sections
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/pr_description.py

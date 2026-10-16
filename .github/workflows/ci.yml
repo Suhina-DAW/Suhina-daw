@@ -81,6 +81,8 @@ jobs:
         run: python3 scripts/depends_on_test.py
       - name: The branch name reminder reads names as intended
         run: python3 scripts/branch_name_test.py
+      - name: The description reminder reads descriptions as intended
+        run: python3 scripts/pr_description_test.py
       - name: The licence header script adds and checks headers as intended
         run: python3 scripts/license_header_test.py
       # Warnings only: documents that describe code this pull request changes, left unchanged.
