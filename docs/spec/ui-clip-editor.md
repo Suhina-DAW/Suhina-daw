@@ -1,9 +1,9 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes
 type: spec
 status: draft
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/ui/src/piano_roll.rs
   - crates/ui/src/midi_tools.rs
@@ -72,7 +72,8 @@ bottom:
    [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
    [#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the tools, then the note
    clipboard, then the MIDI tools column's toggle, and at the right end the piano roll's grid
-   value (› Grid and snapping). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale
+   value (› Grid and snapping), and after it, at the very end, the **×** that hides the editor
+   (› Least height and closing). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale
    with the scale name.
 
    The tools are **Select**, **Draw**, **Paint**, **Erase**, **Slice** and **Mute** (› Drawing
@@ -119,7 +120,9 @@ bottom:
    through the clip's start, offset and loop (a looping clip shows it going round its loop), in
    step with the Arrangement view's playhead. Outside the clip, or while stopped, there is none.
 4. **Velocity lane** (built): under the grid, sharing its time axis, 72 px tall (less in a short
-   detail area: at most 30 % of its height). One stem per note at the
+   detail area: at most 30 % of the room under the ruler, and never so tall that fewer than five
+   key rows are left above it; when that leaves it under 12 px it is not drawn at all, and the
+   key rows take its room). One stem per note at the
    note's start, its height the velocity; a selected stem is brighter. **Later:** the lane's
    height dragged by its top edge; chord notes on the same start drawn side by side, a few pixels
    apart, so each can be grabbed; the lane's tools (randomise, ramp, deviation) ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)).
@@ -127,6 +130,40 @@ bottom:
 Everything scales with the detail area: the detail area's splitter (exists) makes the editor taller
 or shorter, and the key rows and the velocity lane keep their own heights while the visible range
 of keys grows and shrinks.
+
+### Least height and closing
+
+**Built:** the smallest open piano roll is 120 px of detail area (in a row under the view): the
+toolbar, the ruler and at least five key rows at the default 12 px row height, with the clip
+column beside them showing its title (the clip's name) and its Track, Start, Length, Loop and
+Notes rows whole. The splitter, dragged down, stops at that height. Above it the view keeps its
+own least height (160 px), as before; with the detail area showing a track's devices instead the
+detail area's least height stays 80 px.
+
+The editor closes three ways, and each does the same as **View › Hide detail area** (Shift+Tab):
+the detail area is hidden and the view takes the whole height, its height is kept for when it
+comes back. It is window state, not a command, and not an undo step.
+
+- **The splitter dragged down** past half the least height (60 px from the bottom with the
+  editor, 40 px with devices): the detail area collapses to the 6 px splitter along the bottom
+  of the window. While the same drag goes back up past that point, it opens again under the
+  pointer. Once it is let go, the splitter stays at the bottom, and dragging it up opens the
+  detail area again at the height the drag reaches (at least the least height).
+- **The ×** at the right end of the piano roll's toolbar (its top row), named **Hide editor**,
+  with its key in the tooltip.
+- **View › Hide editor** (Ctrl+Shift+E, the keymap action `view.editor`), shown while a clip's
+  editor is open; while it is hidden and a clip is selected the entry reads **Show editor** and
+  opens it. Escape does not close the editor: in the piano roll it already clears the note
+  selection (`pianoRoll.deselect`) and closes the quantise block, so the editor has a key of its
+  own instead, one no other default uses.
+
+After the editor is closed one of these ways, **selecting a clip** (a click on a clip in the
+Arrangement view, another clip, or a slot's clip in the Session view) opens it again at the
+height it had. A detail area hidden with Shift+Tab stays hidden when a clip is selected, as
+before; Shift+Tab, View › Show detail area and the splitter open it either way. A click on an
+empty spot of the Arrangement view clears the clip selection (› [Arrangement
+editing](arrangement-editing.md) › Selecting clips); the detail area stays open and shows the
+track's devices, or the hint.
 
 ### Pulled to the top
 
@@ -176,6 +213,12 @@ pull up.
   macOS, as in the Arrangement view) zooms key height around the pointer. Dragging with the middle mouse button pans both ways. A newly shown clip opens scrolled
   so its notes are in view (the middle of its lowest and highest note; C3 for an empty clip) and
   zoomed so the whole clip fits the width.
+- **Built:** the notes stay in view at any height. Until the key rows are scrolled by hand (the
+  wheel, a middle-button pan, zooming the key height), every change in the editor's height (the
+  splitter, the window, pulling it to the top, closing and opening it) centres the key rows on the
+  notes again, so at the least height the five rows show the middle of the clip's notes, not the
+  rows around C3 it opened at. Once the key rows have been scrolled by hand they stay where they
+  were put until another clip is shown.
 - **Built:** while the **right** mouse button is held down over the grid, each wheel step chooses
   the next tool, or with the wheel turned the other way the previous one, in the order Select →
   Draw → Paint → Erase → Slice → Mute, stopping at the first and the last tool (no wrapping round)
@@ -426,6 +469,11 @@ pull up.
   - **Velocity**: the range of the selection's velocities as 1 to 127, such as `64` or `64–127`.
   - A selection of muted notes says how many are muted in the Notes row, such as `2 of 4, 1 muted`,
     so a run muted with the Mute tool is visible in the column as well as on the grid.
+- **Built:** the column never wraps a value onto more lines, at any height or width. A label or a
+  value too long for its row is shortened with an ellipsis; rows that do not fit under the
+  column's bottom are left out, from the last one up, rather than drawn cut in half, and the title
+  goes last. The same holds for the MIDI tools column beside it: its buttons and fields shorten
+  their text instead of wrapping it, and the column is left out when its head does not fit.
 - When the quantise block is open it takes the column's top: its title **Quantise**, then Grid,
   Amount, the checkbox and the two buttons, and the clip's own properties are drawn under it. The
   space the block needs is given to the column for that frame; closing the block gives it back.
@@ -551,6 +599,7 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 | Click, drag in the key column | Plays the key, through the track's instrument |
 | Ctrl+click, Ctrl+drag in the key column | Selects the notes of that pitch, of those pitches |
 | Middle-button drag | Pan |
+| Ctrl+Shift+E | Hides the editor (the detail area), or shows it again (`view.editor`, › Least height and closing) |
 
 The keys after a click in the piano roll are keymap actions ([`docs/shortcuts.md`](../shortcuts.md)):
 the `selection.*` ones the window has anyway, and `pianoRoll.selectAll`, `.deselect`, `.earlier`,

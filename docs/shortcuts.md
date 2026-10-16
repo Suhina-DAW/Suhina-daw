@@ -3,7 +3,7 @@ description: Keyboard shortcuts in the desktop app: the default keys, the keymap
 read_when: shortcuts, keys, keymap, keymap.json, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, right click deletes, left click draws, Alt right plays, rebind, cut copy paste, duplicate, mute clips, hotkeys, quantise, Ctrl+U, piano roll keys, tool keys, number keys choose a tool, arrow keys, select all, mute tool key
 type: howto
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/ui/src/keymap.rs
   - crates/ui/src/settings_view.rs
@@ -87,6 +87,7 @@ Unknown actions, keys, presets and mouse entries are skipped with a warning in t
 | Play from the start of the clip selected in the Arrangement view, whatever the setting (`transport.playFromSelection`; from the marker when no clip is selected) | Shift+Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |
+| Hide the clip editor, or show it again (`view.editor`; [spec](spec/ui-clip-editor.md) › Least height and closing). Escape in the piano roll keeps clearing the note selection | Ctrl+Shift+E |
 | Map keys to clip slots, scenes and stop buttons, or stop mapping (`view.mappingMode`; [Session view](spec/ui-session-view.md#launch-keys)). A key mapped to a slot wins over its shortcut while the Session view is shown | Ctrl+M |
 | Show or hide the browser (`view.browser`) | Ctrl+B |
 | Show or hide the sample map in the main area (`view.sampleMap`; Escape on the map closes it too) | Ctrl+Shift+M |

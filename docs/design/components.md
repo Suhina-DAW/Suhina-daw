@@ -3,7 +3,7 @@ description: Measurements, states and tokens of every UI component, from the min
 read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout
 type: spec
 status: draft
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
@@ -99,7 +99,7 @@ the view with the detail area, status bar.
 | Drop overlay | While a project file is dragged over the window: `window.background` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
 | Browser | 300 px wide by default, dragged from 200 px to half the window by a 4 px handle at its inner edge (`border`, `border.strong` under the pointer); left of the view, or right (Settings › Interface › Browser); Ctrl+B and View › Show browser hide and show it. See Browser below |
 | Detail splitter | 6 px, `control.background`, a 32 × 2 grip in `text.hint` in the middle; the cursor shows which way it moves |
-| Detail area | Under the view, 200 px by default, resizable from 80 px to all but 160 px of the view, and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; `AudioEffect` panels show visible signal-flow nodes and fitted parameter sliders; a selected clip (on the arrangement, or in a slot) shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
+| Detail area | Under the view, 200 px by default, resizable from 80 px (120 px while it shows the piano roll) to all but 160 px of the view; dragged below half that it collapses to the splitter along the bottom, which is dragged up to open it again ([clip editor](../spec/ui-clip-editor.md) › Least height and closing), and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; `AudioEffect` panels show visible signal-flow nodes and fitted parameter sliders; a selected clip (on the arrangement, or in a slot) shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable) — Settings › Interface › Detail area. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
 | Status bar | 20 px, `panel.background`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.hint`), followed by " · backed up 14:05" once the active project has been backed up in this run. There is no separate info view |
 
 ## Browser
@@ -195,7 +195,7 @@ track along the bottom edge.
 | Grid lines | In the lanes and the fixed rows (not the empty space below the lanes), at every step of the control bar's grid value, coarser where lines would be closer than 8 px ([spec](../spec/arrangement-editing.md) › The grid): a 1 px `border` at each bar line, a 1 px `panel.background` line between |
 | Lanes | Default height 48 px, the lower edge of a header resizes it (20–400 px); separated by 1 px `border.strong`; empty area `window.background`. Overlapping (stacked) clips share the lane in equal sub-rows |
 | Clip | Fills its lane (or sub-row) from top to bottom, 1 px short of its end; `control.background` body; 2 px top strip in the track colour; name 10 px `#C9C4BB`, 4 px from the left and 3 px from the top (it stays in view while the clip's start is scrolled off); selected clip `control.activeBackground` with 1 px `text.primary` inset; a drag moves it along its lane or to another; a right-click opens its menu (Duplicate, Delete, then Split here, greyed out on the clip's edges, and Consolidate) |
-| MIDI marks | Under the name: one 2 px line per note in the track colour, its length the note's; the clip's lowest note at the bottom, its highest at the top |
+| MIDI marks | Under the name: one 2 px line per note in the track colour, its length the note's; the clip's lowest note at the bottom, its highest at the top. From 17 px under the clip's top to 3 px above its bottom on a clip 30 px tall or more; below that from 4 px under the top, over the name's row, so a lane at its least 20 px still shows its notes. Pulled to the top with **Edited track**, the view is as tall as its ruler, loop brace, marker row and the whole lane, so the marks show there too |
 | Audio marks | The waveform ([waveforms](../spec/waveforms.md)) in the track colour: per pixel column the stretch of the file it covers (the engine's beat-to-file mapping: offset, loop, warp markers), a filled shape at 55 % with smoothed edges and the RMS band in the full colour, left and right lanes when the clip is at least 40 px tall, the samples with dots when zoomed in past one per pixel, scaled by the clip gain and its fades (both as they are dragged, before the edit lands); a centred line until the file is decoded. Clips at least 80 × 30 px show their gain 12 px from the top right (44 × 12 px, 9 px mono, "-3.0 dB"), dragged up or down (`clip.setGain`, −70 … +24 dB, double-click resets) |
 | Fades | On an audio clip: a 1 px `text.secondary` line from the bottom-left corner to where the fade-in ends at the top (2 px down, under the colour strip), and from where the fade-out starts to the bottom-right corner, following the fade's shape and curve (sampled every 2 px) |
 | Fade handles | 7 × 7 px squares at the clip's top corners, inside the clip, shown while it is hovered or selected (and while dragged) on clips at least 21 × 14 px; with a fade, at the fade's end along the top edge. `text.secondary`, `text.primary` hovered, 1 px `window.background` outline; an 11 × 11 px area takes the pointer, drawn and hit above the gain field. A horizontal drag sets the fade (`clip.setFades`): the fade's end snaps to the grid, Alt for free; double-click removes it; right-click opens a menu of the shapes with the current one checked |
@@ -497,7 +497,11 @@ when there is nothing to act on; then the quantise icon (notes snapping onto a l
 the MIDI tools column with the quantise block open, and the **MIDI tools** icon (three horizontal
 sliders, `control.activeBackground` while the column shows), which shows and hides that column.
 At the right end
-"Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`). Notes a draw or
+"Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`), then the
+**Hide editor** button: a box as tall as the tool buttons with a 1.1 px × in `text.secondary`
+(`text.primary` on `control.hoverBackground` hovered), 3 px from the right edge. The piano roll's
+least height is 120 px of detail area (the toolbar, the 16 px ruler and five 12 px key rows; the
+velocity lane is left out when it would leave fewer than five rows or be under 12 px). Notes a draw or
 paint drag is making are the track colour at 0.7 with a 1 px `text.primary` inset; notes an erase
 drag has passed over fade to 0.12; the cut line of a slice drag is 1 px `accent`, and a note it
 would split is marked with a 1 px `accent` line over it. A key with the pointer over it, or one
