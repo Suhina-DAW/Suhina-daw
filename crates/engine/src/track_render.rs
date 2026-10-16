@@ -96,6 +96,7 @@ fn alone(project: &Project, track: TrackId) -> Project {
         },
         launcher: Default::default(),
         extensions: Extensions::default(),
+        default_scale: None,
     }
 }
 
@@ -136,6 +137,7 @@ mod tests {
                 length: 2.0,
                 lanes: vec![ContentLane { target: None, data: LaneData::Audio(region("a.wav")) }],
                 extensions: Extensions::default(),
+                scale: None,
             }],
             arrangement: Arrangement {
                 lanes: vec![suhina_model::ArrangementLane {

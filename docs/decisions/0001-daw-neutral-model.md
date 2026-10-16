@@ -1,11 +1,12 @@
 ---
 description: Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit
-read_when: changing the model, track, channel, clip content, lane, pattern, importing another format
+read_when: changing the model, track, channel, clip content, lane, pattern, importing another format, clip scale, default scale
 type: decision
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/model/src/lib.rs
+  - crates/model/src/scale.rs
 ---
 
 # 0001: A DAW-neutral project model
@@ -166,6 +167,32 @@ they mean; a note written by a command that does not name mute is unmuted. A sou
 marks a note as not playing maps onto it instead of losing the note
 ([.als format](../spec/als-format.md) › Notes): a note that is there but silent in another program
 is a muted note here, not a hole.
+
+## Amendment: clip scales (2026-10-16)
+
+A `ClipContent` also has a `scale`: `Option<Scale>`, `None` when nothing says otherwise, so a
+project without scales is unchanged. A `Scale` is a root pitch class (0 is C, 11 is B) and a
+`ScaleMode` (major, minor, harmonic minor, melodic minor, dorian, phrygian, lydian, mixolydian,
+locrian, major pentatonic, minor pentatonic, blues); the root can only be made 0 to 11
+(`Scale::new` refuses anything else), so a scale in the model is always valid and needs no
+validation error. The `Project` has a `default_scale`, `Option<Scale>` as well, that a new MIDI clip
+takes: one `clip.create` makes, a recorded take and a MIDI file placed on a track, all through the
+same placing code. Changing it leaves the clips that exist as they are; an audio clip never takes
+it ([clip editor spec](../spec/ui-clip-editor.md) › Scale and key,
+[#347](https://github.com/suhina-daw/suhina-daw/issues/347)).
+
+The scale is on the content, not on the `Clip` that places it, because it describes the notes:
+two clips that play the same notes play them in the same key, and a content copied for a clip
+(the copy on edit above, a paste) takes its scale with its notes. Setting a scale through a clip
+whose content other clips also play is an edit like a note edit: that clip gets its own copy of the
+content first, and a shared pattern stays one content. On the `Project` it would be one key for a
+whole set, which a song that changes key does not have; on each `Note` it would repeat itself.
+
+A scale is something the editor shows and the note tools use (`note.fitToScale` fits to it when
+given none); the engine never reads it and it changes nothing that sounds. The modes are the
+twelve `note.fitToScale` already knew, now one list in the model that the commands, the project
+file and the piano roll share. A source format that keeps a clip's scale maps onto it: the `.als`
+reader does not read one yet (a follow-up), and a format without scales leaves it `None`.
 
 ## Consequences
 

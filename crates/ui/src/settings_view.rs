@@ -7,7 +7,7 @@
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use crate::keymap::{Keymap, MouseSwitch, Preset, Shortcut, actions};
+use crate::keymap::{Keymap, Preset, Shortcut, actions};
 use crate::motion;
 use crate::pick::PickField;
 use crate::settings::{
@@ -17,6 +17,7 @@ use crate::settings::{
 use crate::theme::{self, PAD, Palette};
 use crate::view_settings::DetailLayout;
 use crate::widgets;
+use crate::workflow::Setting;
 
 const PAGE_WIDTH: f32 = 560.0;
 /// The list of pages on the left, and the gap between it and the page.
@@ -192,6 +193,10 @@ pub struct PageState {
     pub theme_shown: Option<String>,
     /// The audio devices were listed since the Audio page was opened.
     pub audio_listed: Option<bool>,
+    /// How far the General page is scrolled, and how tall its rows were last drawn, in points: it
+    /// is taller than a small window.
+    pub general_scroll: i32,
+    pub general_height: i32,
 }
 
 /// What the user did on the page this frame.
@@ -280,6 +285,13 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
     }
     let page = Rect::from_min_max(Pos2::new(sidebar.right() + SIDEBAR_GAP, top), whole.max);
     let bottom = area.bottom();
+    // The page is drawn and clicked only under the title; the General page, taller than a small
+    // window, scrolls with the wheel.
+    let visible = Rect::from_min_max(page.min, Pos2::new(page.right(), bottom.max(page.top())));
+    let painter = painter.with_clip_rect(visible);
+    let outer_clip = ui.clip_rect();
+    ui.set_clip_rect(visible.intersect(outer_clip));
+    let scroll = if state.page == Page::General { scroll_page(ui, visible, state) } else { 0.0 };
 
     // A section title over a hairline; the first sits level with the top of the list.
     let section = |y: &mut f32, name: &str| {
@@ -300,7 +312,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         *y += SETTING_ROW;
         rect
     };
-    let mut y = top;
+    let mut y = top - scroll;
     let on_off = [("On", true), ("Off", false)];
 
     match state.page {
@@ -508,15 +520,17 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 settings.toolbar_size = size;
                 outcome.changed = true;
             }
-            // The four mouse switches of the Mouse-first preset: their own rows, kept in the
-            // keymap rather than in the settings, so they are saved beside the keys.
-            for switch in MouseSwitch::ALL {
+            // The workflow settings (the Mouse-first switches among them): their own rows, kept
+            // in the keymap rather than in the settings, so they are saved beside the keys.
+            for setting in Setting::ALL {
                 let r = row(&mut y);
-                label(&painter, r, switch.name(), "");
-                let options = [("Off", false), ("On", true)];
-                let current = keymap.mouse().get(switch);
-                if let Some(on) = segmented(ui, &painter, control_rect(r, 2), switch.name(), &options, current) {
-                    keymap.set_mouse(switch, on);
+                label(&painter, r, setting.name(), setting.note());
+                let options: Vec<(&str, usize)> =
+                    setting.short_choices().iter().enumerate().map(|(i, c)| (*c, i)).collect();
+                let current = keymap.workflow().get(setting);
+                let rect = control_rect(r, options.len());
+                if let Some(index) = segmented(ui, &painter, rect, setting.name(), &options, current) {
+                    keymap.set_workflow(setting, index);
                     outcome.keymap_changed = true;
                 }
             }
@@ -525,7 +539,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 &painter,
                 note,
                 Align2::LEFT_CENTER,
-                "Kept in keymap.json with the keys; turning one off leaves the preset's name",
+                "Kept in keymap.json with the keys; changing one makes the workflow Custom",
                 theme::ui_font(theme::TEXT_SMALL),
                 theme::text_secondary(),
             );
@@ -771,7 +785,24 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             outcome.plugins = plugin_section(ui, &painter, page, &mut y, bottom, plugins);
         }
     }
+    if state.page == Page::General {
+        // The last row's note, 14 points, is under `y`.
+        state.general_height = (y + scroll - top + 14.0).round() as i32;
+    }
+    ui.set_clip_rect(outer_clip);
     outcome
+}
+
+/// The wheel over the page scrolls it, as far as its rows reach; returns how far it is scrolled.
+fn scroll_page(ui: &Ui, visible: Rect, state: &mut PageState) -> f32 {
+    let room = visible.height().round() as i32;
+    let most = (state.general_height - room + PAD as i32).max(0);
+    if widgets::pointer_over(ui, visible).is_some() {
+        let wheel = ui.input(|i| i.smooth_scroll_delta.y).round() as i32;
+        state.general_scroll = state.general_scroll.saturating_sub(wheel);
+    }
+    state.general_scroll = state.general_scroll.clamp(0, most);
+    state.general_scroll as f32
 }
 
 /// The list of pages: Interface's own pages indented under it, the page shown filled. Returns
@@ -1007,9 +1038,9 @@ fn shortcuts_page(
         changed = true;
     }
 
-    // The preset: three sets of keys, one for drawing notes first, one for selecting first and
-    // one for working with the mouse. A choice sets the keys and the switches it names; single
-    // keys can still be changed below.
+    // The workflow mode: three presets, one for drawing notes first, one for selecting first and
+    // one for working with the mouse, and Custom. A preset sets the keys and the workflow settings
+    // it names; single keys can still be changed below.
     let mut top = head.bottom() + 4.0;
     let preset_row = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 24.0));
     let preset_label = Rect::from_min_size(preset_row.min, Vec2::new(LABEL_WIDTH, 20.0));
@@ -1025,9 +1056,9 @@ fn shortcuts_page(
     // 64 px a part, as the measurements give every segmented control in Settings.
     let control = Rect::from_min_size(
         Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()),
-        Vec2::new(64.0 * Preset::ALL.len() as f32, SEGMENT),
+        Vec2::new(64.0 * Preset::MODES.len() as f32, SEGMENT),
     );
-    let options: Vec<(&str, Preset)> = Preset::ALL.iter().map(|p| ((*p).name(), *p)).collect();
+    let options: Vec<(&str, Preset)> = Preset::MODES.iter().map(|p| ((*p).name(), *p)).collect();
     if let Some(picked) = preset_segmented(ui, painter, control, &options, current) {
         keymap.set_preset(picked);
         state.capture = None;

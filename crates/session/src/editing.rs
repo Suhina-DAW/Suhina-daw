@@ -121,6 +121,8 @@ pub(crate) fn consolidate(session: &mut Session, params: &Value) -> Result<Value
         }
     }
     let name = clips.first().and_then(|c| p.content(c.content)).map(|c| c.name.clone()).unwrap_or_default();
+    // A MIDI clip keeps the scale of the first clip, as it keeps its name (ADR 0001 › clip scales).
+    let scale = if notes { clips.first().and_then(|c| p.content(c.content)).and_then(|c| c.scale) } else { None };
     let data = match (notes, audio) {
         (true, true) => return Err("the range holds both MIDI and audio clips".into()),
         (false, false) => return Err("the clips in the range play nothing".into()),
@@ -139,6 +141,7 @@ pub(crate) fn consolidate(session: &mut Session, params: &Value) -> Result<Value
         length: end - start,
         lanes: vec![ContentLane { target: None, data }],
         extensions: Default::default(),
+        scale,
     });
     let clip = Clip {
         content: id,

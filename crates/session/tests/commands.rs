@@ -22,6 +22,7 @@ fn project() -> Project {
             length: 4.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 1.0, 36, 1.0)]) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {
@@ -681,6 +682,7 @@ fn audio_project() -> Project {
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Audio(AudioRegion::new("loop.wav")) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     p.arrangement.lanes[0].clips[1].content = ContentId(9);
     p

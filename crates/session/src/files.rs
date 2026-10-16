@@ -563,12 +563,15 @@ fn place_clip(
 ) -> Result<Value, CommandError> {
     let id = ContentId(p.contents.iter().map(|c| c.id.0).max().unwrap_or(0).checked_add(1).ok_or("too many clips")?);
     let length = source.length;
+    // A new MIDI clip takes the project's default scale (ADR 0001 › Amendment: clip scales).
+    let scale = if matches!(source.lane, LaneData::Notes(_)) { p.default_scale } else { None };
     p.contents.push(ClipContent {
         id,
         name: source.name.clone(),
         length,
         lanes: vec![ContentLane { target: None, data: source.lane }],
         extensions: Default::default(),
+        scale,
     });
     let mut clip = Clip {
         content: id,

@@ -333,6 +333,7 @@ fn launcher_project() -> Project {
         length: 4.0,
         lanes: vec![suhina_model::ContentLane { target: None, data: suhina_model::LaneData::Notes(vec![note]) }],
         extensions: suhina_model::Extensions::default(),
+        scale: None,
     });
     let clip = suhina_model::Clip {
         loop_range: Some(suhina_model::LoopRange { start: 0.0, end: 4.0 }),

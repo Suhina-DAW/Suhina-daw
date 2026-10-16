@@ -29,6 +29,7 @@ fn project(notes: Vec<Note>) -> Project {
         length: 8.0,
         lanes,
         extensions: Extensions::default(),
+        scale: None,
     };
     let lane = |n: Vec<Note>| vec![ContentLane { target: None, data: LaneData::Notes(n) }];
     let audio = AudioRegion::new("a.wav");

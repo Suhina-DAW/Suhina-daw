@@ -51,6 +51,7 @@ fn midi_project(notes: Vec<Note>, clips: Vec<Clip>) -> Project {
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     let lane = p.arrangement.lanes.iter_mut().find(|l| l.track == Some(TrackId(1))).unwrap();
     lane.clips = clips;

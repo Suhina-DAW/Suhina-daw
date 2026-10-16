@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use suhina_model::Note;
+use suhina_model::{Note, Scale, ScaleMode};
 
 use crate::notes::{
     MAX_BEAT, MAX_NOTES_PER_COMMAND, edit_notes, indices, midi_velocity, notes_of, optional_number, velocity_of,
@@ -34,22 +34,6 @@ const MIN_FACTOR: f64 = 0.01;
 const MAX_FACTOR: f64 = 100.0;
 /// The shortest length `note.legato` leaves a note: a hundredth of a beat.
 const MIN_LENGTH: f64 = 0.01;
-
-/// The scales `note.fitToScale` knows, each as the semitones above its root.
-const SCALES: &[(&str, &[u8])] = &[
-    ("major", &[0, 2, 4, 5, 7, 9, 11]),
-    ("minor", &[0, 2, 3, 5, 7, 8, 10]),
-    ("harmonicMinor", &[0, 2, 3, 5, 7, 8, 11]),
-    ("melodicMinor", &[0, 2, 3, 5, 7, 9, 11]),
-    ("dorian", &[0, 2, 3, 5, 7, 9, 10]),
-    ("phrygian", &[0, 1, 3, 5, 7, 8, 10]),
-    ("lydian", &[0, 2, 4, 6, 7, 9, 11]),
-    ("mixolydian", &[0, 2, 4, 5, 7, 9, 10]),
-    ("locrian", &[0, 1, 3, 5, 6, 8, 10]),
-    ("majorPentatonic", &[0, 2, 4, 7, 9]),
-    ("minorPentatonic", &[0, 3, 5, 7, 10]),
-    ("blues", &[0, 3, 5, 6, 7, 10]),
-];
 
 /// Suhina's own random number generator for the note tools: splitmix64, written out here so the
 /// same seed gives the same draws on every machine and every run, which is what lets the CLI and
@@ -150,8 +134,9 @@ fn velocity_param(params: &Value, key: &str) -> Result<f64, CommandError> {
         .ok_or_else(|| format!("{key} must be a whole number from 1 to 127").into())
 }
 
-/// The key root `params.root` names: a key name such as "C", "F#" or "Bb", or 0 to 11.
-fn root_of(params: &Value) -> Result<u8, CommandError> {
+/// The key root `params.root` names: a key name such as "C", "F#" or "Bb", or 0 to 11; C when
+/// it is missing.
+pub(crate) fn root_of(params: &Value) -> Result<u8, CommandError> {
     let unknown = || CommandError::from("root must be a key name such as C, F# or Bb, or a whole number 0 to 11");
     match params.get("root") {
         None | Some(Value::Null) => Ok(0),
@@ -187,39 +172,29 @@ fn root_of(params: &Value) -> Result<u8, CommandError> {
     }
 }
 
-/// The semitones of the scale `params.scale` names, over its root.
-fn scale_of(params: &Value) -> Result<&'static [u8], CommandError> {
-    let name = match params.get("scale") {
-        None | Some(Value::Null) => "major",
+/// The mode `params[key]` names, one of the model's ([`ScaleMode::name`]); `None` when missing.
+pub(crate) fn mode_of(params: &Value, key: &str) -> Result<Option<ScaleMode>, CommandError> {
+    let name = match params.get(key) {
+        None | Some(Value::Null) => return Ok(None),
         Some(Value::String(name)) => name.as_str(),
-        Some(_) => return Err("scale must be a text such as major or blues".into()),
+        Some(_) => return Err(format!("{key} must be a text such as major or blues").into()),
     };
-    for &(scale, semitones) in SCALES {
-        if scale == name {
-            return Ok(semitones);
-        }
-    }
-    let names: Vec<&str> = SCALES.iter().map(|(scale, _)| *scale).collect();
-    Err(format!("unknown scale {name:?}; expected one of {}", names.join(", ")).into())
+    ScaleMode::from_name(name).map(Some).ok_or_else(|| {
+        let names: Vec<&str> = ScaleMode::ALL.iter().map(|mode| mode.name()).collect();
+        format!("unknown {key} {name:?}; expected one of {}", names.join(", ")).into()
+    })
 }
 
-/// The key nearest to `key` that `scale` over `root` holds: a tie goes to the lower key, and the
-/// result stays within 0 to 127.
-fn nearest_in_scale(key: u8, root: u8, scale: &[u8]) -> u8 {
-    let in_scale = |candidate: i64| {
-        (0..=127).contains(&candidate) && scale.contains(&(((candidate as u8).wrapping_sub(root)) % 12))
+/// The scale `note.fitToScale` fits to: `root` and `scale` when either is given (C and major for
+/// the one left out), else the clip's own scale, else C major.
+fn fit_scale(session: &Session, params: &Value) -> Result<Scale, CommandError> {
+    let named = params.get("root").is_some_and(|v| !v.is_null()) || params.get("scale").is_some_and(|v| !v.is_null());
+    let own = if named { None } else { crate::scales::scale_of_clip(&session.project, params)? };
+    let scale = match own {
+        Some(scale) => Some(scale),
+        None => Scale::new(root_of(params)?, mode_of(params, "scale")?.unwrap_or_default()),
     };
-    for distance in 0..=127i64 {
-        let lower = i64::from(key) - distance;
-        if in_scale(lower) {
-            return lower as u8;
-        }
-        let upper = i64::from(key) + distance;
-        if in_scale(upper) {
-            return upper as u8;
-        }
-    }
-    key
+    scale.ok_or_else(|| "root must be 0 to 11".into())
 }
 
 /// `note.setMuted`: mutes the named notes (`muted: true`), unmutes them (`false`), or flips each
@@ -281,11 +256,10 @@ pub(crate) fn humanize(session: &mut Session, params: &Value) -> Result<Value, C
     })
 }
 
-/// `note.fitToScale`: moves each note to the nearest key of a scale over a root; a tie goes to the
-/// lower key.
+/// `note.fitToScale`: moves each note to the nearest key of a scale over a root (the clip's own
+/// scale when neither is given); a tie goes to the lower key.
 pub(crate) fn fit_to_scale(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let root = root_of(params)?;
-    let scale = scale_of(params)?;
+    let scale = fit_scale(session, params)?;
     if nothing_to_do(session, params)? {
         return Ok(json!({ "notes": [], "moved": 0 }));
     }
@@ -294,7 +268,7 @@ pub(crate) fn fit_to_scale(session: &mut Session, params: &Value) -> Result<Valu
         let mut moved = 0;
         for &index in &named {
             let note = notes.get(index).ok_or("a note is missing")?;
-            let key = nearest_in_scale(note.key, root, scale);
+            let key = scale.nearest(note.key);
             if key != note.key {
                 if let Some(slot) = notes.get_mut(index) {
                     slot.key = key;
@@ -545,26 +519,28 @@ mod tests {
     }
 
     #[test]
-    fn a_scale_is_one_of_the_twelve() {
-        assert_eq!(scale_of(&json!({})), Ok(&[0, 2, 4, 5, 7, 9, 11][..]));
-        assert_eq!(scale_of(&json!({ "scale": "blues" })), Ok(&[0, 3, 5, 6, 7, 10][..]));
-        assert!(scale_of(&json!({ "scale": "majorish" })).is_err());
-        assert!(scale_of(&json!({ "scale": 5 })).is_err());
+    fn a_mode_is_one_of_the_twelve() {
+        assert_eq!(mode_of(&json!({}), "scale"), Ok(None));
+        assert_eq!(mode_of(&json!({ "scale": "blues" }), "scale"), Ok(Some(ScaleMode::Blues)));
+        assert_eq!(mode_of(&json!({ "mode": "harmonicMinor" }), "mode"), Ok(Some(ScaleMode::HarmonicMinor)));
+        assert!(mode_of(&json!({ "scale": "majorish" }), "scale").is_err());
+        assert!(mode_of(&json!({ "scale": 5 }), "scale").is_err());
     }
 
     #[test]
     fn the_nearest_key_of_a_scale_takes_the_lower_on_a_tie() {
-        let major = &[0, 2, 4, 5, 7, 9, 11][..];
-        assert_eq!(nearest_in_scale(60, 0, major), 60);
+        let c = Scale::new(0, ScaleMode::Major).unwrap();
+        assert_eq!(c.nearest(60), 60);
         // 61 sits between 60 and 62: the lower wins.
-        assert_eq!(nearest_in_scale(61, 0, major), 60);
-        assert_eq!(nearest_in_scale(63, 0, major), 62);
+        assert_eq!(c.nearest(61), 60);
+        assert_eq!(c.nearest(63), 62);
         // Keys stay within 0 to 127.
-        assert_eq!(nearest_in_scale(127, 0, major), 127);
-        assert_eq!(nearest_in_scale(0, 0, major), 0);
+        assert_eq!(c.nearest(127), 127);
+        assert_eq!(c.nearest(0), 0);
         // A root of G: 65 (F) is not in G major, and sits between 64 (E) and 66 (F#), so the
         // lower wins.
-        assert_eq!(nearest_in_scale(65, 7, major), 64);
-        assert_eq!(nearest_in_scale(66, 7, major), 66);
+        let g = Scale::new(7, ScaleMode::Major).unwrap();
+        assert_eq!(g.nearest(65), 64);
+        assert_eq!(g.nearest(66), 66);
     }
 }

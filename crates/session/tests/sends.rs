@@ -45,6 +45,7 @@ fn project() -> Project {
             length: 1.0,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 1.0, 69, 1.0)]) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {

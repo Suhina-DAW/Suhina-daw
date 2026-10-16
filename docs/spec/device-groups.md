@@ -171,10 +171,11 @@ Nothing about a device changes when it moves into a group.
   boundary and never runs a plug-in in the engine. A crashed or hung plug-in in a branch does what
   it does on a track: an effect passes its input, an instrument is silent, the branch and the rest
   of the group go on, and `device.restart` brings it back.
-- **The stages plug-ins share** (ADR 0006 › 4): the branches of a group are independent until they
-  are summed, so their plug-ins can be sent their blocks together, exactly as different tracks'
-  chains are. The first version may run branches one after another inside the chain's stage and
-  only later run them as parallel stages; the sound is the same, only the deadline is used better.
+- **Plug-ins running at the same time** (ADR 0006 › 4): the branches of a group are independent
+  until they are summed, so their plug-ins can be sent their blocks together, each branch going
+  on as its own plug-in answers, exactly as different tracks' chains do (#151). The first version
+  may run branches one after another inside the chain and only later run them side by side; the
+  sound is the same, only the deadline is used better.
 - **A plug-in's key** today is its channel, its plug-in and how many of the same plug-in come
   before it on the channel (`plugin_devices`), which keeps a running plug-in when devices are
   added or moved around it. With groups, "before it" counts depth-first through the whole tree of
@@ -435,7 +436,7 @@ it.
    undo tests and `docs/mcp.md`.
 5. **Plug-ins in groups.** Plug-in slots in branches, the key surviving moves into and out of a
    group, crash and restart inside a branch, tests with `test:clap` and `test:vst3`; then running
-   a group's branches as parallel stages (ADR 0006 › 4 amended).
+   a group's branches side by side (ADR 0006 › 4 amended).
 6. **UI: the group in the device panel.** Header, branch list, the selected branch's devices,
    Ctrl+G and Ctrl+Shift+G, dragging between branches, context menus; design measurements in
    `docs/design/`.

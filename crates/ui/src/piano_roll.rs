@@ -10,20 +10,31 @@ use std::collections::BTreeSet;
 use egui::{Align2, Color32, CursorIcon, Id, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::{Value, json};
 use suhina_engine::Quantization;
-use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
+use suhina_engine::model::{Clip, LaneData, Note, Project, Scale, TrackId};
 
 use crate::grid::default_track_colour;
-use crate::keymap::MouseSettings;
 use crate::midi_tools::ToolSettings;
+use crate::piano_roll_ghosts::{self as ghost_view, GhostSource, Ghosts};
+use crate::piano_roll_grid::{FIXED_VALUES, GridMode, PianoGrid, Width};
+use crate::piano_roll_ruler::{self as ruler_view, ClipShape, RulerState};
+use crate::piano_roll_scale::{self as scale_view, Fold, KeyRows};
 use crate::settings::ToolbarSize;
 use crate::theme;
 use crate::widgets::{self, Action};
+use crate::workflow::Workflow;
+
+/// The gestures of [#351](https://github.com/suhina-daw/suhina-daw/issues/351): the left edge,
+/// copying by dragging, velocity on a note and as a line, the lane's height and the audition.
+#[path = "piano_roll_gestures.rs"]
+mod gestures;
+use gestures::Part;
+pub use gestures::start_by;
 
 /// Height of the toolbar, width of the key column, height of the ruler and the default height of
 /// the velocity lane.
 const TOOLBAR: f32 = 22.0;
 const KEYS: f32 = 36.0;
-const RULER: f32 = 16.0;
+const RULER: f32 = 24.0;
 const VELOCITY_LANE: f32 = 72.0;
 /// The velocity lane is left out under this height, and leaves at least this many key rows.
 const LEAST_LANE: f32 = 12.0;
@@ -47,7 +58,7 @@ const MIN_LINE_SPACING: f32 = 6.0;
 const MAX_LINES: usize = 4000;
 /// The most notes one command takes, so a stroke never builds one it cannot run.
 const MAX_NOTES_PER_COMMAND: usize = suhina_session::MAX_NOTES_PER_COMMAND;
-/// How close to a note's right end, in points, the pointer resizes it instead of moving it.
+/// How close to a note's start or end, in points, the pointer resizes it instead of moving it.
 const EDGE: f32 = 5.0;
 /// How close to a velocity stem, in points, the pointer grabs it.
 const STEM_REACH: f32 = 4.0;
@@ -57,6 +68,10 @@ const MIN_LENGTH: f64 = 0.01;
 const FREE_LENGTH: f64 = 0.25;
 const NEW_VELOCITY: u8 = 100;
 const EPSILON: f64 = 1e-9;
+/// Two clicks this close in time (seconds) and space (points) are a double-click
+/// (› Double-click in `docs/spec/ui-clip-editor.md`).
+const DOUBLE_CLICK_TIME: f64 = 0.3;
+const DOUBLE_CLICK_DISTANCE: f32 = 6.0;
 
 const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -82,12 +97,23 @@ pub struct PianoClip {
     pub color: Color32,
     /// Beats in a bar.
     pub bar_beats: f64,
-    /// The grid step in beats (the control bar's grid value); 0 is none.
+    /// The fixed grid step in beats (the piano roll's own value or the control bar's); 0 is none
+    /// or an adaptive grid, whose step [`grid_menu`](Self::grid_menu) gives at each zoom.
     pub grid: f64,
     /// Where the clip is on the arrangement, to find the playhead in its content.
     pub placement: Placement,
-    /// The grid value as the toolbar's menu shows it (`1/16`, `1 bar`, `none`).
-    pub grid_name: &'static str,
+    /// The grid value as the toolbar's grid menu shows it and ticks it, and whether things snap.
+    pub grid_menu: PianoGrid,
+    /// The grid is the control bar's (Settings › Piano roll grid): the menu offers only what the
+    /// control bar can hold.
+    pub grid_follows: bool,
+    /// The clip's start marker, length and loop, as the ruler shows and changes them.
+    pub shape: ClipShape,
+    /// The notes of other clips drawn faintly behind this clip's own, and the clips the ghost
+    /// menu offers (› Ghost notes); the window fills them in.
+    pub ghosts: Ghosts,
+    /// The scale of the clip's content, whose keys the rows mark (› Scale and key).
+    pub scale: Option<Scale>,
 }
 
 /// Where a clip plays its content on the arrangement.
@@ -149,9 +175,19 @@ pub fn arrangement_clip(
     index: usize,
     quantization: Quantization,
 ) -> Option<PianoClip> {
-    let clip = project.arrangement.lanes.iter().find(|l| l.track == Some(track))?.clips.get(index)?;
+    let lane = project.arrangement.lanes.iter().find(|l| l.track == Some(track))?;
+    let clip = lane.clips.get(index)?;
     let mut piano = piano_clip_from(project, track, clip, quantization)?;
     piano.address = json!({ "track": track.0, "index": index });
+    // Up to the next clip on the lane, as `clip.setLength` allows.
+    let next = lane
+        .clips
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| *i != index && c.start > clip.start)
+        .map(|(_, c)| c.start)
+        .fold(f64::INFINITY, f64::min);
+    piano.shape.room = next.is_finite().then_some(next - clip.start);
     Some(piano)
 }
 
@@ -206,7 +242,16 @@ fn piano_clip_from(project: &Project, track: TrackId, clip: &Clip, quantization:
             offset: clip.offset,
             loop_range: clip.loop_range.map(|l| (l.start, l.end)),
         },
-        grid_name: "",
+        grid_menu: PianoGrid::default(),
+        grid_follows: false,
+        shape: ClipShape {
+            offset: clip.offset,
+            length: clip.length,
+            loop_range: clip.loop_range.map(|l| (l.start, l.end)),
+            room: None,
+        },
+        ghosts: Ghosts::default(),
+        scale: content.scale,
     })
 }
 
@@ -283,18 +328,20 @@ impl Tool {
     ];
 }
 
-/// The grid values the toolbar's menu offers, as `launcher.setQuantization` takes them.
-pub const GRID_VALUES: [&str; 14] = [
-    "none", "8 bars", "4 bars", "2 bars", "1 bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32",
-];
-
 /// A drag in progress, from where it started.
 #[derive(Debug, Clone, PartialEq)]
 enum Gesture {
-    /// The selection follows the grabbed note.
-    Move { from: Pos2, grabbed: usize },
+    /// The selection follows the grabbed note; with `copy` (Ctrl held when it began) a copy of
+    /// it does, and the notes stay.
+    Move { from: Pos2, grabbed: usize, copy: bool },
     /// The selection's lengths follow the grabbed note's right end.
     Resize { from: Pos2, grabbed: usize },
+    /// The selection's starts follow the grabbed note's left edge; their ends stay.
+    ResizeStart { from: Pos2, grabbed: usize },
+    /// Alt and a drag on a note: the selection's velocities follow the pointer up and down.
+    NoteVelocity { from: Pos2, grabbed: usize },
+    /// A line drawn in the velocity lane: each stem it spans takes its height.
+    VelocityLine { from: Pos2 },
     /// A rectangle selects the notes it touches; `add` keeps the selection.
     Select { from: Pos2, add: bool },
     /// The selection's velocities follow the grabbed stem.
@@ -366,8 +413,9 @@ pub struct PianoRollState {
     /// The wheel stepped the tools while the right button was held: letting it go over a note
     /// then deletes nothing (› Zoom and scroll).
     right_stepped: bool,
-    /// A grid value picked in the toolbar this frame, for the window to keep.
-    pub grid_picked: Option<&'static str>,
+    /// A grid value picked in the toolbar's grid menu or with its keys this frame, for the window
+    /// to keep.
+    pub grid_picked: Option<PianoGrid>,
     /// The toolbar's Hide editor button was clicked this frame: the window hides the editor.
     pub hide_requested: bool,
     /// The key rows were scrolled by hand (the wheel, a pan, zooming the key height) since the
@@ -379,6 +427,34 @@ pub struct PianoRollState {
     /// window turns a change into `preview.noteOn` and `preview.noteOff`.
     playing_key: Option<u8>,
     hover_key: Option<u8>,
+    /// When and where the last click in the grid was, while a second click could still make it a
+    /// double-click; the piano roll counts its own clicks (› Double-click).
+    last_click: Option<(f64, Pos2)>,
+    /// The index the note the last click added will have, so the second click of a double-click
+    /// selects that note rather than deleting it.
+    click_added: Option<usize>,
+    /// A workflow mode or setting picked in the toolbar's menu this frame, for the window to keep
+    /// in the keymap.
+    pub workflow_picked: Option<crate::workflow::Pick>,
+    /// A drag on the ruler in progress.
+    pub(crate) ruler: RulerState,
+    /// How wide the note grid was last drawn, for the zoom keys (Z, Shift+Z).
+    view_width: f32,
+    /// The velocity lane's height dragged by its top edge, kept until Suhina closes; `None`: the
+    /// default height (› Layout).
+    lane_wanted: Option<f32>,
+    /// The toolbar's Audition button: drawn and moved notes sound once.
+    pub audition: bool,
+    /// Keys to sound at the end of this frame, and the track and time the sounding ones go off.
+    audition_pending: Vec<u8>,
+    audition_off: Option<(u64, f64)>,
+    audition_sounding: Vec<u8>,
+    /// Which other clips show as ghost notes, picked in the toolbar's ghost menu; kept until
+    /// Suhina closes (› Ghost notes).
+    pub ghost_source: GhostSource,
+    /// Which key rows show, picked in the toolbar's Scale menu (Fold, Fold to scale); kept until
+    /// Suhina closes (› Zoom and scroll).
+    pub fold: Fold,
 }
 
 impl Default for PianoRollState {
@@ -413,6 +489,18 @@ impl Default for PianoRollState {
             centred_for: 0.0,
             playing_key: None,
             hover_key: None,
+            last_click: None,
+            click_added: None,
+            workflow_picked: None,
+            ruler: RulerState::default(),
+            view_width: 0.0,
+            lane_wanted: None,
+            audition: false,
+            audition_pending: Vec::new(),
+            audition_off: None,
+            audition_sounding: Vec::new(),
+            ghost_source: GhostSource::default(),
+            fold: Fold::default(),
         }
     }
 }
@@ -509,11 +597,33 @@ impl PianoRollState {
                 }
                 return None;
             }
+            "pianoRoll.gridNarrow" | "pianoRoll.gridWiden" | "pianoRoll.gridTriplet" | "pianoRoll.gridSnap" => {
+                if let Some(picked) = grid_key(action, clip) {
+                    self.grid_picked = Some(picked);
+                }
+                return None;
+            }
+            // Z: the selected notes fill the width (the whole clip when none is selected); Shift+Z:
+            // the whole clip does. Window state, not a command.
+            "pianoRoll.zoomSelection" => {
+                let start = chosen.iter().map(|n| n.time).fold(f64::INFINITY, f64::min);
+                let end = chosen.iter().map(|n| n.time + n.duration).fold(f64::NEG_INFINITY, f64::max);
+                if start.is_finite() && end > start {
+                    self.zoom_to(start, end);
+                } else {
+                    self.zoom_to(0.0, clip.length);
+                }
+                return None;
+            }
+            "pianoRoll.zoomClip" => {
+                self.zoom_to(0.0, clip.length);
+                return None;
+            }
             _ if chosen.is_empty() => return None,
             _ => {}
         }
         params["notes"] = json!(self.selected.iter().collect::<Vec<_>>());
-        let grid = NoteGrid::new(clip.grid, self.beat_width);
+        let grid = note_grid(clip, self.beat_width);
         let moves = |beats: f64, keys: i32| {
             let (beats, moved) = move_delta(beats, keys, &chosen, grid, false);
             // A pitch move that does not fit leaves the pitch alone, so no note changes its name.
@@ -555,9 +665,19 @@ impl PianoRollState {
         if beats == 0.0 && keys == 0 {
             return None;
         }
+        self.audition_moved(&chosen, keys);
         params["beats"] = json!(round_beat(beats));
         params["semitones"] = json!(keys);
         Some(Action::new(id, params))
+    }
+
+    /// Zooms and scrolls time so beats `start` to `end` fill the note grid's width (as far as the
+    /// zoom range allows), keys untouched.
+    fn zoom_to(&mut self, start: f64, end: f64) {
+        let width = self.view_width.max(1.0);
+        let span = (end - start).max(EPSILON) as f32;
+        self.beat_width = (width / span).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
+        self.scroll.x = (start.max(0.0) as f32 * self.beat_width).max(0.0);
     }
 
     /// Forgets the clip, so the next one shown is fitted to the view again.
@@ -570,6 +690,7 @@ impl PianoRollState {
         self.selecting_new = false;
         self.stroke.clear();
         self.erasing.clear();
+        self.audition_pending.clear();
     }
 
     /// Keeps `note`'s length and velocity for the next note drawn, and for the key column's
@@ -635,7 +756,7 @@ impl PianoRollState {
         let length = if self.last_length > 0.0 {
             self.last_length
         } else if grid.snaps && !free {
-            clip.grid.max(MIN_LENGTH)
+            chosen_step(clip, self.beat_width).max(MIN_LENGTH)
         } else {
             FREE_LENGTH
         };
@@ -671,13 +792,11 @@ fn tool_of(action: &str) -> Option<Tool> {
 /// What the window tells the piano roll about the settings that change what it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Options {
-    /// A right-click on a note deletes it in the Draw and Paint tools: the Draw-first keymap
-    /// preset (› Keymap presets in `docs/spec/ui-clip-editor.md`).
-    pub right_click_deletes: bool,
     /// How large the toolbar is drawn: Settings › General › Piano roll › Toolbar size.
     pub toolbar_size: ToolbarSize,
-    /// The four jobs the Mouse-first preset gives the mouse buttons, each a switch of its own.
-    pub mouse: MouseSettings,
+    /// The workflow settings: what clicks, right-clicks and double-clicks do (› Workflow modes in
+    /// `docs/spec/ui-clip-editor.md`).
+    pub workflow: Workflow,
 }
 
 /// What the piano roll needs from the window besides its own state, for one frame: the settings
@@ -709,6 +828,8 @@ enum IconButton {
     Duplicate,
     Quantise,
     MidiTools,
+    /// Headphones: drawn and moved notes sound once (› Playing the keys).
+    Audition,
     /// The × at the right end: hides the editor.
     Hide,
 }
@@ -729,6 +850,7 @@ impl IconButton {
             Self::Duplicate => "Duplicate",
             Self::Quantise => "Quantise",
             Self::MidiTools => "MIDI tools",
+            Self::Audition => "Audition",
             Self::Hide => "Hide editor",
         }
     }
@@ -747,7 +869,7 @@ impl IconButton {
             Self::Paste => "selection.paste",
             Self::Duplicate => "selection.duplicate",
             Self::Hide => "view.editor",
-            Self::Quantise | Self::MidiTools => return None,
+            Self::Quantise | Self::MidiTools | Self::Audition => return None,
         })
     }
 
@@ -870,6 +992,18 @@ impl IconButton {
                 line((-4.0, -4.0), (4.0, 4.0));
                 line((-4.0, 4.0), (4.0, -4.0));
             }
+            // Headphones: a band over the head and a cup at each end.
+            Self::Audition => {
+                let band: Vec<Pos2> = (0..=12)
+                    .map(|i| {
+                        let angle = std::f32::consts::PI * (1.0 + i as f32 / 12.0);
+                        at(5.0 * angle.cos(), 1.5 + 5.5 * angle.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(band, stroke));
+                painter.rect_filled(Rect::from_center_size(at(-5.0, 3.5), size(3.0, 5.0)), 0.0, color);
+                painter.rect_filled(Rect::from_center_size(at(5.0, 3.5), size(3.0, 5.0)), 0.0, color);
+            }
             // Three horizontal sliders: the MIDI tools column's toggle.
             Self::MidiTools => {
                 for (y, knob) in [(-4.0, -2.0), (0.0, 3.0), (4.0, -1.0)] {
@@ -891,6 +1025,8 @@ struct Layout {
     scroll: Vec2,
     beat_width: f32,
     key_height: f32,
+    /// The key rows shown, from the top: every key, or the keys a fold leaves (› Scale and key).
+    rows: KeyRows,
 }
 
 impl Layout {
@@ -902,14 +1038,22 @@ impl Layout {
         f64::from((x - self.grid.left() + self.scroll.x) / self.beat_width)
     }
 
+    /// The top of `key`'s row; far above the grid for a key the fold hides, so nothing on it is
+    /// drawn or hit.
     fn y_of(&self, key: u8) -> f32 {
-        self.grid.top() - self.scroll.y + f32::from(127 - key.min(127)) * self.key_height
+        match self.rows.row_of(key) {
+            Some(row) => self.grid.top() - self.scroll.y + row as f32 * self.key_height,
+            None => self.grid.top() - 1.0e6,
+        }
     }
 
     /// The key whose row is at `y`, if any.
     fn key_at(&self, y: f32) -> Option<u8> {
         let row = ((y - self.grid.top() + self.scroll.y) / self.key_height).floor();
-        (0.0..=127.0).contains(&row).then(|| 127 - row as u8)
+        if !(row >= 0.0 && row < self.rows.len() as f32) {
+            return None;
+        }
+        self.rows.key_of(row as usize)
     }
 
     fn note_rect(&self, note: &Note) -> Rect {
@@ -918,6 +1062,32 @@ impl Layout {
         let top = self.y_of(note.key);
         Rect::from_min_max(Pos2::new(left, top + 1.0), Pos2::new(right - 1.0, top + self.key_height))
     }
+}
+
+/// The grid step chosen for `clip` at `beat_width` points per beat, before it is made coarser to
+/// keep lines apart: the fixed value, or the adaptive grid's step at this zoom.
+fn chosen_step(clip: &PianoClip, beat_width: f32) -> f64 {
+    if clip.grid_menu.is_adaptive() { clip.grid_menu.step(beat_width, clip.bar_beats) } else { clip.grid }
+}
+
+/// The grid `clip` is edited on at `beat_width`: snapping only while the menu's Snap to grid is on.
+pub(crate) fn note_grid(clip: &PianoClip, beat_width: f32) -> NoteGrid {
+    let grid = NoteGrid::new(chosen_step(clip, beat_width), beat_width);
+    NoteGrid { snaps: grid.snaps && clip.grid_menu.snap, ..grid }
+}
+
+/// The grid a grid key (Ctrl+1 to Ctrl+4 by default) makes of `clip`'s; `None` when the grid
+/// follows the control bar and it has no such value.
+fn grid_key(action: &str, clip: &PianoClip) -> Option<PianoGrid> {
+    let grid = clip.grid_menu;
+    let picked = match action {
+        "pianoRoll.gridNarrow" => grid.narrower(),
+        "pianoRoll.gridWiden" => grid.wider(),
+        "pianoRoll.gridTriplet" => grid.toggle_triplet(),
+        "pianoRoll.gridSnap" => grid.toggle_snap(),
+        _ => return None,
+    };
+    (!clip.grid_follows || picked.control_bar_value().is_some()).then_some(picked)
 }
 
 /// The grid as drawn at this zoom: its step (the chosen one, doubled until lines are far
@@ -950,7 +1120,7 @@ impl NoteGrid {
 
     /// `beat` on the nearest line (or the line before it with `down`), unless `free` or there is
     /// no snapping.
-    fn place(&self, beat: f64, free: bool, down: bool) -> f64 {
+    pub(crate) fn place(&self, beat: f64, free: bool, down: bool) -> f64 {
         if free || !self.snaps {
             return beat;
         }
@@ -988,11 +1158,11 @@ pub fn resize_by(raw: f64, grabbed: &Note, resized: &[Note], grid: NoteGrid, fre
     if by.is_finite() { by } else { 0.0 }
 }
 
-/// The note at `pos`, the topmost (latest) first, and whether `pos` is on its right end.
-fn note_at(layout: &Layout, notes: &[Note], pos: Pos2) -> Option<(usize, bool)> {
+/// The note at `pos`, the topmost (latest) first, and which part of it `pos` is on.
+fn note_at(layout: &Layout, notes: &[Note], pos: Pos2) -> Option<(usize, Part)> {
     notes.iter().enumerate().rev().find_map(|(i, n)| {
         let rect = layout.note_rect(n).expand2(Vec2::new(0.0, 0.5));
-        rect.contains(pos).then(|| (i, pos.x >= rect.right() - EDGE.min(rect.width() / 3.0)))
+        rect.contains(pos).then(|| (i, Part::of(rect, pos.x)))
     })
 }
 
@@ -1055,6 +1225,7 @@ impl Gestures<'_> {
             actions.push(Action::new("note.add", add_params(self.clip, &[note])));
             // `note.add` appends: the new note is the next index.
             state.selected = BTreeSet::from([self.clip.notes.len()]);
+            state.audition_keys([note.key]);
         }
     }
 
@@ -1175,7 +1346,7 @@ pub fn show(
     let toolbar_rect = Rect::from_min_max(area.min, Pos2::new(area.right(), area.top() + band));
     let whole = area;
     let area = Rect::from_min_max(Pos2::new(area.left(), toolbar_rect.bottom()), area.max);
-    let lane_height = velocity_lane_height(area.height() - RULER, state.key_height);
+    let lane_height = velocity_lane_height(area.height() - RULER, state.key_height, state.lane_wanted);
     let keys = Rect::from_min_max(
         Pos2::new(area.left(), area.top() + RULER),
         Pos2::new(area.left() + KEYS, area.bottom() - lane_height),
@@ -1189,10 +1360,11 @@ pub fn show(
     }
     // A newly shown clip fits the width with its notes in the middle; until the rows are scrolled
     // by hand, a change in height centres the notes again, so they are in view at any height.
+    let rows = scale_view::rows(clip, state.fold);
     if fresh {
-        fit(state, grid_rect, clip);
+        fit(state, grid_rect, clip, &rows);
     } else if !state.scrolled_by_hand && (grid_rect.height() - state.centred_for).abs() > 0.5 {
-        centre_notes(state, grid_rect.height(), clip);
+        centre_notes(state, grid_rect.height(), clip, &rows);
     }
 
     let inputs = Inputs {
@@ -1210,7 +1382,11 @@ pub fn show(
         state.right_stepped = false;
     }
     scroll_and_zoom(ui, state, area, grid_rect, inputs);
-    state.scroll.y = state.scroll.y.clamp(0.0, (128.0 * state.key_height - grid_rect.height()).max(0.0));
+    // The ruler: its loop handles and markers, and dragging it to zoom and scroll time.
+    let shape = ruler_view::interact(ui, ruler, grid_rect.left(), clip, state, inputs.alt, actions);
+    state.view_width = grid_rect.width();
+    let rows_height = rows.len() as f32 * state.key_height;
+    state.scroll.y = state.scroll.y.clamp(0.0, (rows_height - grid_rect.height()).max(0.0));
     let width = ((clip.length + clip.bar_beats * 4.0) as f32 * state.beat_width).max(grid_rect.width());
     state.scroll.x = state.scroll.x.clamp(0.0, (width - grid_rect.width()).max(0.0));
     let layout = Layout {
@@ -1221,8 +1397,9 @@ pub fn show(
         scroll: state.scroll,
         beat_width: state.beat_width,
         key_height: state.key_height,
+        rows,
     };
-    let grid = NoteGrid::new(clip.grid, state.beat_width);
+    let grid = note_grid(clip, state.beat_width);
     let gesture = Gestures { layout: &layout, clip, grid };
 
     // The grid's gestures: one widget for the whole grid, so a note under the pointer and the
@@ -1233,8 +1410,10 @@ pub fn show(
     if let Some(pos) = ui.ctx().pointer_hover_pos().filter(|p| grid_rect.contains(*p)) {
         let over = note_at(&layout, &clip.notes, pos);
         let cursor = match (&state.gesture, over, state.tool) {
-            (Some(Gesture::Resize { .. }), _, _) => Some(CursorIcon::ResizeHorizontal),
+            (Some(Gesture::Resize { .. } | Gesture::ResizeStart { .. }), _, _) => Some(CursorIcon::ResizeHorizontal),
+            (Some(Gesture::Move { copy: true, .. }), _, _) => Some(CursorIcon::Copy),
             (Some(Gesture::Move { .. }), _, _) => Some(CursorIcon::Grabbing),
+            (Some(Gesture::NoteVelocity { .. }), _, _) => Some(CursorIcon::ResizeVertical),
             (Some(Gesture::Slice { .. }), _, _) | (None, _, Tool::Slice) => Some(CursorIcon::Text),
             // There is no eraser cursor in the windowing layer, so the pointer is hidden and the
             // eraser button's shape is drawn where the pointer is.
@@ -1242,7 +1421,7 @@ pub fn show(
                 eraser = Some(pos);
                 Some(CursorIcon::None)
             }
-            (None, Some((_, true)), _) => Some(CursorIcon::ResizeHorizontal),
+            (None, Some((_, Part::Start | Part::End)), _) => Some(CursorIcon::ResizeHorizontal),
             (Some(Gesture::Draw { .. } | Gesture::Paint), _, _) | (None, None, Tool::Draw | Tool::Paint) => {
                 Some(CursorIcon::Crosshair)
             }
@@ -1262,64 +1441,35 @@ pub fn show(
             state.selected
         );
     }
-    if response.double_clicked()
-        && state.tool == Tool::Select
+    let workflow = options.workflow;
+    if response.clicked()
         && let Some(pos) = pointer
     {
-        match note_at(&layout, &clip.notes, pos) {
-            Some((index, _)) => {
-                state.selected.clear();
-                let mut params = clip.address.clone();
-                params["notes"] = json!([index]);
-                actions.push(Action::new("note.delete", params));
-            }
-            None => gesture.add_note(state, actions, pos, inputs.alt),
-        }
-    } else if response.clicked()
-        && let Some(pos) = pointer
-    {
-        match (note_at(&layout, &clip.notes, pos), state.tool) {
-            (Some((index, _)), Tool::Erase) => gesture.delete_note(state, actions, index),
-            // A click with Mute mutes the note, or unmutes it when it is already muted: one
-            // `note.setMuted`, one undo step (› Muting).
-            (Some((index, _)), Tool::Mute) => {
-                if let Some(note) = clip.notes.get(index) {
-                    let mut params = clip.address.clone();
-                    params["notes"] = json!([index]);
-                    params["muted"] = json!(!note.muted);
-                    actions.push(Action::new("note.setMuted", params));
-                }
-            }
-            (None, Tool::Erase | Tool::Mute) => {}
-            (Some((index, _)), _) if inputs.shift || inputs.command => {
-                if !state.selected.remove(&index) {
-                    state.selected.insert(index);
-                }
-            }
-            (Some((index, _)), _) => {
-                state.selected = BTreeSet::from([index]);
-                if let Some(note) = clip.notes.get(index) {
-                    state.remember(note);
-                }
-            }
-            (None, Tool::Draw | Tool::Paint) => gesture.add_note(state, actions, pos, inputs.alt),
-            // Left click draws: with the Mouse-first switch on, a click on an empty spot in the
-            // Select tool adds a note, the way the Draw tool does (› Keymap presets).
-            (None, Tool::Select) if options.mouse.left_draws => gesture.add_note(state, actions, pos, inputs.alt),
-            (None, Tool::Slice) => {}
-            (None, Tool::Select) => state.selected.clear(),
+        // The piano roll counts its own double-clicks: two clicks close in time and space, and a
+        // third starts a new pair (› Double-click).
+        let time = ui.input(|i| i.time);
+        let double = state
+            .last_click
+            .is_some_and(|(at, from)| time - at < DOUBLE_CLICK_TIME && from.distance(pos) < DOUBLE_CLICK_DISTANCE);
+        state.last_click = if double { None } else { Some((time, pos)) };
+        let added = state.click_added.take();
+        let over = note_at(&layout, &clip.notes, pos);
+        if double {
+            second_click(&gesture, state, actions, (over.map(|(i, _)| i), added), pos, inputs, workflow);
+        } else {
+            single_click(&gesture, state, actions, over.map(|(i, _)| i), pos, inputs, workflow);
         }
     }
     // The right button: the Mouse-first switches first, then the Draw-first preset's delete in
     // Draw and Paint (› Keymap presets).
+    let right_deletes = workflow.right_click_deletes(matches!(state.tool, Tool::Draw | Tool::Paint));
     if response.clicked_by(PointerButton::Secondary)
         && !state.right_stepped
         && !state.right_playing
-        && !(options.mouse.alt_right_plays && inputs.alt)
+        && !(workflow.alt_right_plays && inputs.alt)
         && let Some(pos) = pointer
         && let Some((index, _)) = note_at(&layout, &clip.notes, pos)
-        && (options.mouse.right_deletes
-            || (options.right_click_deletes && matches!(state.tool, Tool::Draw | Tool::Paint)))
+        && right_deletes
     {
         gesture.delete_note(state, actions, index);
     }
@@ -1331,7 +1481,7 @@ pub fn show(
         let from = pointer.unwrap_or(grid_rect.center());
         state.erasing.clear();
         state.muting.clear();
-        if options.mouse.alt_right_plays && inputs.alt {
+        if workflow.alt_right_plays && inputs.alt {
             // Alt (Option) and the right button: the clip plays from the point under the pointer
             // and stops when the button is let go. It is the transport, not an edit.
             if let Some(at) = clip.placement.arrangement_beat(layout.beat_at(from.x)) {
@@ -1339,11 +1489,9 @@ pub fn show(
                 actions.push(Action::new("transport.play", json!({})));
                 state.right_playing = true;
             }
-        } else if options.mouse.shift_right_splits && inputs.shift {
+        } else if workflow.shift_right_splits && inputs.shift {
             state.gesture = Some(Gesture::Slice { from });
-        } else if options.mouse.right_deletes
-            || (options.right_click_deletes && matches!(state.tool, Tool::Draw | Tool::Paint))
-        {
+        } else if right_deletes {
             state.gesture = Some(Gesture::Erase);
             if let Some((index, _)) = note_at(&layout, &clip.notes, from) {
                 state.erasing.insert(index);
@@ -1381,15 +1529,22 @@ pub fn show(
             }
             // Left click draws: with the Mouse-first switch on, the Select tool draws a note on an
             // empty spot the way Draw does (› Keymap presets).
-            (None, Tool::Select) if options.mouse.left_draws => Gesture::Draw { from },
-            (Some((grabbed, edge)), _) => {
+            (None, Tool::Select) if workflow.empty_click_draws => Gesture::Draw { from },
+            (Some((grabbed, part)), _) => {
                 if !state.selected.contains(&grabbed) {
                     if !(inputs.shift || inputs.command) {
                         state.selected.clear();
                     }
                     state.selected.insert(grabbed);
                 }
-                if edge { Gesture::Resize { from, grabbed } } else { Gesture::Move { from, grabbed } }
+                // The ends resize; on the body Alt changes the velocity and Ctrl copies
+                // (› Moving, › Resizing, › Velocity).
+                match part {
+                    Part::End => Gesture::Resize { from, grabbed },
+                    Part::Start => Gesture::ResizeStart { from, grabbed },
+                    Part::Body if inputs.alt => Gesture::NoteVelocity { from, grabbed },
+                    Part::Body => Gesture::Move { from, grabbed, copy: inputs.command },
+                }
             }
             (None, Tool::Select) => Gesture::Select { from, add: inputs.shift || inputs.command },
         });
@@ -1415,14 +1570,21 @@ pub fn show(
         }
         if lane_response.drag_started_by(PointerButton::Primary) {
             let from = ui.input(|i| i.pointer.press_origin()).or(at).unwrap_or(lane.center());
-            if let Some(grabbed) = stem_at(&layout, &clip.notes, &state.selected, from) {
+            // A drag that grabs no bar (or any drag with Alt) draws a line (› Velocity).
+            let grabbed = if inputs.alt { None } else { stem_at(&layout, &clip.notes, &state.selected, from) };
+            if let Some(grabbed) = grabbed {
                 if !state.selected.contains(&grabbed) {
                     state.selected = BTreeSet::from([grabbed]);
                 }
                 state.gesture = Some(Gesture::Velocity { from, grabbed });
+            } else {
+                state.gesture = Some(Gesture::VelocityLine { from });
             }
         }
     }
+    // The lane's top edge: dragging it makes the lane taller or shorter (› Layout).
+    let room = area.height() - RULER;
+    gestures::lane_edge(ui, &layout, room, state);
 
     // The key column: pressing a key plays it through the track's instrument while it is held,
     // and Ctrl+click or Ctrl+drag selects the notes of that pitch or those pitches.
@@ -1463,6 +1625,9 @@ pub fn show(
         (Some(Gesture::Draw { from }), Some(now)) if dragging || stopped => {
             Some(Effect::Draw(drawn_note(state, &layout, clip, grid, *from, now, inputs.alt)))
         }
+        (Some(Gesture::VelocityLine { from }), Some(now)) if dragging || stopped => {
+            Some(gestures::velocity_line(&layout, &clip.notes, *from, now))
+        }
         (Some(gesture), Some(now)) if dragging || stopped => {
             Some(effect(gesture, now, &layout, clip, &chosen, grid, inputs.alt))
         }
@@ -1473,6 +1638,10 @@ pub fn show(
     if ui.input(|i| i.pointer.button_released(PointerButton::Secondary)) && std::mem::take(&mut state.right_playing) {
         actions.push(Action::new("transport.stop", json!({})));
     }
+    let velocity_label = match (&state.gesture, &preview) {
+        (Some(Gesture::NoteVelocity { grabbed, .. }), Some(Effect::Velocity(by))) => Some((*grabbed, *by)),
+        _ => None,
+    };
     if stopped {
         if let (Some(effect), Some(gesture)) = (preview.clone(), state.gesture.take()) {
             commit(&gesture, effect, clip, state, actions, &layout);
@@ -1485,7 +1654,13 @@ pub fn show(
         state.muting.clear();
     }
 
-    draw(ui, &layout, clip, state, grid, preview);
+    let shape = shape.unwrap_or(clip.shape);
+    draw(ui, &layout, clip, state, grid, preview, shape.played());
+    if let Some((grabbed, by)) = velocity_label {
+        gestures::draw_velocity_label(ui, &layout, clip, grabbed, by);
+    }
+    let axis = ruler_view::Axis { origin: grid_rect.left() - state.scroll.x, beat_width: state.beat_width };
+    ruler_view::draw(ui, ruler, &axis, &shape);
     // The eraser under the pointer: the windowing layer has no eraser cursor, so the pointer is
     // hidden and the Erase button's shape is drawn where it is.
     if let Some(pos) = eraser {
@@ -1503,6 +1678,95 @@ pub fn show(
         draw_playhead(ui, &layout, beat);
     }
     for_readers(ui, &layout, clip, state);
+    scale_view::key_readers(ui, layout.keys, clip, &layout.rows, |key| layout.y_of(key), layout.key_height);
+    // Notes the audition sounds go on now and off a moment later.
+    let track = clip.address.get("track").and_then(Value::as_u64);
+    state.audition_frame(ui, track, actions);
+}
+
+/// A single click in the grid, on note `over` or an empty spot at `pos`: what the tool does with
+/// it (› Drawing notes, › Selecting, › Muting).
+fn single_click(
+    gesture: &Gestures<'_>,
+    state: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+    over: Option<usize>,
+    pos: Pos2,
+    inputs: Inputs,
+    workflow: Workflow,
+) {
+    let clip = gesture.clip;
+    match (over, state.tool) {
+        (Some(index), Tool::Erase) => gesture.delete_note(state, actions, index),
+        // A click with Mute mutes the note, or unmutes it when it is already muted: one
+        // `note.setMuted`, one undo step (› Muting).
+        (Some(index), Tool::Mute) => {
+            if let Some(note) = clip.notes.get(index) {
+                let mut params = clip.address.clone();
+                params["notes"] = json!([index]);
+                params["muted"] = json!(!note.muted);
+                actions.push(Action::new("note.setMuted", params));
+            }
+        }
+        (None, Tool::Erase | Tool::Mute) => {}
+        (Some(index), _) if inputs.shift || inputs.command => {
+            if !state.selected.remove(&index) {
+                state.selected.insert(index);
+            }
+        }
+        (Some(index), _) => {
+            state.selected = BTreeSet::from([index]);
+            if let Some(note) = clip.notes.get(index) {
+                state.remember(note);
+            }
+        }
+        // Draw and Paint add a note; so does Select when a click on empty grid draws (the
+        // Mouse-first setting, › Workflow modes).
+        (None, Tool::Draw | Tool::Paint) => click_adds(gesture, state, actions, pos, inputs),
+        (None, Tool::Select) if workflow.empty_click_draws => click_adds(gesture, state, actions, pos, inputs),
+        (None, Tool::Slice) => {}
+        (None, Tool::Select) => state.selected.clear(),
+    }
+}
+
+/// A click that adds a note at `pos`, remembering which index it will have, so the second click
+/// of a double-click selects it instead of deleting it.
+fn click_adds(
+    gesture: &Gestures<'_>,
+    state: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+    pos: Pos2,
+    inputs: Inputs,
+) {
+    let before = actions.len();
+    gesture.add_note(state, actions, pos, inputs.alt);
+    if actions.len() > before {
+        state.click_added = Some(gesture.clip.notes.len());
+    }
+}
+
+/// The second click of a double-click, on note `over` (with `added` the note the first click
+/// added, if it did) or an empty spot at `pos` (› Double-click in `docs/spec/ui-clip-editor.md`).
+fn second_click(
+    gesture: &Gestures<'_>,
+    state: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+    (over, added): (Option<usize>, Option<usize>),
+    pos: Pos2,
+    inputs: Inputs,
+    workflow: Workflow,
+) {
+    match (state.tool, over) {
+        // The first click already erased or muted the note: the second adds nothing, so a
+        // double-click is one note and one undo step.
+        (Tool::Erase | Tool::Mute, _) => {}
+        // The first click added a note: the second selects it and never deletes it.
+        (_, Some(index)) if added.is_some() => state.selected = BTreeSet::from([index]),
+        (_, None) if added.is_some() => {}
+        (Tool::Select, Some(index)) if workflow.double_click_deletes => gesture.delete_note(state, actions, index),
+        (Tool::Select, None) if workflow.double_click_adds => click_adds(gesture, state, actions, pos, inputs),
+        _ => single_click(gesture, state, actions, over, pos, inputs, workflow),
+    }
 }
 
 fn draw_playhead(ui: &Ui, layout: &Layout, beat: f64) {
@@ -1604,6 +1868,46 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     if paint.place(tools, IconButton::MidiTools, state.tools_open, true) {
         state.tools_open = !state.tools_open;
     }
+    let audition = place();
+    if paint.place(audition, IconButton::Audition, state.audition, true) {
+        state.audition = !state.audition;
+        if !state.audition {
+            state.audition_pending.clear();
+        }
+    }
+    // The workflow menu: the mode's name, the four modes and every workflow setting
+    // (› Workflow modes).
+    let hide_left = row.right() - side;
+    let workflow = Rect::from_min_size(Pos2::new(x.get() + 4.0, row.top()), Vec2::new(WORKFLOW_MENU, row.height()));
+    if workflow.right() + 4.0 + 104.0 < hide_left {
+        // Each menu takes the width its button needs, so the next one starts right after it.
+        let shown = workflow_menu(ui, workflow, keymap, state);
+        x.set(shown.right().min(workflow.right()) + gap);
+        // The ghost menu after it, when there is room for both (› Ghost notes).
+        let ghosts =
+            Rect::from_min_size(Pos2::new(x.get() + 4.0, row.top()), Vec2::new(ghost_view::MENU_WIDTH, row.height()));
+        if ghosts.right() + 4.0 + 104.0 < hide_left {
+            let shown = ghost_view::menu(ui, ghosts, &clip.ghosts, &mut state.ghost_source);
+            x.set(shown.right().min(ghosts.right()) + gap);
+            // The Scale menu after it, when the grid value still fits after it (› Scale and key);
+            // the grid value's caption gives way to it.
+            let menu = Rect::from_min_size(
+                Pos2::new(x.get() + 4.0, row.top()),
+                Vec2::new(scale_view::MENU_WIDTH, row.height()),
+            );
+            if menu.right() + gap + 2.0 + GRID_MENU + 6.0 <= hide_left - gap {
+                let before = state.fold;
+                let shown = scale_view::menu(ui, menu, clip, &mut state.fold, actions);
+                if state.fold != before {
+                    // Another set of rows: the notes are centred again in them.
+                    state.scrolled_by_hand = false;
+                    state.centred_for = 0.0;
+                }
+                x.set(shown.right().min(menu.right()) + gap);
+            }
+        }
+    }
+    let paint = ButtonPaint { ui, painter: &painter, keymap, scale };
     let x = x.get();
     // At the very end the × that hides the editor, then the grid value before it.
     let hide =
@@ -1612,38 +1916,168 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
         state.hide_requested = true;
     }
     let row = Rect::from_min_max(row.min, Pos2::new(hide.left() - gap - 2.0, row.bottom()));
-    let menu = Rect::from_min_max(Pos2::new(row.right() - 64.0, row.top()), row.max);
-    if menu.left() < x + 40.0 {
+    let menu = Rect::from_min_max(Pos2::new(row.right() - GRID_MENU, row.top()), row.max);
+    if menu.left() < x + 6.0 {
         return;
     }
-    let label =
-        Rect::from_min_max(Pos2::new(menu.left() - 34.0, row.top()), Pos2::new(menu.left() - 4.0, row.bottom()));
-    widgets::text_in(
-        &painter,
-        label,
-        Align2::RIGHT_CENTER,
-        "Grid",
-        theme::ui_font(theme::TEXT_SMALL),
-        theme::text_hint(),
-    );
-    let mono = theme::mono_font(theme::TEXT_SMALL);
-    let mut chosen = clip.grid_name;
-    let shown = chosen;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(menu), |ui| {
-        let menu = egui::ComboBox::from_id_salt("piano-roll-grid")
-            .width(menu.width())
-            .selected_text(egui::RichText::new(shown).font(mono.clone()).color(theme::text_value()))
-            .show_ui(ui, |ui| {
-                for value in GRID_VALUES {
-                    ui.selectable_value(&mut chosen, value, egui::RichText::new(value).font(mono.clone()));
-                }
-            });
-        menu.response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Grid value {shown}")));
-    });
-    if chosen != clip.grid_name {
-        state.grid_picked = Some(chosen);
+    // The caption, when there is room for it too.
+    if menu.left() >= x + 40.0 {
+        let label =
+            Rect::from_min_max(Pos2::new(menu.left() - 34.0, row.top()), Pos2::new(menu.left() - 4.0, row.bottom()));
+        widgets::text_in(
+            &painter,
+            label,
+            Align2::RIGHT_CENTER,
+            "Grid",
+            theme::ui_font(theme::TEXT_SMALL),
+            theme::text_hint(),
+        );
     }
+    if let Some(picked) = grid_menu(ui, menu, clip, keymap) {
+        state.grid_picked = Some(picked);
+    }
+}
+
+/// How wide the toolbar's grid menu button is, in points.
+const GRID_MENU: f32 = 76.0;
+
+/// The toolbar's grid menu (› Grid and snapping): its button shows the grid value; its menu holds
+/// Snap to grid, the adaptive widths, the fixed values, Narrow grid, Widen grid and Triplet grid,
+/// each with its key, the chosen ones ticked. While the grid follows the control bar, an entry the
+/// control bar cannot hold is greyed out. Returns the grid picked this frame.
+fn grid_menu(ui: &mut Ui, rect: Rect, clip: &PianoClip, keymap: &crate::keymap::Keymap) -> Option<PianoGrid> {
+    let grid = clip.grid_menu;
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let mono = theme::mono_font(theme::TEXT_SMALL);
+    let shown = grid.label();
+    let mut picked = None;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        let text = egui::RichText::new(format!("{shown}   ")).font(mono.clone()).color(theme::text_value());
+        let menu = ui.menu_button(text, |ui| {
+            // One entry: its text, the key its action has, ticked when `ticked` says so.
+            let mut entry = |ui: &mut Ui, name: &str, action: Option<&str>, ticked: Option<bool>, result: PianoGrid| {
+                let enabled = !clip.grid_follows || result.control_bar_value().is_some();
+                let key = action.and_then(|a| keymap.label(a)).unwrap_or_default();
+                let text = egui::RichText::new(name).font(font.clone());
+                let button = egui::Button::selectable(ticked.unwrap_or(false), text)
+                    .shortcut_text(egui::RichText::new(key.as_str()).font(mono.clone()).color(theme::text_hint()));
+                let response = ui.add_enabled(enabled, button);
+                // Its accessible label is its name and its key, as the icon buttons' are.
+                let label = if key.is_empty() { name.to_string() } else { format!("{name} ({key})") };
+                response.widget_info(|| match ticked {
+                    Some(on) => egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, &label),
+                    None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label),
+                });
+                if response.clicked() {
+                    picked = Some(result);
+                    ui.close();
+                }
+            };
+            let heading = |ui: &mut Ui, text: &str| {
+                ui.label(egui::RichText::new(text).font(font.clone()).color(theme::text_hint()));
+            };
+            entry(ui, "Snap to grid", Some("pianoRoll.gridSnap"), Some(grid.snap), grid.toggle_snap());
+            ui.separator();
+            heading(ui, "Adaptive grid");
+            for width in Width::ALL {
+                let name = format!("Adaptive {}", width.name().to_lowercase());
+                let result = PianoGrid { mode: GridMode::Adaptive(width), ..grid };
+                entry(ui, &name, None, Some(grid.mode == GridMode::Adaptive(width)), result);
+            }
+            ui.separator();
+            heading(ui, "Fixed grid");
+            for (index, value) in FIXED_VALUES.iter().enumerate() {
+                // Picking a value while following the control bar turns snapping back on: its
+                // none is snap off.
+                let snap = grid.snap || clip.grid_follows;
+                let result = PianoGrid { mode: GridMode::Fixed(index), snap, ..grid };
+                entry(ui, value, None, Some(grid.mode == GridMode::Fixed(index)), result);
+            }
+            ui.separator();
+            entry(ui, "Narrow grid", Some("pianoRoll.gridNarrow"), None, grid.narrower());
+            entry(ui, "Widen grid", Some("pianoRoll.gridWiden"), None, grid.wider());
+            ui.separator();
+            entry(ui, "Triplet grid", Some("pianoRoll.gridTriplet"), Some(grid.triplet), grid.toggle_triplet());
+        });
+        let label = format!("Grid value {shown}");
+        menu_arrow(ui, menu.response.rect, theme::text_value());
+        menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        menu.response.on_hover_text("The grid: snapping, adaptive or fixed lines, triplets");
+    });
+    picked.filter(|p| *p != grid)
+}
+
+/// The small triangle at the right end of a toolbar menu's button, drawn as a shape: the UI font
+/// has no glyph for it.
+pub(crate) fn menu_arrow(ui: &Ui, button: Rect, color: Color32) {
+    let c = Pos2::new(button.right() - 7.0, button.center().y);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![c + Vec2::new(-3.0, -1.5), c + Vec2::new(3.0, -1.5), c + Vec2::new(0.0, 2.0)],
+        color,
+        Stroke::NONE,
+    ));
+}
+
+/// How wide the toolbar's workflow menu is, in points.
+const WORKFLOW_MENU: f32 = 96.0;
+
+/// The toolbar's workflow menu: its button shows the mode, its menu offers the four modes and,
+/// under a divider, a submenu per workflow setting with its choices. A pick is left in `state`
+/// for the window, which keeps it in the keymap.
+fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state: &mut PianoRollState) -> Rect {
+    use crate::keymap::Preset;
+    use crate::workflow::{Pick, Setting};
+    let mode = keymap.preset();
+    let current = keymap.workflow();
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let mut picked = None;
+    let mut shown = rect;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        let text = egui::RichText::new(format!("{}   ", mode.name())).font(font.clone()).color(theme::text_value());
+        let menu = ui.menu_button(text, |ui| {
+            for choice in Preset::MODES {
+                let response =
+                    ui.selectable_label(choice == mode, egui::RichText::new(choice.name()).font(font.clone()));
+                if response.clicked() {
+                    if choice != mode {
+                        picked = Some(Pick::Mode(choice));
+                    }
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for setting in Setting::ALL {
+                let chosen = current.get(setting);
+                let shown = setting.choices().get(chosen).copied().unwrap_or("");
+                let title = egui::RichText::new(format!("{}: {shown}", setting.name())).font(font.clone());
+                ui.menu_button(title, |ui| {
+                    for (index, choice) in setting.choices().iter().enumerate() {
+                        let response =
+                            ui.selectable_label(index == chosen, egui::RichText::new(*choice).font(font.clone()));
+                        let name = format!("{}: {choice}", setting.name());
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, index == chosen, &name)
+                        });
+                        if response.clicked() {
+                            if index != chosen {
+                                picked = Some(Pick::Setting(setting, index));
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        });
+        let label = format!("Workflow {}", mode.name());
+        menu_arrow(ui, menu.response.rect, theme::text_value());
+        menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        shown = menu.response.rect;
+        menu.response.on_hover_text("How clicks, right-clicks and double-clicks work: a preset, or Custom");
+    });
+    if picked.is_some() {
+        state.workflow_picked = picked;
+    }
+    shown
 }
 
 /// The toolbar's icon buttons as they are painted this frame: the surface they are drawn on, the
@@ -1699,8 +2133,16 @@ fn icon_hint(button: IconButton, keymap: &crate::keymap::Keymap) -> String {
 enum Effect {
     Move(f64, i32),
     Resize(f64),
+    /// Beats the selection's starts move by, their ends kept.
+    ResizeStart(f64),
     Select(Rect),
     Velocity(f64),
+    /// A line in the velocity lane from `from` to `to`, and the velocity each stem it spans takes.
+    VelocityLine {
+        from: Pos2,
+        to: Pos2,
+        set: Vec<(usize, f64)>,
+    },
     /// The note a draw drag makes.
     Draw(Option<Note>),
     /// A slice: the beat the cut is at, and the notes it crosses.
@@ -1719,9 +2161,11 @@ fn effect(
     free: bool,
 ) -> Effect {
     match gesture {
-        Gesture::Move { from, .. } => {
+        Gesture::Move { from, grabbed, .. } => {
             let raw = f64::from((now.x - from.x) / layout.beat_width);
-            let keys = (-(now.y - from.y) / layout.key_height).round() as i32;
+            let rows = (-(now.y - from.y) / layout.key_height).round() as i32;
+            // Folded, the grabbed note steps through the shown rows; the rest move as far.
+            let keys = clip.notes.get(*grabbed).map_or(rows, |n| layout.rows.semitones(n.key, rows));
             let (beats, keys) = move_delta(raw, keys, chosen, grid, free);
             Effect::Move(beats, keys)
         }
@@ -1731,6 +2175,16 @@ fn effect(
                 .get(*grabbed)
                 .map_or(Effect::Resize(0.0), |g| Effect::Resize(resize_by(raw, g, chosen, grid, free)))
         }
+        Gesture::ResizeStart { from, grabbed } => {
+            let raw = f64::from((now.x - from.x) / layout.beat_width);
+            clip.notes
+                .get(*grabbed)
+                .map_or(Effect::ResizeStart(0.0), |g| Effect::ResizeStart(start_by(raw, g, chosen, grid, free)))
+        }
+        Gesture::NoteVelocity { from, grabbed } => {
+            Effect::Velocity(gestures::velocity_by(*from, now, clip.notes.get(*grabbed)))
+        }
+        Gesture::VelocityLine { from } => gestures::velocity_line(layout, &clip.notes, *from, now),
         Gesture::Select { from, .. } => Effect::Select(Rect::from_two_pos(*from, now)),
         Gesture::Velocity { grabbed, .. } => {
             // The grabbed bar follows the pointer's height; the other selected notes change by
@@ -1824,23 +2278,46 @@ fn commit(
     let mut params = clip.address.clone();
     params["notes"] = json!(notes);
     match (gesture, effect) {
-        (Gesture::Move { .. }, Effect::Move(beats, keys)) if !notes.is_empty() && (beats != 0.0 || keys != 0) => {
+        (Gesture::Move { copy, .. }, Effect::Move(beats, keys)) if !notes.is_empty() && (beats != 0.0 || keys != 0) => {
+            let moved: Vec<Note> = notes.iter().filter_map(|i| clip.notes.get(*i).copied()).collect();
+            state.audition_moved(&moved, keys);
             params["beats"] = json!(round_beat(beats));
             params["semitones"] = json!(keys);
-            actions.push(Action::new("note.move", params));
+            if *copy {
+                // Ctrl+drag: one `note.duplicate` puts the copies where the drag let go; the
+                // copies are appended, so they are the next indices, and they are selected.
+                actions.push(Action::new("note.duplicate", params));
+                state.selected = (clip.notes.len()..clip.notes.len() + notes.len()).collect();
+            } else {
+                actions.push(Action::new("note.move", params));
+            }
         }
         (Gesture::Resize { .. }, Effect::Resize(by)) if !notes.is_empty() && by != 0.0 => {
             params["by"] = json!(round_beat(by));
             actions.push(Action::new("note.resize", params));
         }
-        (Gesture::Velocity { .. }, Effect::Velocity(by)) if !notes.is_empty() && by != 0.0 => {
+        (Gesture::ResizeStart { .. }, Effect::ResizeStart(by)) if !notes.is_empty() && by != 0.0 => {
+            params["startBy"] = json!(round_beat(by));
+            actions.push(Action::new("note.resize", params));
+        }
+        (Gesture::Velocity { .. } | Gesture::NoteVelocity { .. }, Effect::Velocity(by))
+            if !notes.is_empty() && by != 0.0 =>
+        {
             params["by"] = json!(by);
+            actions.push(Action::new("note.setVelocity", params));
+        }
+        // The velocity line: one `note.setVelocity` with a value for each stem it spans.
+        (Gesture::VelocityLine { .. }, Effect::VelocityLine { set, .. }) if !set.is_empty() => {
+            let mut params = clip.address.clone();
+            params["notes"] = set.iter().map(|(i, _)| json!(i)).collect();
+            params["velocities"] = set.iter().map(|(_, v)| json!(v)).collect();
             actions.push(Action::new("note.setVelocity", params));
         }
         (Gesture::Draw { .. }, Effect::Draw(Some(note))) => {
             actions.push(Action::new("note.add", add_params(clip, &[note])));
             state.selected = BTreeSet::from([clip.notes.len()]);
             state.remember(&note);
+            state.audition_keys([note.key]);
         }
         // Shift and Draw: one `note.add` for the whole stroke, the notes it drew.
         (Gesture::DrawRun, _) => {
@@ -1851,6 +2328,7 @@ fn commit(
             if !stroke.is_empty() {
                 actions.push(Action::new("note.add", add_params(clip, &stroke)));
                 state.selected = (clip.notes.len()..clip.notes.len() + stroke.len()).collect();
+                state.audition_keys(stroke.iter().map(|n| n.key));
                 if let Some(last) = stroke.last() {
                     state.remember(last);
                 }
@@ -1874,6 +2352,7 @@ fn commit(
             if !stroke.is_empty() {
                 actions.push(Action::new("note.add", add_params(clip, &stroke)));
                 state.selected = (clip.notes.len()..clip.notes.len() + stroke.len()).collect();
+                state.audition_keys(stroke.iter().map(|n| n.key));
             }
         }
         (Gesture::Erase, _) if !state.erasing.is_empty() => {
@@ -1929,30 +2408,32 @@ fn round_beat(beat: f64) -> f64 {
     (beat * 1e6).round() / 1e6
 }
 
-/// How tall the velocity lane is with `room` under the ruler: 72 px, at most 30 % of the room,
-/// never so tall that fewer than five key rows of `key_height` are left, and left out when that
-/// leaves it under 12 px (› Layout in `docs/spec/ui-clip-editor.md`).
-fn velocity_lane_height(room: f32, key_height: f32) -> f32 {
-    let lane = VELOCITY_LANE.min(room * 0.3).min(room - LEAST_KEY_ROWS * key_height);
+/// How tall the velocity lane is with `room` under the ruler: 72 px, at most 30 % of the room
+/// (`wanted`, the height its top edge was dragged to, instead of both), never so tall that fewer
+/// than five key rows of `key_height` are left, and left out when that leaves it under 12 px
+/// (› Layout in `docs/spec/ui-clip-editor.md`).
+fn velocity_lane_height(room: f32, key_height: f32, wanted: Option<f32>) -> f32 {
+    let most = room - LEAST_KEY_ROWS * key_height;
+    let lane = wanted.unwrap_or(VELOCITY_LANE.min(room * 0.3)).min(most);
     if lane.is_finite() && lane >= LEAST_LANE { lane } else { 0.0 }
 }
 
 /// A newly shown clip: the whole clip fits the `grid`'s width, and its notes are in the middle.
-fn fit(state: &mut PianoRollState, grid: Rect, clip: &PianoClip) {
+fn fit(state: &mut PianoRollState, grid: Rect, clip: &PianoClip, rows: &KeyRows) {
     let width = grid.width().max(1.0);
     state.beat_width = (width / clip.length.max(1.0) as f32).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
     state.scroll.x = 0.0;
     state.scrolled_by_hand = false;
-    centre_notes(state, grid.height(), clip);
+    centre_notes(state, grid.height(), clip, rows);
 }
 
 /// Scrolls the key rows so the middle of the clip's lowest and highest note (C3 for an empty
-/// clip) is in the middle of a grid `height` tall.
-fn centre_notes(state: &mut PianoRollState, height: f32, clip: &PianoClip) {
+/// clip) is in the middle of a grid `height` tall, counting the rows `rows` shows.
+fn centre_notes(state: &mut PianoRollState, height: f32, clip: &PianoClip, rows: &KeyRows) {
     let (low, high) = clip.notes.iter().fold((u8::MAX, 0u8), |(lo, hi), n| (lo.min(n.key), hi.max(n.key)));
-    let middle = if low <= high { (f32::from(low) + f32::from(high)) / 2.0 } else { 60.0 };
+    let middle = if low <= high { rows.middle_row(low, high) } else { rows.middle_row(60, 60) };
     let height = height.max(1.0);
-    state.scroll.y = (127.0 - middle) * state.key_height + state.key_height / 2.0 - height / 2.0;
+    state.scroll.y = middle * state.key_height + state.key_height / 2.0 - height / 2.0;
     state.centred_for = height;
 }
 
@@ -2069,7 +2550,18 @@ fn dashed_outline(painter: &egui::Painter, rect: Rect, color: Color32) {
     }
 }
 
-fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid: NoteGrid, preview: Option<Effect>) {
+/// Draws the grid, the notes, the velocity lane, the key column and the ruler's bar numbers;
+/// `played` is the part of the content the clip plays (› Ruler): the grid and the notes outside
+/// it are shaded.
+fn draw(
+    ui: &Ui,
+    layout: &Layout,
+    clip: &PianoClip,
+    state: &PianoRollState,
+    grid: NoteGrid,
+    preview: Option<Effect>,
+    played: (f64, f64),
+) {
     let painter = ui.painter_at(layout.keys.union(layout.ruler).union(layout.grid).union(layout.lane));
     let grid_painter = painter.with_clip_rect(layout.grid);
     let first_key = layout.key_at(layout.grid.bottom() - 0.5).unwrap_or(0);
@@ -2077,13 +2569,14 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
 
     // Rows: black keys darker, a stronger line under each C.
     painter.rect_filled(layout.grid, 0.0, theme::window_background());
-    for key in first_key..=last_key {
+    for key in (first_key..=last_key).filter(|k| layout.rows.shows(*k)) {
         let top = layout.y_of(key);
         let row = Rect::from_min_max(
             Pos2::new(layout.grid.left(), top),
             Pos2::new(layout.grid.right(), top + layout.key_height),
         );
-        let fill = if is_black(key) { theme::window_background() } else { theme::panel_background() };
+        // With a scale, its keys are lighter; without one, the white keys are (› Scale and key).
+        let fill = scale_view::row_fill(clip.scale, key, is_black(key));
         grid_painter.rect_filled(row, 0.0, fill);
         let line = if key % 12 == 0 { theme::border_strong() } else { theme::border() };
         grid_painter.hline(row.x_range(), row.bottom() - 0.5, theme::hairline(line));
@@ -2114,8 +2607,9 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
     for n in (first_bar..=last_bar).filter(|n| n % label_every == 0).take(MAX_LINES) {
         let x = layout.x_of(n as f64 * bar).round() + 0.5;
         ruler_painter.vline(x, layout.ruler.y_range(), theme::hairline(theme::border_strong()));
-        let label =
-            Rect::from_min_max(Pos2::new(x + 3.0, layout.ruler.top()), Pos2::new(x + 40.0, layout.ruler.bottom()));
+        // The bar numbers sit under the ruler's loop row.
+        let top = layout.ruler.top() + ruler_view::LOOP_ROW;
+        let label = Rect::from_min_max(Pos2::new(x + 3.0, top), Pos2::new(x + 40.0, layout.ruler.bottom()));
         widgets::text_in(
             &ruler_painter,
             label,
@@ -2126,15 +2620,34 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         );
     }
 
-    // Past the clip's end: shaded.
-    let end = layout.x_of(clip.length);
+    // Outside the part the clip plays (before its start marker or its loop, past its loop's end
+    // or its end marker): shaded, and the notes there with it.
+    let shade = Color32::from_black_alpha(90);
+    let (played_start, played_end) = played;
+    let end = layout.x_of(played_end);
     if end < layout.grid.right() {
         let past = Rect::from_min_max(Pos2::new(end.max(layout.grid.left()), layout.grid.top()), layout.grid.max);
-        grid_painter.rect_filled(past, 0.0, Color32::from_black_alpha(90));
+        grid_painter.rect_filled(past, 0.0, shade);
     }
+    let start = layout.x_of(played_start);
+    if start > layout.grid.left() {
+        let before =
+            Rect::from_min_max(layout.grid.min, Pos2::new(start.min(layout.grid.right()), layout.grid.bottom()));
+        grid_painter.rect_filled(before, 0.0, shade);
+    }
+    let outside =
+        |note: &Note| note.time + note.duration <= played_start + EPSILON || note.time >= played_end - EPSILON;
+    // Ghost notes of other clips, under the clip's own (› Ghost notes).
+    ghost_view::paint(&grid_painter, &clip.ghosts, layout.grid, |g| layout.note_rect(&g.note()));
 
     // Notes, where a drag in progress puts them.
     let shown = |i: usize, note: &Note| -> Note {
+        if let Some(Effect::VelocityLine { set, .. }) = &preview {
+            return match set.iter().find(|(index, _)| *index == i) {
+                Some((_, midi)) => Note { velocity: (midi.clamp(1.0, 127.0) / 127.0) as f32, ..*note },
+                None => *note,
+            };
+        }
         if !state.selected.contains(&i) {
             return *note;
         }
@@ -2145,6 +2658,9 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
                 ..*note
             },
             Some(Effect::Resize(by)) => Note { duration: (note.duration + by).max(MIN_LENGTH), ..*note },
+            Some(Effect::ResizeStart(by)) => {
+                Note { time: note.time + by, duration: (note.duration - by).max(MIN_LENGTH), ..*note }
+            }
             Some(Effect::Velocity(by)) => {
                 let midi = (f64::from(suhina_session::midi_velocity(note.velocity)) + by).clamp(1.0, 127.0);
                 Note { velocity: (midi / 127.0) as f32, ..*note }
@@ -2156,6 +2672,10 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         Some(Effect::Select(rect)) => Some(rect),
         _ => None,
     };
+    // The velocity line being drawn, over the lane.
+    if let Some(Effect::VelocityLine { from, to, .. }) = &preview {
+        lane_painter.line_segment([*from, *to], Stroke::new(1.0, theme::accent()));
+    }
     for (i, note) in clip.notes.iter().enumerate() {
         let note = shown(i, note);
         let rect = layout.note_rect(&note);
@@ -2175,6 +2695,7 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         } else {
             0.4 + 0.6 * velocity / 127.0
         };
+        let alpha = if outside(&note) { alpha * 0.45 } else { alpha };
         grid_painter.rect_filled(rect, 0.0, clip.color.gamma_multiply(alpha));
         if muted {
             dashed_outline(&grid_painter, rect, theme::text_hint());
@@ -2214,8 +2735,8 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         grid_painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_secondary()), StrokeKind::Inside);
     }
     // Notes a draw or paint drag is making, outlined until they are added.
-    let drawn = match preview {
-        Some(Effect::Draw(Some(note))) => vec![note],
+    let drawn = match &preview {
+        Some(Effect::Draw(Some(note))) => vec![*note],
         _ => state.stroke.clone(),
     };
     for note in &drawn {
@@ -2239,7 +2760,7 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
     // The key column: keys, every C named.
     let key_painter = painter.with_clip_rect(layout.keys);
     key_painter.rect_filled(layout.keys, 0.0, theme::window_background());
-    for key in first_key..=last_key {
+    for key in (first_key..=last_key).filter(|k| layout.rows.shows(*k)) {
         let top = layout.y_of(key);
         let row = Rect::from_min_max(
             Pos2::new(layout.keys.left(), top),
@@ -2255,7 +2776,9 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
             theme::control_background()
         };
         key_painter.rect_filled(row.shrink2(Vec2::new(0.0, 0.5)), 0.0, fill);
-        if key % 12 == 0 && layout.key_height >= 8.0 {
+        scale_view::key_mark(&key_painter, clip.scale, key, row);
+        // Folded, every row is named: the keys beside each other are no longer neighbours.
+        if (key % 12 == 0 || layout.rows.folded()) && layout.key_height >= 8.0 {
             widgets::text_in(
                 &key_painter,
                 row.shrink2(Vec2::new(3.0, 0.0)),
@@ -2307,6 +2830,7 @@ fn for_readers(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollStat
     let grid = ui.interact(layout.grid, Id::new("piano-roll-readers"), Sense::hover());
     let count = clip.notes.len();
     grid.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, format!("Piano roll, {count} notes")));
+    ghost_view::for_readers(ui, &clip.ghosts, layout.grid, |g| layout.note_rect(&g.note()));
     for (i, note) in clip.notes.iter().enumerate() {
         let rect = layout.note_rect(note).intersect(layout.grid);
         if !rect.is_positive() {
@@ -2472,12 +2996,122 @@ mod tests {
             bar_beats: 4.0,
             grid: 0.25,
             placement: Placement { start: 16.0, length: 8.0, offset: 0.0, loop_range: None },
-            grid_name: "1/16",
+            grid_menu: PianoGrid::default(),
+            grid_follows: false,
+            shape: ClipShape { offset: 0.0, length: 8.0, loop_range: None, room: None },
+            ghosts: Ghosts::default(),
+            scale: None,
         }
+    }
+
+    /// A layout 200 points tall at 10 points a row, scrolled to the top, with `rows`.
+    fn folded_layout(rows: KeyRows) -> Layout {
+        let grid = Rect::from_min_size(Pos2::new(36.0, 24.0), Vec2::new(400.0, 200.0));
+        Layout {
+            keys: grid,
+            ruler: grid,
+            grid,
+            lane: grid,
+            scroll: Vec2::ZERO,
+            beat_width: 40.0,
+            key_height: 10.0,
+            rows,
+        }
+    }
+
+    #[test]
+    fn a_fold_maps_heights_to_the_shown_keys_and_back() {
+        use suhina_engine::model::ScaleMode;
+        let mut c = clip(vec![note(0.0, 1.0, 40), note(1.0, 1.0, 64), note(2.0, 1.0, 60)]);
+        // Fold: three rows, highest first; every height in a row is its key and back.
+        let layout = folded_layout(scale_view::rows(&c, Fold::Notes));
+        assert_eq!(layout.rows.len(), 3);
+        for (row, key) in [(0, 64), (1, 60), (2, 40)] {
+            let y = 24.0 + row as f32 * 10.0;
+            assert_eq!(layout.y_of(key), y);
+            assert_eq!(layout.key_at(y + 5.0), Some(key));
+        }
+        assert_eq!(layout.key_at(24.0 + 35.0), None, "below the last row is no key");
+        assert!(layout.y_of(62) < -1000.0, "a hidden key is far above the grid");
+        // A note is hit and a double-click adds on the row's key.
+        let state = PianoRollState::default();
+        let grid = note_grid(&c, 40.0);
+        assert_eq!(note_at(&layout, &c.notes, Pos2::new(36.0 + 100.0, 24.0 + 15.0)).map(|(i, _)| i), Some(2));
+        let added = state.new_note(&layout, &c, grid, Pos2::new(36.0 + 140.0, 24.0 + 25.0), false).unwrap();
+        assert_eq!(added.key, 40);
+        // A drag up one row from 40 moves by the 20 semitones to 60.
+        let moved = effect(
+            &Gesture::Move { from: Pos2::new(60.0, 50.0), grabbed: 0, copy: false },
+            Pos2::new(60.0, 40.0),
+            &layout,
+            &c,
+            &c.notes[..1],
+            grid,
+            false,
+        );
+        assert!(matches!(moved, Effect::Move(_, 20)), "{moved:?}");
+        // Fold to scale: C major's keys and every key with a note; without a scale, every key.
+        assert_eq!(scale_view::rows(&c, Fold::Scale).len(), 128);
+        c.scale = Scale::new(0, ScaleMode::Major);
+        let rows = scale_view::rows(&c, Fold::Scale);
+        assert!(rows.shows(60) && rows.shows(62) && !rows.shows(61));
+        assert!(rows.shows(40), "E is in C major");
+        c.notes.push(note(3.0, 1.0, 61));
+        assert!(scale_view::rows(&c, Fold::Scale).shows(61), "a note outside the scale keeps its row");
+        assert_eq!(scale_view::rows(&c, Fold::Off).len(), 128);
+        // Unfolded, the rows are the keys as they always were.
+        let layout = folded_layout(KeyRows::default());
+        assert_eq!(layout.y_of(127), 24.0);
+        assert_eq!(layout.key_at(24.0 + 67.0 * 10.0 + 1.0), Some(60));
+    }
+
+    #[test]
+    fn z_fits_the_selection_and_shift_z_the_whole_clip() {
+        let clip = clip(vec![note(2.0, 1.0, 60), note(3.0, 1.0, 62), note(6.0, 1.0, 64)]);
+        let mut state = focused_on(&clip);
+        state.view_width = 400.0;
+        state.selected = BTreeSet::from([0, 1]);
+        assert!(state.key_action("pianoRoll.zoomSelection", &clip, 0.0, None).is_none());
+        // Beats 2 to 4 fill 400 points.
+        assert_eq!((state.beat_width, state.scroll.x), (200.0, 400.0));
+        assert!(state.key_action("pianoRoll.zoomClip", &clip, 0.0, None).is_none());
+        assert_eq!((state.beat_width, state.scroll.x), (50.0, 0.0));
+        // Nothing selected: Z fits the clip too.
+        state.selected.clear();
+        state.beat_width = 300.0;
+        state.key_action("pianoRoll.zoomSelection", &clip, 0.0, None);
+        assert_eq!(state.beat_width, 50.0);
+        // A tiny selection stops at the zoom range.
+        state.selected = BTreeSet::from([0]);
+        state.view_width = 100_000.0;
+        state.key_action("pianoRoll.zoomSelection", &clip, 0.0, None);
+        assert_eq!(state.beat_width, BEAT_WIDTH_RANGE.1);
     }
 
     fn focused_on(clip: &PianoClip) -> PianoRollState {
         PianoRollState { shown: Some(clip.address.clone()), focused: true, ..PianoRollState::default() }
+    }
+
+    #[test]
+    fn the_grid_keys_leave_a_new_grid_for_the_window_and_snap_off_snaps_nothing() {
+        let mut piano = clip(Vec::new());
+        let mut state = focused_on(&piano);
+        assert_eq!(state.key_action("pianoRoll.gridWiden", &piano, 0.0, None), None);
+        assert_eq!(state.grid_picked.take().map(|g| g.label()).as_deref(), Some("1/8"));
+        state.key_action("pianoRoll.gridSnap", &piano, 0.0, None);
+        let free = state.grid_picked.take().unwrap_or_default();
+        assert!(!free.snap);
+        piano.grid_menu = free;
+        let grid = note_grid(&piano, 40.0);
+        assert_eq!((grid.step, grid.snaps), (0.25, false), "the lines stay, nothing snaps");
+        assert_eq!(grid.nearest_line(1.1), 1.1);
+        // Following the control bar, a key whose grid it cannot hold does nothing.
+        piano.grid_menu = PianoGrid::from_value("1/32");
+        piano.grid_follows = true;
+        state.key_action("pianoRoll.gridTriplet", &piano, 0.0, None);
+        assert_eq!(state.grid_picked, None);
+        state.key_action("pianoRoll.gridNarrow", &piano, 0.0, None);
+        assert_eq!(state.grid_picked.map(|g| g.label()).as_deref(), Some("1/32"));
     }
 
     #[test]

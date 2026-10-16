@@ -25,6 +25,7 @@ fn project() -> Project {
         length: 1.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 0.25, key, 1.0)]) }],
         extensions: Extensions::default(),
+        scale: None,
     };
     Project {
         tracks: vec![Track {
