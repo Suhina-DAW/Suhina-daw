@@ -43,6 +43,25 @@ env:
   # The maintainers are listed here, in test-build.yml and in test-build-links.yml.
   MAINTAINERS: juhamikael
   LABEL: ready to merge
+  # Shell functions the jobs source: whether the pull request has the label now (not as the event
+  # saw it), and stopping a merge: auto-merge off, and out of the queue when it is in it. A failed
+  # dequeue fails the job, so a pull request is never left queued without anyone seeing it.
+  HELPERS: |
+    has_label() {
+      gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" --jq '.[].name' | grep -Fxq -- "$LABEL"
+    }
+    stop_merge() {
+      gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
+      state=$(gh api graphql \
+        -f query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id isInMergeQueue } } }' \
+        -f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$NUMBER" \
+        --jq '.data.repository.pullRequest | "\(.id) \(.isInMergeQueue)"')
+      read -r id queued <<< "$state"
+      if [ "$queued" = "true" ]; then
+        gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' \
+          -f id="$id" >/dev/null
+      fi
+    }
 
 jobs:
   queue:
@@ -70,6 +89,7 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           HAS_TEST_BUILD: ${{ contains(github.event.pull_request.labels.*.name, 'test-build') }}
         run: |
+          eval "$HELPERS"
           is_maintainer() { printf '%s\n' $MAINTAINERS | grep -Fxq -- "$1"; }
           if ! is_maintainer "$SENDER"; then
             gh pr edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
@@ -88,9 +108,21 @@ jobs:
             -f body="\`$LABEL\`: a maintainer read ${SHA:0:7}; merge when every check is green." >/dev/null
           # Turned off first, so a maintainer's push moves the expected head to the new commit.
           gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
+          # Runs are not serialised (a concurrency group would drop waiting events), so the label
+          # is read again here: a run that waited must not undo a maintainer taking it off.
+          if ! has_label; then
+            echo "::notice::The label was taken off while this run waited; nothing queued."
+            exit 0
+          fi
           # With main's merge queue this adds the pull request to the queue once it is mergeable;
           # --match-head-commit refuses if the head is no longer the commit approved above.
           gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash --match-head-commit "$SHA"
+          # Taken off between the read above and the merge call: the `stop` run may already have
+          # finished, so stop the merge here too.
+          if ! has_label; then
+            stop_merge
+            echo "::notice::The label was taken off while this run queued; the merge was stopped."
+          fi
 
   unlabel:
     name: take the label off new commits
@@ -134,10 +166,14 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number }}
           APP: ${{ steps.app-token.outputs.app-slug }}
         run: |
-          gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
-          id=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
-          gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' \
-            -f id="$id" >/dev/null 2>&1 || true
+          eval "$HELPERS"
+          # Added again since: the newer `labeled` run decides.
+          if has_label; then
+            echo "::notice::The label is back on; nothing stopped."
+            exit 0
+          fi
+          stop_merge
+          # main's rule restricts no one from dismissing reviews, so the app may dismiss its own.
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/reviews" \
             --jq ".[] | select(.user.login == \"$APP[bot]\" and .state == \"APPROVED\") | .id" |
           while read -r review; do
