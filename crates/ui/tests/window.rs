@@ -1932,6 +1932,9 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
     // The four mouse switches write to the keymap, which is handed out to be saved.
     assert!(harness.query_by_label("Right click deletes a note: On").is_some(), "each switch is an Off/On row");
     assert!(!harness.state().keymap().mouse().right_deletes, "off until it is turned on");
+    // Under the window's edge until the page is scrolled to it.
+    harness.get_by_label("Right click deletes a note: On").scroll_to_me();
+    harness.run();
     harness.get_by_label("Right click deletes a note: On").click();
     harness.run();
     assert!(harness.state().keymap().mouse().right_deletes);

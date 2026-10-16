@@ -35,6 +35,11 @@ const BROWSE_WIDTH: f32 = 60.0;
 const THEME_ROWS: usize = 8;
 /// A dropdown on the right of its row (Settings › Audio).
 const DROPDOWN_FIELD: f32 = 260.0;
+/// Room right of the page for its scroll bar.
+const SCROLL_GUTTER: f32 = 12.0;
+/// The least height of a list that fills the space left on its page; a shorter window scrolls
+/// the page to it.
+const LIST_LEAST: f32 = 160.0;
 
 /// Facts the page shows but does not change.
 #[derive(Debug, Clone)]
@@ -191,6 +196,10 @@ pub struct PageState {
     pub theme_shown: Option<String>,
     /// The audio devices were listed since the Audio page was opened.
     pub audio_listed: Option<bool>,
+    /// The page the scroll position belongs to: another page opens at its top.
+    pub scrolled: Option<Page>,
+    /// The control with the keyboard focus when it was last scrolled into view.
+    pub focused: Option<Id>,
 }
 
 /// What the user did on the page this frame.
@@ -226,7 +235,6 @@ pub struct Sources<'a> {
 
 /// Draws the page into the space left in `ui`.
 pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &mut PageState) -> Outcome {
-    let Sources { about, plugins, themes, keymap, tag_limit } = sources;
     let mut outcome = Outcome::default();
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
@@ -277,8 +285,60 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         state.audio_listed = None;
         state.theme_shown = None;
     }
-    let page = Rect::from_min_max(Pos2::new(sidebar.right() + SIDEBAR_GAP, top), whole.max);
-    let bottom = area.bottom();
+
+    // The page shown, beside the list: it scrolls (wheel, scroll bar, a control given the focus)
+    // when it is taller than the room left under the title.
+    let viewport = Rect::from_min_max(
+        Pos2::new(sidebar.right() + SIDEBAR_GAP, top),
+        Pos2::new((whole.right() + SCROLL_GUTTER).min(area.right()), area.bottom().max(top)),
+    );
+    let width = whole.right() - viewport.left();
+    let to_top = state.scrolled != Some(state.page);
+    state.scrolled = Some(state.page);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(viewport), |ui| {
+        let mut scroll = egui::ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]);
+        if to_top {
+            scroll = scroll.vertical_scroll_offset(0.0);
+        }
+        scroll.show(ui, |ui| {
+            let page = Rect::from_min_size(ui.max_rect().min, Vec2::new(width, viewport.height()));
+            let end = page_body(ui, settings, sources, state, &mut outcome, page);
+            ui.allocate_rect(Rect::from_min_max(page.min, Pos2::new(page.right(), end + 2.0 * PAD)), Sense::hover());
+            keep_focus_in_view(ui, state);
+        });
+    });
+    outcome
+}
+
+/// A control that takes the keyboard focus (Tab) is scrolled into view.
+fn keep_focus_in_view(ui: &Ui, state: &mut PageState) {
+    let focused = ui.memory(|m| m.focused());
+    if focused == state.focused {
+        return;
+    }
+    state.focused = focused;
+    if let Some(response) = focused.and_then(|id| ui.ctx().read_response(id))
+        && ui.min_rect().intersects(response.rect)
+    {
+        ui.scroll_to_rect(response.rect, None);
+    }
+}
+
+/// Draws the page shown into `page`, its top at the top of what scrolls; returns where it ends.
+fn page_body(
+    ui: &mut Ui,
+    settings: &mut Settings,
+    sources: Sources<'_>,
+    state: &mut PageState,
+    outcome: &mut Outcome,
+    page: Rect,
+) -> f32 {
+    let Sources { about, plugins, themes, keymap, tag_limit } = sources;
+    let painter = ui.painter().clone();
+    let top = page.top();
+    // The lists that fill the space left (colours, shortcuts, plug-ins found) end here, or lower
+    // when the window is too short for them.
+    let bottom = page.bottom();
 
     // A section title over a hairline; the first sits level with the top of the list.
     let section = |y: &mut f32, name: &str| {
@@ -612,7 +672,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         }
         Page::Theme => {
             section(&mut y, "Theme");
-            outcome.themes = theme_page(ui, &painter, page, y, bottom, themes, state);
+            outcome.themes = theme_page(ui, &painter, page, &mut y, bottom, themes, state);
         }
         Page::Arrangement => {
             section(&mut y, "Arrangement");
@@ -731,7 +791,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             }
         }
         Page::Shortcuts => {
-            outcome.keymap_changed = shortcuts_page(ui, &painter, page, y, bottom, keymap, state);
+            outcome.keymap_changed = shortcuts_page(ui, &painter, page, &mut y, bottom, keymap, state);
         }
         Page::Plugins => {
             section(&mut y, "Plug-ins");
@@ -753,7 +813,7 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
             outcome.plugins = plugin_section(ui, &painter, page, &mut y, bottom, plugins);
         }
     }
-    outcome
+    y
 }
 
 /// The list of pages: Interface's own pages indented under it, the page shown filled. Returns
@@ -787,11 +847,12 @@ fn theme_page(
     ui: &mut Ui,
     painter: &egui::Painter,
     page: Rect,
-    mut y: f32,
+    at: &mut f32,
     bottom: f32,
     themes: &ThemesView,
     state: &mut PageState,
 ) -> Option<ThemeRequest> {
+    let mut y = *at;
     let mut request = None;
     let small = theme::ui_font(theme::TEXT_SMALL);
 
@@ -879,7 +940,9 @@ fn theme_page(
     widgets::text_in(painter, r, Align2::LEFT_CENTER, "Colours", small.clone(), theme::text_hint());
     painter.hline(page.x_range(), r.bottom() + 2.5, theme::hairline(theme::border()));
     y = r.bottom() + 6.0;
-    let list = Rect::from_min_max(Pos2::new(page.left(), y), Pos2::new(page.right(), (bottom - 12.0).max(y + 60.0)));
+    let list =
+        Rect::from_min_max(Pos2::new(page.left(), y), Pos2::new(page.right(), (bottom - 12.0).max(y + LIST_LEAST)));
+    *at = list.bottom();
     let colors = themes.colors;
     let mut edited = colors;
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
@@ -934,7 +997,7 @@ fn shortcuts_page(
     ui: &mut Ui,
     painter: &egui::Painter,
     page: Rect,
-    y: f32,
+    at: &mut f32,
     bottom: f32,
     keymap: &mut Keymap,
     state: &mut PageState,
@@ -973,7 +1036,7 @@ fn shortcuts_page(
         }
     }
 
-    let head = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), SETTING_ROW));
+    let head = Rect::from_min_size(Pos2::new(page.left(), *at), Vec2::new(page.width(), SETTING_ROW));
     label(painter, head, "Shortcuts", "Change, then press the keys; Escape cancels. Kept in keymap.json.");
     let reset = Rect::from_min_max(
         Pos2::new(head.right() - 80.0, head.top() + 1.0),
@@ -1028,8 +1091,11 @@ fn shortcuts_page(
         top += 16.0;
     }
 
-    let list =
-        Rect::from_min_max(Pos2::new(page.left(), top + 4.0), Pos2::new(page.right(), (bottom - 12.0).max(top + 60.0)));
+    let list = Rect::from_min_max(
+        Pos2::new(page.left(), top + 4.0),
+        Pos2::new(page.right(), (bottom - 12.0).max(top + 4.0 + LIST_LEAST)),
+    );
+    *at = list.bottom();
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let mut group = "";
@@ -1171,8 +1237,11 @@ fn plugin_section(
     }
 
     // What was found, in the space left.
-    let list =
-        Rect::from_min_max(Pos2::new(page.left(), *y + 4.0), Pos2::new(page.right(), (bottom - 12.0).max(*y + 40.0)));
+    let list = Rect::from_min_max(
+        Pos2::new(page.left(), *y + 4.0),
+        Pos2::new(page.right(), (bottom - 12.0).max(*y + 4.0 + LIST_LEAST)),
+    );
+    *y = list.bottom();
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for [name, vendor, format, version] in &plugins.found {
