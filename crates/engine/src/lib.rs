@@ -16,8 +16,6 @@ mod buses_tests;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
-#[cfg(test)]
-mod chain_wait_tests;
 mod cpu;
 mod cue;
 #[cfg(test)]

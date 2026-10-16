@@ -1091,3 +1091,7 @@ fn process(device: &mut Box<dyn Device>, buffer: &mut [f32], from: usize, to: us
     let Some(span) = buffer.get_mut(from * 2..to * 2) else { return };
     device.process(context, span);
 }
+
+#[cfg(test)]
+#[path = "chain_wait_tests.rs"]
+mod wait_tests;
