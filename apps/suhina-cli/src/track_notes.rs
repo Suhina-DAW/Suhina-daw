@@ -94,15 +94,9 @@ mod tests {
     fn project(clips: Vec<Clip>, notes: Vec<Note>) -> Project {
         Project {
             tracks: vec![Track {
-                id: TrackId(1),
-                name: "Lead".into(),
-                color: None,
                 content: ContentKinds { notes: true, audio: false },
                 channel: Some(ChannelId(1)),
-                parent: None,
-                midi_input: Default::default(),
-                audio_input: Default::default(),
-                extensions: Extensions::default(),
+                ..Track::new(TrackId(1), "Lead")
             }],
             contents: vec![ClipContent {
                 id: ContentId(1),
@@ -121,25 +115,11 @@ mod tests {
     }
 
     fn clip(start: f64, length: f64, loop_range: Option<LoopRange>) -> Clip {
-        Clip {
-            content: ContentId(1),
-            start,
-            length,
-            offset: 0.0,
-            loop_range,
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
-            follow_action: Default::default(),
-            launch: Default::default(),
-            extensions: Extensions::default(),
-        }
+        Clip { loop_range, ..Clip::new(ContentId(1), start, length) }
     }
 
     fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.5, key, velocity: 0.75, release_velocity: 0.25, channel: 0, muted: false }
+        Note { release_velocity: 0.25, ..Note::new(time, 0.5, key, 0.75) }
     }
 
     fn summary(events: &[Event]) -> Vec<(u32, bool, u8)> {

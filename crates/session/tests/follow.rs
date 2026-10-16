@@ -16,66 +16,24 @@ const BEAT: usize = SR as usize / 2;
 /// One track, "Drums", with a one-beat looping clip in scenes 1 and 2 and an empty scene 3.
 fn project() -> Project {
     let clip = |content: u32| Clip {
-        content: ContentId(content),
-        start: 0.0,
-        length: 1.0,
-        offset: 0.0,
         loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        extensions: Extensions::default(),
-        launch: Default::default(),
+        ..Clip::new(ContentId(content), 0.0, 1.0)
     };
     let content = |id: u32, key: u8| ClipContent {
         id: ContentId(id),
         name: format!("Beat {id}"),
         length: 1.0,
-        lanes: vec![ContentLane {
-            target: None,
-            data: LaneData::Notes(vec![Note {
-                time: 0.0,
-                duration: 0.25,
-                key,
-                velocity: 1.0,
-                release_velocity: 0.5,
-                channel: 0,
-                muted: false,
-            }]),
-        }],
+        lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 0.25, key, 1.0)]) }],
         extensions: Extensions::default(),
         scale: None,
     };
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "Drums".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
+            ..Track::new(TrackId(1), "Drums")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C1".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: Vec::new(),
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel::new(ChannelId(1), "C1")],
         contents: vec![content(1, 36), content(2, 40)],
         launcher: Launcher {
             scenes: vec![Scene::default(); 3],

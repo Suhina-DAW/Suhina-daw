@@ -13,18 +13,13 @@ pub(crate) const SR: u32 = 48_000;
 pub(crate) const BEAT: usize = SR as usize / 2;
 
 pub(crate) fn note(time: f64, duration: f64, key: u8) -> Note {
-    Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
+    Note::new(time, duration, key, 1.0)
 }
 
 pub(crate) fn device(id: &str, params: &[(&str, f64)]) -> Device {
     Device {
-        name: id.into(),
-        kind: DeviceKind::Builtin(id.into()),
-        enabled: true,
-        state: None,
         params: params.iter().map(|(p, v)| DeviceParam::new(*p, *v)).collect(),
-        automation: Vec::new(),
-        extensions: Extensions::default(),
+        ..Device::new(id, DeviceKind::Builtin(id.into()))
     }
 }
 
@@ -32,47 +27,16 @@ pub(crate) fn device(id: &str, params: &[(&str, f64)]) -> Device {
 /// slot, a looping clip of the same notes; `devices` on its channel.
 pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Project {
     let clip = |start: f64, looping: bool| Clip {
-        content: ContentId(1),
-        start,
-        length,
-        offset: 0.0,
         loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
+        ..Clip::new(ContentId(1), start, length)
     };
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "T".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
-            parent: None,
-            midi_input: Default::default(),
-            audio_input: Default::default(),
-            extensions: Extensions::default(),
+            ..Track::new(TrackId(1), "T")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices,
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel { devices, ..Channel::new(ChannelId(1), "C") }],
         contents: vec![ClipContent {
             id: ContentId(1),
             name: "c".into(),
@@ -321,24 +285,8 @@ fn an_edit_keeps_a_chain_playing_and_takes_its_new_values() {
 #[test]
 fn hostile_notes_and_devices_do_not_break_a_render() {
     let mut notes: Vec<Note> = (0..200).map(|i| note(f64::from(i) * 0.001, 0.5, (i % 128) as u8)).collect();
-    notes.push(Note {
-        time: 0.1,
-        duration: f64::NAN,
-        key: 200,
-        velocity: f32::NAN,
-        release_velocity: 0.0,
-        channel: 9,
-        muted: false,
-    });
-    notes.push(Note {
-        time: 0.2,
-        duration: -1.0,
-        key: 60,
-        velocity: -3.0,
-        release_velocity: 0.0,
-        channel: 0,
-        muted: false,
-    });
+    notes.push(Note { release_velocity: 0.0, channel: 9, ..Note::new(0.1, f64::NAN, 200, f32::NAN) });
+    notes.push(Note { release_velocity: 0.0, ..Note::new(0.2, -1.0, 60, -3.0) });
     let devices = vec![
         device("fm-synth", &[("algorithm", 1e9), ("op1.level", f64::NAN), ("volume", f64::INFINITY)]),
         device("overdrive", &[("drive", -5.0)]),

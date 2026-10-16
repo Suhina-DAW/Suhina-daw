@@ -11,25 +11,11 @@ use suhina_model::*;
 use suhina_session::{MAX_NOTES_PER_COMMAND, Session};
 
 fn note(time: f64, key: u8) -> Note {
-    Note { time, duration: 1.0, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
+    Note::new(time, 1.0, key, 100.0 / 127.0)
 }
 
 fn clip(content: u32, start: f64) -> Clip {
-    Clip {
-        content: ContentId(content),
-        start,
-        length: 4.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        extensions: Extensions::default(),
-        launch: Default::default(),
-    }
+    Clip::new(ContentId(content), start, 4.0)
 }
 
 fn content(id: u32, lanes: Vec<ContentLane>) -> ClipContent {
@@ -48,30 +34,11 @@ fn content(id: u32, lanes: Vec<ContentLane>) -> ClipContent {
 /// a slot with a MIDI clip and in scene 2 an empty slot.
 fn project() -> Project {
     let track = |id: u32, name: &str| Track {
-        id: TrackId(id),
-        name: name.into(),
-        color: None,
         content: ContentKinds { notes: true, audio: true },
-        channel: None,
-        parent: None,
-        extensions: Extensions::default(),
-        audio_input: Default::default(),
-        midi_input: Default::default(),
+        ..Track::new(TrackId(id), name)
     };
     let notes = |n: Vec<Note>| ContentLane { target: None, data: LaneData::Notes(n) };
-    let audio = AudioRegion {
-        file: "a.wav".into(),
-        absolute_file: None,
-        sample_rate: None,
-        channels: None,
-        duration_seconds: None,
-        warped: false,
-        stretch: StretchMode::default(),
-        warp_markers: Vec::new(),
-        gain: 1.0,
-        transpose: 0.0,
-        stream: None,
-    };
+    let audio = AudioRegion::new("a.wav");
     Project {
         tracks: vec![track(1, "Keys"), track(2, "Drums")],
         contents: vec![

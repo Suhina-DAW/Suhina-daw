@@ -43,51 +43,25 @@ fn env() -> Arc<PluginEnv> {
 /// The test gain `id` with its gain (parameter 0) automated through `points` (beat, value).
 fn gain(id: &str, points: &[(f64, f64)]) -> Device {
     Device {
-        name: format!("Test {id}"),
-        kind: DeviceKind::Clap { id: id.into() },
-        enabled: true,
-        state: None,
-        params: Vec::new(),
         automation: vec![AutomationLane {
             param: "0".into(),
             points: points.iter().map(|&(beat, value)| AutomationPoint { beat, value, curve: 0.0 }).collect(),
             enabled: true,
         }],
-        extensions: Extensions::default(),
+        ..Device::new(format!("Test {id}"), DeviceKind::Clap { id: id.into() })
     }
 }
 
 /// One track playing a note for `length` beats through `devices`.
 fn project(length: f64, devices: Vec<Device>) -> Project {
-    let note =
-        Note { time: 0.0, duration: length, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false };
+    let note = Note::new(0.0, length, 69, 1.0);
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "T".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
+            ..Track::new(TrackId(1), "T")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices,
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel { devices, ..Channel::new(ChannelId(1), "C") }],
         contents: vec![ClipContent {
             id: ContentId(1),
             name: "c".into(),
@@ -100,21 +74,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
             lanes: vec![ArrangementLane {
                 name: "l".into(),
                 track: Some(TrackId(1)),
-                clips: vec![Clip {
-                    content: ContentId(1),
-                    start: 0.0,
-                    length,
-                    offset: 0.0,
-                    loop_range: None,
-                    enabled: true,
-                    fade_in: 0.0,
-                    fade_out: 0.0,
-                    fade_in_curve: Default::default(),
-                    fade_out_curve: Default::default(),
-                    extensions: Extensions::default(),
-                    follow_action: Default::default(),
-                    launch: Default::default(),
-                }],
+                clips: vec![Clip::new(ContentId(1), 0.0, length)],
             }],
             markers: Vec::new(),
         },

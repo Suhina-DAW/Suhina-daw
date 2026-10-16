@@ -261,14 +261,10 @@ fn lane_events(envelope: &Envelope, time: u64, frames: usize, mut emit: impl FnM
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suhina_model::{AutomationLane, AutomationPoint, DeviceKind, Extensions};
+    use suhina_model::{AutomationLane, AutomationPoint, DeviceKind};
 
     fn device(params: &[(&str, f64)], lanes: &[(&str, &[(f64, f64)])]) -> Device {
         Device {
-            name: "P".into(),
-            kind: DeviceKind::Clap { id: "x".into() },
-            enabled: true,
-            state: None,
             params: params.iter().map(|(id, v)| DeviceParam::new(*id, *v)).collect(),
             automation: lanes
                 .iter()
@@ -278,7 +274,7 @@ mod tests {
                     enabled: true,
                 })
                 .collect(),
-            extensions: Extensions::default(),
+            ..Device::new("P", DeviceKind::Clap { id: "x".into() })
         }
     }
 

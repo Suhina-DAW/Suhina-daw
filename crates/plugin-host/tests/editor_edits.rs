@@ -64,31 +64,11 @@ fn project() -> Project {
     };
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "T".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
+            ..Track::new(TrackId(1), "T")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: vec![plugin],
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel { devices: vec![plugin], ..Channel::new(ChannelId(1), "C") }],
         ..Project::default()
     }
 }

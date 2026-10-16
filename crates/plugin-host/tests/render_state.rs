@@ -43,19 +43,12 @@ fn env() -> Arc<PluginEnv> {
 /// after them, with no saved state (its default gain), playing a note at beat 0 in the
 /// arrangement.
 fn project() -> Project {
-    let note =
-        Note { time: 0.0, duration: 0.5, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false };
+    let note = Note::new(0.0, 0.5, 69, 1.0);
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "T".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: false },
             channel: Some(ChannelId(1)),
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
+            ..Track::new(TrackId(1), "T")
         }],
         channels: vec![Channel {
             id: ChannelId(1),
@@ -93,21 +86,7 @@ fn project() -> Project {
             lanes: vec![ArrangementLane {
                 name: "l".into(),
                 track: Some(TrackId(1)),
-                clips: vec![Clip {
-                    content: ContentId(1),
-                    start: 0.0,
-                    length: 1.0,
-                    offset: 0.0,
-                    loop_range: None,
-                    enabled: true,
-                    fade_in: 0.0,
-                    fade_out: 0.0,
-                    fade_in_curve: Default::default(),
-                    fade_out_curve: Default::default(),
-                    follow_action: Default::default(),
-                    extensions: Extensions::default(),
-                    launch: Default::default(),
-                }],
+                clips: vec![Clip::new(ContentId(1), 0.0, 1.0)],
             }],
             markers: Vec::new(),
         },

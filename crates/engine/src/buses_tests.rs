@@ -13,46 +13,17 @@ use crate::{Renderer, render_offline};
 /// is false.
 pub(crate) fn grouped(group_devices: Vec<Device>, outside: bool) -> Project {
     let channel = |id: u32, output: Option<u32>, devices: Vec<Device>| Channel {
-        id: ChannelId(id),
-        name: format!("C{id}"),
-        role: ChannelRole::Regular,
-        volume: 1.0,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
         output: output.map(ChannelId),
-        sends: Vec::new(),
         devices,
-        extensions: Extensions::default(),
-        automation: Vec::new(),
+        ..Channel::new(ChannelId(id), format!("C{id}"))
     };
     let track = |id: u32, parent: Option<u32>| Track {
-        id: TrackId(id),
-        name: format!("T{id}"),
-        color: None,
         content: ContentKinds { notes: parent.is_some() || id == 4, audio: false },
         channel: Some(ChannelId(id)),
         parent: parent.map(TrackId),
-        midi_input: Default::default(),
-        audio_input: Default::default(),
-        extensions: Extensions::default(),
+        ..Track::new(TrackId(id), format!("T{id}"))
     };
-    let clip = Clip {
-        content: ContentId(1),
-        start: 0.0,
-        length: 1.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-    };
+    let clip = Clip::new(ContentId(1), 0.0, 1.0);
     let players: Vec<u32> = if outside { vec![1, 2, 4] } else { vec![1, 2] };
     let mut tracks = vec![track(1, Some(3)), track(2, Some(3)), track(3, None)];
     let mut channels = vec![channel(1, Some(3), vec![]), channel(2, Some(3), vec![]), channel(3, None, group_devices)];

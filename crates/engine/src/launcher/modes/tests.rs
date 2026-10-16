@@ -209,17 +209,11 @@ fn legato_audio_continues_from_the_replaced_clips_position() {
         lanes: vec![ContentLane {
             target: None,
             data: LaneData::Audio(AudioRegion {
-                file: "ramp.wav".into(),
-                absolute_file: None,
                 sample_rate: Some(sr),
                 channels: Some(1),
                 duration_seconds: Some(1.0),
-                warped: false,
-                stretch: StretchMode::default(),
-                warp_markers: Vec::new(),
                 gain,
-                transpose: 0.0,
-                stream: None,
+                ..AudioRegion::new("ramp.wav")
             }),
         }],
         extensions: Extensions::default(),

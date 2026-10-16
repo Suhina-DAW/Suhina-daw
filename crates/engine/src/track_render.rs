@@ -104,24 +104,18 @@ fn alone(project: &Project, track: TrackId) -> Project {
 mod tests {
     use std::sync::Arc;
 
-    use suhina_model::{AudioRegion, ContentId, ContentLane, LaneData, StretchMode};
+    use suhina_model::{AudioRegion, ContentId, ContentLane, LaneData};
 
     use super::*;
     use crate::{AudioData, render_offline_with_audio};
 
     fn region(file: &str) -> AudioRegion {
         AudioRegion {
-            file: file.into(),
-            absolute_file: None,
             sample_rate: Some(48_000),
             channels: Some(1),
             duration_seconds: Some(1.0),
-            warped: false,
-            stretch: StretchMode::default(),
-            warp_markers: Vec::new(),
             gain: 0.5,
-            transpose: 0.0,
-            stream: None,
+            ..AudioRegion::new(file)
         }
     }
 
@@ -132,31 +126,11 @@ mod tests {
         let track = TrackId(3);
         let project = Project {
             tracks: vec![Track {
-                id: track,
-                name: "Audio".into(),
-                color: None,
                 content: suhina_model::ContentKinds { notes: false, audio: true },
                 channel: Some(ChannelId(7)),
-                parent: None,
-                extensions: Extensions::default(),
-                audio_input: Default::default(),
-                midi_input: Default::default(),
+                ..Track::new(track, "Audio")
             }],
-            channels: vec![Channel {
-                id: ChannelId(7),
-                name: "Audio".into(),
-                role: ChannelRole::Regular,
-                volume: 0.3,
-                pan: -0.5,
-                mute: false,
-                solo: false,
-                cue: false,
-                output: None,
-                sends: Vec::new(),
-                devices: Vec::new(),
-                extensions: Extensions::default(),
-                automation: Vec::new(),
-            }],
+            channels: vec![Channel { volume: 0.3, pan: -0.5, ..Channel::new(ChannelId(7), "Audio") }],
             contents: vec![ClipContent {
                 id: ContentId(1),
                 name: "a".into(),
@@ -170,19 +144,9 @@ mod tests {
                     name: "Audio".into(),
                     track: Some(track),
                     clips: vec![suhina_model::Clip {
-                        content: ContentId(1),
-                        start: 0.5,
-                        length: 1.0,
                         offset: 0.25,
-                        loop_range: None,
-                        enabled: true,
                         fade_in: 0.25,
-                        fade_out: 0.0,
-                        fade_in_curve: Default::default(),
-                        fade_out_curve: Default::default(),
-                        follow_action: Default::default(),
-                        launch: Default::default(),
-                        extensions: Extensions::default(),
+                        ..suhina_model::Clip::new(ContentId(1), 0.5, 1.0)
                     }],
                 }],
                 markers: Vec::new(),
