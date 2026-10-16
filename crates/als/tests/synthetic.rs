@@ -136,6 +136,29 @@ fn reads_arrangement_clip_and_notes() {
     assert!((notes[0].velocity - 0.5).abs() < 1e-6);
 }
 
+/// A clip with one enabled note and one deactivated note (`IsEnabled="false"`): the deactivated
+/// note is kept and read as muted, not dropped (`docs/spec/als-format.md` › Notes).
+#[test]
+fn a_deactivated_note_is_read_as_muted() {
+    let events = concat!(
+        r#"<MidiNoteEvent Time="0" Duration="1" Velocity="100" OffVelocity="64" NoteId="1"/>"#,
+        r#"<MidiNoteEvent Time="1" Duration="1" Velocity="100" OffVelocity="64" NoteId="2" IsEnabled="false"/>"#,
+    );
+    let clip = midi_clip("0", "0", "4", "false", "4", &key_track(60, events));
+    let xml = format!(
+        r#"<Ableton><LiveSet><Tracks><MidiTrack Id="1"><Name><EffectiveName Value="Keys"/></Name>
+           <DeviceChain><MainSequencer><ClipSlotList>
+             <ClipSlot Id="0"><ClipSlot><Value>{clip}</Value></ClipSlot><HasStop Value="true"/></ClipSlot>
+           </ClipSlotList></MainSequencer></DeviceChain></MidiTrack></Tracks></LiveSet></Ableton>"#
+    );
+    let p = read_xml(&xml).unwrap().project;
+    let content = p.contents.first().expect("the clip's content");
+    let LaneData::Notes(notes) = &content.lanes[0].data else { panic!("expected notes") };
+    assert_eq!(notes.len(), 2, "the deactivated note is kept, not dropped");
+    assert_eq!((notes[0].muted, notes[1].muted), (false, true));
+    assert_eq!((notes[1].time, notes[1].duration, notes[1].key), (1.0, 1.0, 60));
+}
+
 #[test]
 fn reads_scenes_and_session_slots() {
     let p = read_xml(&live_set()).unwrap().project;

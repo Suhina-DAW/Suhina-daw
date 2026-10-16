@@ -10,7 +10,7 @@ const SR: u32 = 48_000;
 const BEAT: usize = SR as usize / 2;
 
 fn note(time: f64, key: u8) -> Note {
-    Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
+    Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 /// A slot clip of `length` beats playing `notes`, looping or once, with `follow`.

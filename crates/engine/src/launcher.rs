@@ -984,7 +984,7 @@ fn plan_clip(
         let meter = crate::meters::meter_slot(project, lane_track);
         match &lane.data {
             LaneData::Notes(lane_notes) => {
-                for note in lane_notes.iter().filter(|n| n.time.is_finite() && n.duration.is_finite()) {
+                for note in lane_notes.iter().filter(|n| !n.muted && n.time.is_finite() && n.duration.is_finite()) {
                     let velocity = note_velocity(note.velocity);
                     notes.push(PlanNote {
                         time: note.time,
@@ -1747,7 +1747,7 @@ mod tests {
     pub(super) const BAR: usize = 4 * BEAT;
 
     pub(super) fn note(time: f64, key: u8) -> Note {
-        Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
+        Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
     }
 
     /// A clip of `length` beats that loops over its whole length, or plays once.
@@ -1869,6 +1869,33 @@ mod tests {
     #[test]
     fn nothing_plays_until_something_is_launched() {
         assert!(render(&two_loops(), &[], 2.0).iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn a_muted_note_is_never_planned_by_the_launcher() {
+        // A one-beat loop with a note on the beat and one off it. Muting the off-beat note leaves
+        // half the notes sounding; the launcher never plans a voice for it.
+        let with_offbeat_muted = || {
+            let mut content = notes(1, vec![note(0.0, 60), note(0.5, 72)]);
+            if let Some(LaneData::Notes(list)) = content.lanes.first_mut().map(|lane| &mut lane.data)
+                && let Some(note) = list.get_mut(1)
+            {
+                note.muted = true;
+            }
+            project(vec![content], vec![vec![with(clip(1, 1.0, true))]])
+        };
+        let unmuted =
+            || project(vec![notes(1, vec![note(0.0, 60), note(0.5, 72)])], vec![vec![with(clip(1, 1.0, true))]]);
+        let launch = [(0.0, LaunchCommand::LaunchClip { column: 0, slot: 0 })];
+
+        let heard = render(&unmuted(), &launch, 2.0);
+        let quiet = render(&with_offbeat_muted(), &launch, 2.0);
+        assert_onsets(
+            &heard,
+            &[0, BEAT / 2, BEAT, BEAT + BEAT / 2, 2 * BEAT, 2 * BEAT + BEAT / 2, 3 * BEAT, 3 * BEAT + BEAT / 2],
+        );
+        assert_onsets(&quiet, &[0, BEAT, 2 * BEAT, 3 * BEAT]);
+        assert_eq!(onsets(&quiet).len() * 2, onsets(&heard).len());
     }
 
     #[test]

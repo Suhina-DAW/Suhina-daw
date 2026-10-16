@@ -100,7 +100,7 @@ With `--launcher` the set starts stopped and Suhina reads one command per line:
 | `metronome on`, `metronome on -12`, `metronome off` (or `click …`) | a click on every beat, higher on the bar; level in dB (−6 by default) |
 | `tempo 100`, `vol Bass -6`, `mute Bass`, `unmute Bass` | edits, heard while playing |
 | `undo`, `redo` | undo or redo the last edit |
-| `track.setMute {"track": 1, "mute": true}` | any command by id, with JSON parameters |
+| `track.setMute {"tracks": [1], "mute": true}` | any command by id, with JSON parameters |
 | `help` (or `?`), `quit` (or `exit`) | |
 
 ## Building

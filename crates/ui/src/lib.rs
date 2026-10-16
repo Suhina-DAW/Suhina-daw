@@ -19,6 +19,7 @@ pub mod loading_dialog;
 pub mod logo;
 pub mod menus;
 pub mod meter;
+pub mod midi_tools;
 pub mod missing_files;
 pub mod motion;
 pub mod nesting;

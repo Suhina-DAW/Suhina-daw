@@ -76,6 +76,9 @@ jobs:
       # its commands are run here against mocked API clients, on the runner's Node.js.
       - name: The claim bot's commands answer as intended
         run: python3 scripts/claim_bot_test.py
+      # The Depends on check decides what the merge queue may merge; run it the same way.
+      - name: The Depends on check reads descriptions as intended
+        run: python3 scripts/depends_on_test.py
       # Warnings only: documents that describe code this pull request changes, left unchanged.
       - name: Documents that describe the changed code
         if: github.event_name == 'pull_request'

@@ -13,7 +13,7 @@ fn folder(name: &str) -> std::path::PathBuf {
 fn a_saved_project_opens_as_it_was() {
     let dir = folder("round-trip");
     let mut session = Session::new(blank_project());
-    session.execute("track.setVolume", &json!({ "track": "1 MIDI", "db": -6.0 })).unwrap_or_default();
+    session.execute("track.setVolume", &json!({ "tracks": ["1 MIDI"], "db": -6.0 })).unwrap_or_default();
     assert!(session.has_unsaved_changes());
     // Without a path there is nowhere to save it yet.
     assert!(session.execute("project.save", &json!({})).is_err());
@@ -44,7 +44,7 @@ fn a_copy_leaves_the_project_with_its_own_file() {
     session
         .execute("project.save", &json!({ "path": dir.join("song.suhina").display().to_string() }))
         .unwrap_or_default();
-    session.execute("track.setMute", &json!({ "track": "2 MIDI", "mute": true })).unwrap_or_default();
+    session.execute("track.setMute", &json!({ "tracks": ["2 MIDI"], "mute": true })).unwrap_or_default();
     let copy = dir.join("templates").join("Live set.suhina");
     let result = session.execute("project.save", &json!({ "path": copy.display().to_string(), "copy": true }));
     assert_eq!(result.ok().map(|v| v["copy"].clone()), Some(json!(true)));
@@ -91,7 +91,7 @@ fn what_cannot_be_saved_or_opened_is_an_error() {
 fn a_project_saved_before_the_rename_opens_and_is_saved_back_to_its_own_file() {
     let dir = folder("old-extension");
     let mut session = Session::new(blank_project());
-    session.execute("track.setVolume", &json!({ "track": "1 MIDI", "db": -6.0 })).unwrap_or_default();
+    session.execute("track.setVolume", &json!({ "tracks": ["1 MIDI"], "db": -6.0 })).unwrap_or_default();
     // A file as projects were saved before October 2026: `.locr`, format "locr".
     let old = dir.join("Old song.locr");
     let template = dir.join("Old template.locr");
@@ -106,7 +106,7 @@ fn a_project_saved_before_the_rename_opens_and_is_saved_back_to_its_own_file() {
     assert!(warnings.is_empty());
     assert_eq!(opened.project(), session.project());
     // Saved without a path, it goes back to the file it came from: no new file beside it.
-    opened.execute("track.setMute", &json!({ "track": "2 MIDI", "mute": true })).unwrap_or_default();
+    opened.execute("track.setMute", &json!({ "tracks": ["2 MIDI"], "mute": true })).unwrap_or_default();
     let saved = opened.execute("project.save", &json!({}));
     assert_eq!(saved.ok().and_then(|v| v["path"].as_str().map(String::from)), Some(old.display().to_string()));
     assert_eq!(opened.source(), Some(old.as_path()));

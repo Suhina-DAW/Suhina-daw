@@ -497,6 +497,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
 - Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
   double-click for off, right-click for before or after the fader.
+- Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
+  `track.adjustPan` move each track by the same amount, keeping what is between them, and
+  `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
+  volume or pan moves every selected track with it, the wheel over a value changes it (1 dB a
+  tick) instead of scrolling, and Settings › Interface › Arrangement › Mixer controls draws the
+  volume and pan as fields or as knobs ([spec](docs/spec/arrangement-editing.md#volume-pan-mute-and-solo)).
 - A cue output for headphones: Settings › Audio › Cue puts browser previews and the tracks whose
   **C** button is on (`track.setCue`) on another output pair of the same device (outputs 3/4 and
   up, `output.setCuePair`) at their own volume (`output.setCueVolume`), while the main outputs
@@ -517,12 +523,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
 - Groups inside groups, up to 16 levels ([#209](https://github.com/suhina-daw/suhina-daw/issues/209)):
   the sound goes through every group's volume, mute and devices to the output, solo follows the
-  nesting, and a fold arrow on a group's header hides its tracks in both views. Drag a header
+  nesting, and the fold triangle on a group's header hides its tracks in both views. Drag a header
   into a group, or use Move into group / Move out of group in its menu (`track.setGroup`); nested
   groups are saved and read from Live Sets ([spec](docs/spec/arrangement-editing.md#groups-inside-groups)).
 - A double-click on an empty Session slot or an empty spot of an Arrangement lane of a MIDI track
   makes an empty MIDI clip there, a bar long and on the grid (`clip.create`, also over MCP); in
   the Arrangement it is selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-midi-clip)).
+- Clips: Ctrl-click adds one to the selection and Shift-click takes the run up to one, Ctrl+A
+  selects the lot, and Ctrl+C, Ctrl+X, Ctrl+D, Delete and 0 (clip mute) act on the whole
+  selection as one undo step ([spec](docs/spec/arrangement-editing.md#selecting-clips)). Header
+  clicks take a run of tracks the same way.
+- A group's triangle folds its tracks away into one lane, which stands in for the track being
+  worked on (its clips, waveform and colour), or the first track inside it; a Stems file's group
+  arrives folded ([spec](docs/spec/arrangement-editing.md#folded-groups)).
 - Waveforms in clips, the browser's preview and the sample map's tooltips are drawn by one
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
@@ -579,6 +592,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ahead of the device instead of two, and Settings › Audio and `audio.info` say how long a key
   takes to be heard (`live_latency_ms`); at 128 frames, at most about 5 ms plus the device
   ([#265](https://github.com/suhina-daw/suhina-daw/issues/265), ADR 0017).
+- A buffer size is never asked of a driver that did not declare it: the dropdown lists the sizes
+  the device's own range allows, a range holding none of the engine's sizes (or no range at all)
+  leaves the driver its own buffer size and the notice says which size plays, and on WASAPI shared
+  mode the row is *Engine block* — Windows sets the device's buffer there, so the number is
+  Suhina's render block and the note names the period Windows gives the device, in milliseconds.
+  A device is not given up over a size its driver refuses: the same output is tried without one
+  before anything falls back.
 - Settings › Plug-ins: the folders scanned (add, remove), Scan and Rescan all in the background,
   and the plug-ins found and the files that failed.
 - Every key is the user's to change: Settings › Shortcuts and `keymap.json` bind any command
@@ -622,6 +642,19 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   them; and Settings › Shortcuts has the presets **Select-first** (Ctrl+D duplicates) and
   **Draw-first** (Ctrl+B duplicates, a right-click in Draw and Paint deletes), kept in
   `keymap.json`.
+- **Piano roll, step 4** ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the toolbar
+  takes a size in Settings › General › Piano roll (Normal, Large, Larger, Large at first) and its
+  six tool icons are drawn as outlines; the **Mute** tool (key 6) mutes and unmutes the notes a
+  click or drag touches, and a muted note keeps its place in the clip, is drawn faded and is never
+  played (`note.setMuted`, and `Note.muted` in the model, the `.suhina` file and a Live Set's
+  `IsEnabled="false"`); a **MIDI tools column** beside the notes holds quantise (Ctrl+U still
+  works) and the tools Transpose, Humanise, Fit to scale, Invert, Reverse, Legato, ×2, ÷2 and the
+  velocity Randomise and Ramp, each one command (`note.humanize`, `.fitToScale`, `.invert`,
+  `.reverse`, `.legato`, `.stretch`, `.randomizeVelocity`, `.rampVelocity`) and one undo step; the
+  clip column lists what is selected (Notes "N of M", From, To, Pitch, Velocity); and
+  Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
+  (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
+  their own, kept in `keymap.json`.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

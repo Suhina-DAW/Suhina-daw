@@ -1,6 +1,6 @@
 ---
-description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, where playback starts and stops (the play start marker), how clips are split and consolidated, and named markers on the timeline
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers
+description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, how a group's tracks fold away, where playback starts and stops (the play start marker), how clips are split and consolidated, and named markers on the timeline
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers, fold, folded group, unfold, group triangle, group lane, volume, pan, mute, solo, mixer controls, knob, the wheel over a value
 type: spec
 status: draft
 last_verified: 2026-10-15
@@ -72,14 +72,29 @@ pointer is instead (off the grid).
 **`none`** launches clips at once, and in the Arrangement view nothing snaps (as if Alt were held);
 lines show beats and bars by the zoom alone.
 
+## Selecting clips
+
+A click on a clip selects it alone; **Ctrl** (Cmd) adds a clip to the selection or takes it out,
+and **Shift** takes the run of clips between the clip clicked last and this one, in the order the
+lanes draw them (top lane first, clips in their lane from left to right). Ctrl+A selects every clip
+in the arrangement. Pressing a clip that is part of the selection keeps the selection, so a drag can
+start there; pressing one that is not selects that clip and only it moves, since moving a whole
+selection is not built yet (see Open).
+
+In the track headers the same keys work on tracks: a click selects one, Ctrl adds or takes one out,
+Shift takes the run of headers between the last one clicked and this one. Ctrl+G groups those.
+
 ## Duplicating and deleting
 
-`clip.duplicate {track, index, stack?}` places a copy right after the clip, replacing what the
-copy covers unless stacked, as a moved clip does (the window stacks when the setting for the
-clip's kind is on); `clip.delete {track, index}` removes it. In the Arrangement view a clip's
-right-click menu has both, and the keys Ctrl+D and Delete act on the selected clip. Points
-selected on an automation lane are deleted by Delete before any clip; selecting a clip ends a
-selection of points, and selecting points ends the clip's selection
+`clip.duplicate {clips, stack?}` places a copy of each named clip right after it, replacing what
+the copies cover unless stacked, as a moved clip does (the window stacks when the setting for the
+clip's kind is on); `clip.delete {clips}` removes them. Both take a list of `{ track, index }` as
+`project.clips` lists them, at least one, and make one undo step for the whole list
+(`clip.delete` also takes one clip as `{track, index}`, or a slot's clip as `{track, scene}`). In the
+Arrangement view a clip's right-click menu has both, and Mute, and they act on the whole
+selection when the click fell inside it, else on the one clip. The keys Ctrl+D and Delete do the
+same for the selection. Points selected on an automation lane are deleted by Delete before any
+clip; selecting a clip ends a selection of points, and selecting points ends the clips' selection
 ([automation](automation.md#in-the-arrangement-view)).
 
 ## Automation lanes
@@ -107,18 +122,21 @@ clip's own. In the Session view a double-click on an empty slot makes one there
 
 ## Copy, cut and paste
 
-`clip.copy {track, index}` keeps a copy of a clip and what it plays; `clip.cut` also deletes it;
-`clip.paste {track, start, stack?}` places the copy on a track that takes its kind, replacing what
-it covers unless stacked. The pasted clip plays its own copy of the content, so editing one does
-not change the other. The window's keys paste after the selected clip, or at the playhead on the
-selected track ([shortcuts](../shortcuts.md)), and stack when the stacking setting for the
-clip's kind is on, like a moved clip. A clip's right-click menu has Copy.
+`clip.copy {clips}` keeps a copy of the clips named in `clips` and what they play; `clip.cut` also
+deletes them; `clip.paste {track, start, stack?}` places the copies on a track that takes their
+kind, replacing what they cover unless stacked. The earliest copied clip lands on `start` and the
+others keep their distance from it, so a copied run pastes as a run. The pasted clips play their own
+copy of the content, so editing one does not change the other. The window's keys paste after the
+selected clip, or at the playhead on the selected track ([shortcuts](../shortcuts.md)), and stack
+when the stacking setting for the clip's kind is on, like a moved clip. A clip's right-click menu
+has Copy.
 
 The clipboard is shared with the clip slots ([clip launching](clip-launching.md) › Clips between
 the arrangement and the slots): `clip.copy {track, scene}` copies a slot's clip, which pastes
 onto the arrangement like any other, and `clip.paste {track, scene}` puts the copied
-arrangement clip into a slot. Pasting with `start` and `scene` together, or neither, is an error;
-`start` is at most 120000 beats.
+arrangement clip into a slot; a slot holds one clip, so with several copied that paste is an
+error. Copying with `clips` and `scene` together, or neither, is an error, and so is pasting with
+`start` and `scene` together, or neither; `start` is at most 120000 beats.
 
 **Dragging into a slot, and back.** A clip dragged in the Arrangement view and held over
 **Session** in the control bar for half a second switches the view; let go over a slot and the
@@ -127,6 +145,11 @@ clip is copied into it, the arrangement left as it was. A slot's clip dragged an
 replaces what it covers unless stacked. Both are `clip.copy` then `clip.paste`
 ([Session view](ui-session-view.md) › Between the views).
 
+## Clips off
+
+`clip.setEnabled {clips, enabled}` turns clips on or off: an off clip is drawn dimmed, plays
+nothing and does not sound in a render, so it works as a clip mute. The 0 key turns the selection off,
+or back on when nothing in it plays; a clip's menu says Mute or Unmute for the clip it fell on.
 ## Splitting
 
 `clip.split {track, index, at}` cuts an arrangement clip in two at song position `at` (beats from
@@ -485,11 +508,12 @@ Clips placed from the browser or dropped from the system's file manager (`clip.a
 moved clip; they stack when either stacking setting is on (one `stack` flag for the whole drop,
 not per kind) ([browser](browser.md) › Files).
 
-In the Arrangement view a header click selects a track (Ctrl adds), Ctrl+G groups the selection,
-dragging a header moves the track above the lane under the pointer (below it from its lower half),
-and a right-click opens the track's menu: name, colour, group, ungroup, **Move into group** (a
-submenu of every other group it can go into), **Move out of group** (one level up, right after the
-group it leaves), delete. The Session view's column headers have the same menu.
+In the Arrangement view a header click selects a track (Ctrl adds, Shift takes a run), Ctrl+G
+groups the selection, dragging a header moves the track above the lane under the pointer (below it
+from its lower half), and a right-click opens the track's menu: name, colour, group, ungroup,
+**Move into group** (a submenu of every other group it can go into), **Move out of group** (one
+level up, right after the group it leaves), delete. A group's header starts with a triangle that
+folds its tracks away (Folded groups). The Session view's column headers have the same menu.
 
 ### Groups inside groups
 
@@ -500,19 +524,52 @@ output; each group's volume, mute and devices apply on the way ([ADR 0004](../de
 › 10), and solo follows the nesting: a soloed track is heard through every group above it, a
 soloed group plays everything inside it at any depth.
 
-A header shows its nesting by stepping in 8 px per level. A group's colour square is its fold
-arrow: pointing down while the group is open, right while it is folded, when the lanes of every
-track inside it are hidden (the Session view hides their columns; both views fold the same
-groups, and folding is part of the view, not an edit, so it does not undo). A dragged header
-joins the group of the lane it is let go over: above that lane, or below it from its lower half,
-and below the header of an open group is into that group, first. Within the same group the drop
-is a `track.move`; into another group, or out to the top level, it is a `track.setGroup`. After a
-folded group is after everything inside it.
+A header shows its nesting by stepping in 8 px per level. A group that holds tracks has the fold
+triangle at the start of its header (Folded groups): the lanes of every track inside it, at any
+depth, are hidden while it is folded, and the Session view hides their columns; both views fold
+the same groups, and folding is part of the view, not an edit, so it does not undo. A dragged
+header joins the group of the lane it is let go over: above that lane, or below it from its lower
+half, and below the header of an open group is into that group, first. Within the same group the
+drop is a `track.move`; into another group, or out to the top level, it is a `track.setGroup`.
+After a folded group is after everything inside it.
 
 While the piano roll is pulled to the top with **Edited track** (Settings › General › Piano roll),
 the view shows only its ruler and the edited track's lane, lit, with no return tracks and no main
 track, and is not scrolled; its scroll position is back when the view is whole again
 ([clip editor](ui-clip-editor.md) › Pulled to the top).
+
+## Volume, pan, mute and solo
+
+Every track's mixer strip is reached by a `track.*` command that takes `tracks`, a list of one or
+more tracks by id or name:
+
+| Command | Does |
+|---|---|
+| `track.setVolume {tracks, db, continue?}` | Sets each to `db` (at most +6; `"-inf"` is silence). |
+| `track.adjustVolume {tracks, db}` | Moves each by the same number of dB (positive is louder), keeping what is between them, within the same range. |
+| `track.setPan {tracks, pan, continue?}`, `track.adjustPan {tracks, pan}` | The same two, for pan; −1 is full left, +1 full right, and a move stops at either end. |
+| `track.setMute {tracks, mute}` | Turns each off or back on. |
+| `track.setSolo {tracks, solo, exclusive?}` | Solos each; `exclusive` also ends every other solo. |
+
+A set or adjust that changes a parameter with an automation lane turns that lane off for each
+track it changes, and the answer says `"automation": "off"` ([automation](automation.md)).
+
+In the Arrangement view a header's volume and pan fields and its track-on and solo buttons act on
+the whole selection while the track they belong to is part of one of two or more tracks: dragging
+one field moves every selected track's by the same amount (the others follow it as it is dragged,
+and the commands land when it is let go), one click on a track-on or a solo button turns them all
+off or on, and the whole list is one undo step. With one track selected, or with a click outside
+the selection, they act on that track alone, and it is heard while it is dragged: each frame sets
+the value with `continue`, so the drag is one undo step.
+
+**The wheel over a field** changes its value instead of scrolling the view: one tick of a wheel is
+one step (1 dB, or 0.02 of pan), Shift makes it ten times finer, and the view stays where it is.
+The same holds for a clip's gain field and for the Session mixer's values.
+
+**Mixer controls** (Settings › Interface › Arrangement) chooses how a track's volume and pan are
+drawn: **Field** (default), the bar and the centre bar this view has always had, or **Knob**, a
+small knob with its value beside it, as the Session mixer's pan knob. Either way the control is
+dragged and rolled over the same.
 
 ## Over other clips
 
@@ -540,6 +597,28 @@ default.
 Where clips on a lane overlap, the lane shows them side by side in sub-rows (each clip in the
 first sub-row free at its start), so every clip stays visible and can be grabbed. A lane without
 overlaps shows one row.
+
+## Folded groups
+
+A group track's header starts with a small triangle; clicking it **folds** the group. The lanes of
+the tracks inside it go away, and the group's own lane stands in for one of them, drawing that
+track's clips, waveform and colour. Which one: the track the user is working on — the header they
+clicked last, or the track of the selected clip — while it is one of the group's own, else the
+first track inside it. Clicking the triangle again opens the group. A group holding no tracks
+shows no triangle.
+
+A group arrives folded when a Stems file makes one: dropping a `.stem.mp4` on a lane, a slot or
+the empty area puts its stems and their muted master in a new group, and that group opens folded,
+so the whole file reads as one lane until its triangle is clicked
+([stems](stems-format.md) › Mastering).
+
+Folding is view state, not part of the project: nothing in a saved project keeps it, so a project
+that is saved and opened shows every group open, and no command folds or opens one. A folded
+group's header stays its own — name, colour, volume, pan, mute, solo and output are the group's —
+and only the clips come from the track its row stands in for. A clip on that row is that track's
+clip: clicking it selects it, dragging it moves it, and its menu acts on it, exactly as if the lane
+were drawn. The tracks inside a folded group cannot be reached with the mouse, since none of them
+is drawn.
 
 ## Open
 

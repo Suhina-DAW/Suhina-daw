@@ -111,18 +111,18 @@ fn a_manual_change_turns_a_lane_off_until_it_is_on_again() {
     // Kept in the parameter's range.
     assert_eq!(session.project().channels[0].devices[0].automation[0].points[0].value, 36.0);
 
-    let set = run(&mut session, "track.setVolume", json!({ "track": 1, "db": -3 })).unwrap();
+    let set = run(&mut session, "track.setVolume", json!({ "tracks": [1], "db": -3 })).unwrap();
     assert_eq!(set["automation"], "off");
     assert!(!lanes(&session)[0].enabled);
     // Once off, another change says nothing more.
-    let set = run(&mut session, "track.setVolume", json!({ "track": 1, "db": -4 })).unwrap();
+    let set = run(&mut session, "track.setVolume", json!({ "tracks": [1], "db": -4 })).unwrap();
     assert!(set.get("automation").is_none());
     let set =
         run(&mut session, "device.setParam", json!({ "track": 1, "device": 0, "param": "gain", "value": -6 })).unwrap();
     assert_eq!(set["automation"], "off");
     assert!(!session.project().channels[0].devices[0].automation[0].enabled);
     // A parameter without a lane is not touched.
-    let set = run(&mut session, "track.setPan", json!({ "track": 1, "pan": 0.5 })).unwrap();
+    let set = run(&mut session, "track.setPan", json!({ "tracks": [1], "pan": 0.5 })).unwrap();
     assert!(set.get("automation").is_none());
 
     let list = run(&mut session, "automation.list", json!({ "track": 1 })).unwrap();

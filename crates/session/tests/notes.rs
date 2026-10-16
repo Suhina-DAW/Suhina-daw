@@ -8,7 +8,7 @@ use suhina_model::*;
 use suhina_session::{MAX_NOTES_PER_COMMAND, Session};
 
 fn note(time: f64, key: u8) -> Note {
-    Note { time, duration: 1.0, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0 }
+    Note { time, duration: 1.0, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 fn clip(content: u32, start: f64) -> Clip {
@@ -117,7 +117,10 @@ fn undoes(session: &mut Session, content: u32, before: &[Note]) {
 fn notes_are_listed_with_midi_velocities() {
     let mut session = Session::new(project());
     let listed = run(&mut session, "note.list", json!({ "track": "Keys", "index": 0 })).unwrap();
-    assert_eq!(listed[1], json!({ "index": 1, "time": 1.0, "length": 1.0, "key": 64, "velocity": 100 }));
+    assert_eq!(
+        listed[1],
+        json!({ "index": 1, "time": 1.0, "length": 1.0, "key": 64, "velocity": 100, "muted": false })
+    );
     assert_eq!(listed.as_array().map(Vec::len), Some(3));
     // An empty MIDI clip has none; a slot's clip is named by its scene.
     assert_eq!(run(&mut session, "note.list", json!({ "track": 1, "index": 1 })).unwrap(), json!([]));
@@ -312,8 +315,9 @@ fn arranged(session: &Session) -> Vec<u32> {
 fn editing_a_duplicate_leaves_the_original_alone_and_undoes_both() {
     let mut session = Session::new(project());
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     assert_eq!(arranged(&session)[copy], 1, "a duplicate plays the same content until it is edited");
     let before_edit = session.project().clone();
 
@@ -347,8 +351,9 @@ fn editing_a_duplicate_leaves_the_original_alone_and_undoes_both() {
 fn editing_the_original_of_a_duplicate_leaves_the_duplicate_alone() {
     let mut session = Session::new(project());
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.setVelocity", json!({ "track": 1, "index": 0, "notes": [0, 1, 2], "velocity": 20 }))
         .unwrap();
     assert_eq!(arranged(&session)[copy], 1);
@@ -367,8 +372,9 @@ fn quantising_a_duplicate_leaves_the_original_alone() {
     )
     .unwrap();
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.quantize", json!({ "track": 1, "index": copy, "grid": "1/4" })).unwrap();
     let own = arranged(&session)[copy];
     assert_ne!(own, 1);
@@ -400,7 +406,7 @@ fn a_launcher_clip_sharing_an_arrangement_clips_content_is_copied_when_edited() 
 #[test]
 fn an_edit_that_changes_nothing_or_fails_makes_no_copy() {
     let mut session = Session::new(project());
-    run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
+    run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
     let before = session.project().clone();
     // A move by nothing changes no note, and so adds no undo step.
     run(&mut session, "note.move", json!({ "track": 1, "index": 0, "notes": [0], "beats": 0.0 })).unwrap();
@@ -416,8 +422,9 @@ fn an_edit_that_changes_nothing_or_fails_makes_no_copy() {
 #[test]
 fn an_empty_duplicate_gets_its_own_content_when_notes_are_added() {
     let mut session = Session::new(project());
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 1, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 1 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(
         &mut session,
         "note.add",
@@ -462,8 +469,9 @@ fn a_shared_pattern_stays_shared_when_edited() {
 fn pasting_into_a_duplicate_leaves_the_original_alone() {
     let mut session = Session::new(project());
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.copy", json!({ "track": 1, "index": 0, "notes": [0] })).unwrap();
     run(&mut session, "note.paste", json!({ "track": 1, "index": copy })).unwrap();
     let own = arranged(&session)[copy];
@@ -627,8 +635,9 @@ fn splitting_a_duplicate_leaves_the_original_alone() {
     )
     .unwrap();
     let original = notes(&session, 1);
-    let made = run(&mut session, "clip.duplicate", json!({ "track": 1, "index": 0, "stack": true })).unwrap();
-    let copy = made["index"].as_u64().unwrap() as usize;
+    let made =
+        run(&mut session, "clip.duplicate", json!({ "clips": [{ "track": 1, "index": 0 }], "stack": true })).unwrap();
+    let copy = made["clips"][0]["index"].as_u64().unwrap() as usize;
     run(&mut session, "note.split", json!({ "track": 1, "index": copy, "notes": [3], "at": 1.0 })).unwrap();
     let own = arranged(&session)[copy];
     assert_ne!(own, 1);

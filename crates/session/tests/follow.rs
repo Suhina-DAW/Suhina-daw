@@ -40,6 +40,7 @@ fn project() -> Project {
                 velocity: 1.0,
                 release_velocity: 0.5,
                 channel: 0,
+                muted: false,
             }]),
         }],
         extensions: Extensions::default(),

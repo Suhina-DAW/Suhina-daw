@@ -75,9 +75,12 @@ its comments say what the work waits for, so ask there instead of starting.
 **Claim it** in a comment on the issue before you write code:
 
 > /claim Plan: … When: …
+> Touches: crates/ui/src/piano_roll, crates/session
 
 The claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) moves the card to `In progress` and
-assigns you, and refuses the claim when the work is not free. Without the bot, a plain comment
+assigns you, and refuses the claim when the work is not free or another issue it is *Blocked by*
+is still open. The `Touches:` line names the paths you will change; it is optional, and with it the
+bot's answer lists the open pull requests and other claims that touch the same code. Without the bot, a plain comment
 ("I'd like to take this. Plan: …") is the claim, and the first one wins: a bot that is down never
 means the issue is free.
 
@@ -95,6 +98,16 @@ takes it over. If you stop, comment `/unclaim`, so the card goes back to `Ready`
 a new session of your own as well. When that pull request has stalled, ask its author in it; with
 no answer in three days, you may take the work over in that pull request, or in one that replaces
 it, names it and is linked from it.
+
+**Build on overlapping work, do not repeat it.** Before you write code, look at the open pull
+requests that touch the same code (the claim bot lists them for your `Touches:` line). When one
+already builds what you need, build on it: stack on its branch when both are in this repository, or
+from a fork branch from its head and write `Depends on #N` on a line of its own in your description;
+the *Depends on* check keeps your pull request from merging before #N. When two pull requests change
+the same code for different reasons, say so in both; when they do the same thing two ways, a
+maintainer chooses. An issue that cannot start before another one is marked *Blocked by* that
+issue (its *Relationships* on GitHub), and cannot be claimed until it is closed. `AGENTS.md` › Tasks
+gives the same rules step by step.
 
 **Keep at most three pull requests open at a time**, unless you are a maintainer. Review time is
 what limits how fast Suhina moves, and a stack of open pull requests goes stale as `main` changes.

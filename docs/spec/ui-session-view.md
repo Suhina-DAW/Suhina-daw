@@ -282,6 +282,12 @@ instead and hides the section; the Arrangement view shows only its own selection
 Every change runs `clip.setFollowAction` with only what changed, one undo step each. Typing a
 time or a chance is planned, as for every value field.
 
+The pan and the volume are dragged up or down, and the wheel over either changes it a step at a
+time (1 dB, or 0.02 of pan; Shift is finer) instead of scrolling the view. With Settings ›
+Interface › Arrangement › **Mixer controls** on Knob, the volume is drawn as a knob beside the pan
+knob, and its value stays beside them
+([arrangement editing](arrangement-editing.md) › Volume, pan, mute and solo).
+
 ## Detail area: device chain
 
 Devices left to right in chain order. Each device has a header (on/off switch, name, fold,

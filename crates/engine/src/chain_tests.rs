@@ -10,7 +10,7 @@ pub(crate) const SR: u32 = 48_000;
 pub(crate) const BEAT: usize = SR as usize / 2;
 
 pub(crate) fn note(time: f64, duration: f64, key: u8) -> Note {
-    Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0 }
+    Note { time, duration, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 pub(crate) fn device(id: &str, params: &[(&str, f64)]) -> Device {
@@ -317,8 +317,24 @@ fn an_edit_keeps_a_chain_playing_and_takes_its_new_values() {
 #[test]
 fn hostile_notes_and_devices_do_not_break_a_render() {
     let mut notes: Vec<Note> = (0..200).map(|i| note(f64::from(i) * 0.001, 0.5, (i % 128) as u8)).collect();
-    notes.push(Note { time: 0.1, duration: f64::NAN, key: 200, velocity: f32::NAN, release_velocity: 0.0, channel: 9 });
-    notes.push(Note { time: 0.2, duration: -1.0, key: 60, velocity: -3.0, release_velocity: 0.0, channel: 0 });
+    notes.push(Note {
+        time: 0.1,
+        duration: f64::NAN,
+        key: 200,
+        velocity: f32::NAN,
+        release_velocity: 0.0,
+        channel: 9,
+        muted: false,
+    });
+    notes.push(Note {
+        time: 0.2,
+        duration: -1.0,
+        key: 60,
+        velocity: -3.0,
+        release_velocity: 0.0,
+        channel: 0,
+        muted: false,
+    });
     let devices = vec![
         device("fm-synth", &[("algorithm", 1e9), ("op1.level", f64::NAN), ("volume", f64::INFINITY)]),
         device("overdrive", &[("drive", -5.0)]),

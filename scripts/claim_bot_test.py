@@ -3,8 +3,9 @@
 The bot moves issue cards on the project board, so a wrong branch would write to the board instead
 of failing a test. This runs the script with mocked API clients instead: every command
 (`/claim`, `/claim @login`, `/unclaim`, `/hold`, `/ready`) is answered for each state a card can be in — free, held,
-taken, closed, absent from the board — and for the mistakes the bot is meant to catch (an open pull
-request, an epic, a status the field does not have, a missing token).
+taken, closed, blocked by another issue, absent from the board — for the mistakes the bot is meant to
+catch (an open pull request, an epic, a status the field does not have, a missing token), and for the
+other open work a claim's `Touches:` line overlaps.
 
     python scripts/claim_bot_test.py
 
@@ -74,6 +75,26 @@ function scenario(input) {
     if (query.includes("closedByPullRequestsReferences")) {
       return { node: { closedByPullRequestsReferences: { nodes: board.openPrs || [] } } };
     }
+    if (query.includes("blockedBy(")) {
+      if (board.blockedBy === "fail") throw new Error("blockedBy is not answered");
+      return { node: { blockedBy: { nodes: board.blockedBy || [] } } };
+    }
+    if (query.includes("pullRequests(states")) {
+      state.readPulls = true;
+      if (input.pulls === "fail") throw new Error("pull requests are not answered");
+      return {
+        repository: {
+          pullRequests: {
+            nodes: (input.pulls || []).map((pull) => ({
+              number: pull.number,
+              title: pull.title,
+              files: { nodes: pull.files.map((path) => ({ path })) },
+              closingIssuesReferences: { nodes: (pull.closes || []).map((number) => ({ number })) },
+            })),
+          },
+        },
+      };
+    }
     if (query.includes("addProjectV2ItemById")) {
       state.added = true;
       return { addProjectV2ItemById: { item: { id: "ITEM_NEW" } } };
@@ -109,9 +130,14 @@ function scenario(input) {
     },
   };
   // A comment is its text, written by a maintainer, or { body, by } for anyone else; { bot, hoursAgo }
-  // makes it the bot's own comment, written that many hours ago.
-  const listComments = async () => ({
-    data: ((input.issue && input.issue.comments) || []).map((entry) =>
+  // makes it the bot's own comment, written that many hours ago. Other issues' comments come from
+  // `claims`: { number, title, assignees, comments }.
+  const claims = input.claims || [];
+  const listComments = async (args) => ({
+    data: (args.issue_number === 42
+      ? (input.issue && input.issue.comments) || []
+      : (claims.find((other) => other.number === args.issue_number) || { comments: [] }).comments
+    ).map((entry) =>
       typeof entry === "string"
         ? { body: entry, author_association: "MEMBER", user: { type: "User" } }
         : {
@@ -135,6 +161,16 @@ function scenario(input) {
           },
         }),
         listComments,
+        // The open issues with someone assigned: the claims.
+        listForRepo: async () => ({
+          data: claims
+            .filter((other) => (other.assignees || []).length > 0)
+            .map((other) => ({
+              number: other.number,
+              title: other.title,
+              assignees: other.assignees.map((login) => ({ login })),
+            })),
+        }),
         // GitHub answers with the issue, and silently leaves out anyone it may not assign.
         addAssignees: async (args) => {
           const taken = args.assignees.filter((login) => !(input.unassignable || []).includes(login));
@@ -478,6 +514,130 @@ const cases = [
     name: "a comment that only mentions a command is ignored",
     input: { body: "I think /claim would be nice here", board: { status: "Ready" } },
     expect: (s) => s.state.comments.length === 0 && !s.state.moved,
+  },
+  {
+    name: "claim on an issue blocked by an open issue is refused, and names it",
+    input: {
+      body: "/claim",
+      board: { status: "Ready", blockedBy: [{ number: 7, title: "Model field", state: "OPEN" }] },
+    },
+    expect: (s) => says(s.state, "blocked by", "#7 Model field") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "a blocker that is closed no longer blocks",
+    input: {
+      body: "/claim",
+      board: { status: "Ready", blockedBy: [{ number: 7, title: "Model field", state: "CLOSED" }] },
+    },
+    expect: (s) => s.state.moved === "opt-progress" && !says(s.state, "blocked by"),
+  },
+  {
+    name: "a blocker in another repository is named with its repository",
+    input: {
+      body: "/claim",
+      board: {
+        status: "Ready",
+        blockedBy: [{ number: 3, title: "Site", state: "OPEN", repository: { nameWithOwner: "suhina-daw/website" } }],
+      },
+    },
+    expect: (s) => says(s.state, "suhina-daw/website#3 Site") && !s.state.moved,
+  },
+  {
+    name: "a maintainer's claim for someone on a blocked issue is refused",
+    input: {
+      body: "/claim @other",
+      association: "MEMBER",
+      board: { status: "Ready", blockedBy: [{ number: 7, title: "Model field", state: "OPEN" }] },
+    },
+    expect: (s) => says(s.state, "blocked by", "#7") && !s.state.moved && !s.state.assigned.length,
+  },
+  {
+    name: "the person who has a blocked issue already is still pointed at their work",
+    input: {
+      body: "/claim",
+      board: { status: "In progress", blockedBy: [{ number: 7, title: "Model field", state: "OPEN" }] },
+      assignees: ["someone"],
+    },
+    expect: (s) => says(s.state, "already yours") && !says(s.state, "blocked by"),
+  },
+  {
+    name: "a blocked-by lookup that fails does not stop the claim",
+    input: { body: "/claim", board: { status: "Ready", blockedBy: "fail" } },
+    expect: (s) => s.state.moved === "opt-progress",
+  },
+  {
+    name: "a Touches line lists an open pull request that changes the same files",
+    input: {
+      body: "/claim Plan: the grid\nTouches: crates/ui/src/arrangement/",
+      board: { status: "Ready" },
+      pulls: [
+        { number: 302, title: "Clips package", files: ["crates/ui/src/arrangement/grid.rs", "ROADMAP.md"] },
+        { number: 303, title: "Engine only", files: ["crates/engine/src/lib.rs"] },
+      ],
+    },
+    expect: (s) =>
+      s.state.moved === "opt-progress" &&
+      says(s.state, "Claimed by", "Other open work touches", "#302 Clips package", "crates/ui/src/arrangement/grid.rs") &&
+      !says(s.state, "#303") &&
+      !says(s.state, "ROADMAP.md"),
+  },
+  {
+    name: "a Touches line after the plan on the same line ends before When",
+    input: {
+      body: "/claim Plan: grid Touches: `crates/session`, crates/ui/** When: today",
+      board: { status: "Ready" },
+      pulls: [{ number: 310, title: "Undo", files: ["crates/session/src/undo.rs"] }],
+    },
+    expect: (s) => says(s.state, "#310 Undo") && !says(s.state, "today`"),
+  },
+  {
+    name: "another claim on the same code is listed",
+    input: {
+      body: "/claim\nTouches: crates/ui",
+      board: { status: "Ready" },
+      claims: [
+        { number: 50, title: "Piano roll", assignees: ["other"], comments: ["/claim Plan: x\nTouches: crates/ui/src/piano_roll"] },
+        { number: 51, title: "Engine", assignees: ["third"], comments: ["/claim\nTouches: crates/engine"] },
+      ],
+    },
+    expect: (s) => says(s.state, "#50 Piano roll (a claim)", "crates/ui/src/piano_roll") && !says(s.state, "#51"),
+  },
+  {
+    name: "a claim taken back with /unclaim is not listed",
+    input: {
+      body: "/claim\nTouches: crates/ui",
+      board: { status: "Ready" },
+      claims: [{ number: 50, title: "Piano roll", assignees: ["other"], comments: ["/claim\nTouches: crates/ui", "/unclaim"] }],
+    },
+    expect: (s) => says(s.state, "No other open pull request or claim touches `crates/ui`") && !says(s.state, "#50"),
+  },
+  {
+    name: "a pull request that closes this issue is not other work",
+    input: {
+      body: "/claim\nTouches: crates/ui",
+      board: { status: "Ready" },
+      pulls: [{ number: 320, title: "Mine", files: ["crates/ui/src/lib.rs"], closes: [42] }],
+    },
+    expect: (s) => s.state.moved === "opt-progress" && !says(s.state, "#320"),
+  },
+  {
+    name: "a claim without a Touches line is told about it and reads no pull requests",
+    input: { body: "/claim Plan: x", board: { status: "Ready" }, pulls: [{ number: 1, title: "A", files: ["x"] }] },
+    expect: (s) => s.state.moved === "opt-progress" && says(s.state, "A `Touches:` line") && !s.state.readPulls,
+  },
+  {
+    name: "paths that are not plain relative paths are dropped from a Touches line",
+    input: {
+      body: "/claim\nTouches: ../secret, $(rm -rf), /etc, crates/./ui",
+      board: { status: "Ready" },
+      pulls: [{ number: 1, title: "A", files: ["crates/ui/x.rs"] }],
+    },
+    expect: (s) => s.state.moved === "opt-progress" && says(s.state, "A `Touches:` line") && !s.state.readPulls,
+  },
+  {
+    name: "a failed pull request lookup still answers the claim",
+    input: { body: "/claim\nTouches: crates/ui", board: { status: "Ready" }, pulls: "fail" },
+    expect: (s) => s.state.moved === "opt-progress" && says(s.state, "Claimed by", "No other open"),
   },
   {
     name: "a missing token is announced instead of failing silently",

@@ -30,7 +30,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 174
+COMMANDS = 186
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -78,10 +78,11 @@ CHAPTERS = [
      "scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature "
      "each. A launched clip is selected and the detail area shows its follow-action controls. "
      "Missing capture-and-insert scene, moving clips between slots, select-on-launch options."),
-    (8, "Clip View", 34, 0.15, "started",
+    (8, "Clip View", 34, 0.18, "started",
      "Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll "
      "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of "
-     "tool icons with the note clipboard, and the quantise controls in the clip column. No loop "
+     "tool icons with the note clipboard and a toolbar size, a MIDI tools column beside the notes, "
+     "and the selection described in the clip column (count, span, pitch and velocity range). No loop "
      "or marker editing, no clip panels, no sample editor, no groove/scale panels."),
     (9, "Audio Clips, Tempo, and Warping", 18, 0.38, "partial",
      "Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, "
@@ -92,18 +93,23 @@ CHAPTERS = [
      "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
      "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
      "automation envelope."),
-    (10, "Editing MIDI", 41, 0.33, "started",
+    (10, "Editing MIDI", 41, 0.37, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
-     "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase and Slice "
-     "tools (keys 1 to 5, the wheel with the right button held steps through them) and "
+     "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute "
+     "tools (keys 1 to 6, the wheel with the right button held steps through them) and "
      "its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, "
      "splits them at a drawn cut line (note.split splits every note the line crosses), plays keys "
-     "through the track's instrument, "
-     "quantises them (Ctrl+U, and grid, amount and ends in the clip column) and edits velocity in a lane, "
+     "through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is "
+     "never played, in the model, the project file and an imported Live Set), "
+     "quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, "
      "through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty "
      "MIDI clip is made with a double-click on a slot or a lane (clip.create). No "
-     "transpose tools, fold, scales, chords, deactivated notes, probability or MPE lanes."),
-    (11, "MIDI Tools", 37, 0.00, "absent", "No transformation or generative MIDI tools."),
+     "fold, scales, chords, probability or MPE lanes."),
+    (11, "MIDI Tools", 37, 0.12, "started",
+     "A MIDI tools column runs quantise, transpose, humanise, fit to scale, invert, reverse, legato, "
+     "x2 and /2 and the velocity randomise and ramp over the selection or the whole clip, each one "
+     "note.* command with undo and a seed for the random ones. No chord/strum/arpeggiate tools, no "
+     "generative or shape-based tools."),
     (12, "Editing MPE", 10, 0.00, "absent", "No MPE data, editing or MPE-aware devices."),
     (13, "Converting Audio to MIDI", 5, 0.05, "planned",
      "Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap."),

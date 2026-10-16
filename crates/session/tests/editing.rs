@@ -32,7 +32,7 @@ fn max_diff(a: &[f32], b: &[f32], skip: Option<std::ops::Range<usize>>) -> f32 {
 }
 
 fn note(time: f64, duration: f64, key: u8) -> Note {
-    Note { time, duration, key, velocity: 0.8, release_velocity: 0.5, channel: 0 }
+    Note { time, duration, key, velocity: 0.8, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 fn clip(content: u32, start: f64, length: f64) -> Clip {

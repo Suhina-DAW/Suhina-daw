@@ -175,14 +175,15 @@ branch* by hand. The test build never runs on the queue.
 `changes` job skips fmt, clippy and the tests when every changed file is documentation (`docs/`,
 any `.md`, `LICENSE`, `NOTICE`), a script under `scripts/` or a file under `.github/`: no Rust
 build or test reads them. A change to `ci.yml` itself still runs every job. The `docs` job runs on
-every change, so the script tests and the claim bot's test still run; in the Actions tab the
+every change, so the script tests and the tests of the claim bot and the Depends on check still run; in the Actions tab the
 skipped jobs show as skipped and `ci` passes.
 
 The queue is a setting, not code: Settings › Rules (or Branches) › the rule for `main` › **Require
 merge queue**, with the merge method used today, a group size of about 5 and *Only merge
 non-failing pull requests*. With a queue, *Require branches to be up to date before merging* is not
 needed. Every check the rule requires must come from a workflow that runs on `merge_group`; today
-that is only `ci`, and a check required from another workflow would keep the queue waiting.
+those are `ci` and `Depends on` ([`claim-bot.md`](claim-bot.md) › The Depends on check), and a check
+required from another workflow would keep the queue waiting.
 
 Without a queue, turn off *Require branches to be up to date before merging* and merge each green
 pull request without updating it; CI on `main`, which runs on every push, catches the rare

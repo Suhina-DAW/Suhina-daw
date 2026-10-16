@@ -9,11 +9,10 @@
 
 use egui::{Align2, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::{DeviceKind, LaneData, Project, TrackId};
+use suhina_engine::model::{DeviceKind, LaneData, Note, Project, TrackId};
 use suhina_session::{Placement, PluginReport, PluginStatus};
 
 use crate::grid::gain_to_db;
-use crate::piano_roll::{PianoRollState, QUANTIZE_GRIDS};
 use crate::theme::{self, PAD, ROW};
 use crate::widgets::{self, Action};
 
@@ -186,6 +185,78 @@ pub struct ClipInfo {
     /// Fade-in and fade-out in beats (`clip.setFades`).
     pub fades: (f64, f64),
     pub notes: usize,
+    /// What the piano roll has selected in this clip (› Clip column in
+    /// `docs/spec/ui-clip-editor.md`).
+    pub selection: SelectionInfo,
+}
+
+/// What the piano roll has selected in the clip the detail area shows: how many notes, how many
+/// of them are muted, the span in bars and beats, and the range of keys and velocities (1 to 127).
+/// Empty when nothing is selected, so the column shows no rows for it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SelectionInfo {
+    pub selected: usize,
+    pub muted: usize,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub low_key: Option<u8>,
+    pub high_key: Option<u8>,
+    pub low_velocity: Option<u8>,
+    pub high_velocity: Option<u8>,
+}
+
+impl SelectionInfo {
+    /// The selection `selected` (indices into `notes`) described as the clip column shows it.
+    /// `bar_beats` is how long a bar is, as [`build_with`] reads it from the time signature.
+    pub fn of(notes: &[Note], selected: &std::collections::BTreeSet<usize>, bar_beats: f64) -> Self {
+        let mut info = Self { selected: selected.len(), ..Self::default() };
+        let mut low_key: Option<u8> = None;
+        let mut high_key: Option<u8> = None;
+        let mut low_velocity: Option<u8> = None;
+        let mut high_velocity: Option<u8> = None;
+        let mut start: Option<f64> = None;
+        let mut end: Option<f64> = None;
+        for index in selected {
+            let Some(note) = notes.get(*index) else { continue };
+            if note.muted {
+                info.muted += 1;
+            }
+            low_key = Some(low_key.map_or(note.key, |key| key.min(note.key)));
+            high_key = Some(high_key.map_or(note.key, |key| key.max(note.key)));
+            let velocity = suhina_session::midi_velocity(note.velocity);
+            low_velocity = Some(low_velocity.map_or(velocity, |v| v.min(velocity)));
+            high_velocity = Some(high_velocity.map_or(velocity, |v| v.max(velocity)));
+            start = Some(start.map_or(note.time, |time: f64| time.min(note.time)));
+            let note_end = note.time + note.duration;
+            end = Some(end.map_or(note_end, |time: f64| time.max(note_end)));
+        }
+        info.from = start.map(|beats| bars_beats(beats, bar_beats, 1));
+        info.to = end.map(|beats| bars_beats(beats, bar_beats, 1));
+        info.low_key = low_key;
+        info.high_key = high_key;
+        info.low_velocity = low_velocity;
+        info.high_velocity = high_velocity;
+        info
+    }
+}
+
+/// How long a bar is in the project's time signature, in beats, as the clip column counts bars
+/// and beats.
+pub fn bar_beats(project: &Project) -> f64 {
+    let ts = project.transport.time_signature;
+    if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) }
+}
+
+/// A position as the column writes it: `bar.beat`, counted from one for a position and from zero
+/// for a length.
+pub fn bars_beats(beats: f64, bar_beats: f64, from_one: u64) -> String {
+    if !(beats.is_finite() && bar_beats.is_finite()) || bar_beats <= 0.0 {
+        return "-".into();
+    }
+    let beats = beats.max(0.0);
+    let bar = (beats / bar_beats).floor() as u64 + from_one;
+    let beat = (beats % bar_beats).floor() as u64 + from_one;
+    format!("{bar}.{beat}")
 }
 
 /// A track's device chain.
@@ -197,11 +268,12 @@ pub struct Chain {
 }
 
 /// What the detail area shows: a selected clip comes with its track's chain, since that chain
-/// is what the clip plays through.
+/// is what the clip plays through. The clip's properties are boxed: they are much larger than the
+/// chain or nothing, and the detail is one value moved around each frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Detail {
     Devices(Chain),
-    Clip(ClipInfo, Chain),
+    Clip(Box<ClipInfo>, Chain),
     Nothing,
 }
 
@@ -217,9 +289,7 @@ pub fn build_with(
     clip: Option<ClipRef>,
     plugins: &mut dyn FnMut(TrackId, usize) -> Option<PluginReport>,
 ) -> Detail {
-    let ts = project.transport.time_signature;
-    let bar_beats =
-        if ts.denominator == 0 { 4.0 } else { f64::from(ts.numerator.max(1)) * 4.0 / f64::from(ts.denominator) };
+    let bar = bar_beats(project);
     let track_name =
         |id: TrackId| project.tracks.iter().find(|t| t.id == id).map(|t| t.name.clone()).unwrap_or_default();
     let found = clip.and_then(|clip| match clip {
@@ -256,24 +326,20 @@ pub fn build_with(
                 })
                 .sum()
         });
-        let bars_beats = |beats: f64, from_one: u64| {
-            let bar = (beats / bar_beats).floor() as u64 + from_one;
-            let beat = (beats % bar_beats).floor() as u64 + from_one;
-            format!("{bar}.{beat}")
-        };
         return Detail::Clip(
-            ClipInfo {
+            Box::new(ClipInfo {
                 name: content.map(|c| c.name.clone()).unwrap_or_default(),
                 track: track_name(id),
-                start: scene.map_or_else(|| bars_beats(placed.start, 1), |s| (s + 1).to_string()),
+                start: scene.map_or_else(|| bars_beats(placed.start, bar, 1), |s| (s + 1).to_string()),
                 scene: scene.is_some(),
-                length: bars_beats(placed.length, 0),
+                length: bars_beats(placed.length, bar, 0),
                 looping: placed.loop_range.is_some(),
                 audio: audio.is_some(),
                 gain_db: audio.map(gain_to_db),
                 fades: (placed.fade_in, placed.fade_out),
                 notes,
-            },
+                selection: SelectionInfo::default(),
+            }),
             chain(project, id, plugins),
         );
     }
@@ -390,7 +456,7 @@ pub fn show_row(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, places:
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
         Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
-            let column = clip_properties(&painter, area, info, false);
+            let column = clip_properties(ui, &painter, area, info, false);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
             if rest.width() > 0.0 {
@@ -459,7 +525,7 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
         Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions, places),
         Detail::Clip(info, chain) => {
-            let column = clip_properties(&painter, area, info, true);
+            let column = clip_properties(ui, &painter, area, info, true);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
             if rest.height() > 0.0 {
@@ -470,118 +536,20 @@ pub fn show_stack(ui: &mut Ui, detail: &Detail, actions: &mut Vec<Action>, place
 }
 
 /// The clip's properties column for a clip whose editor fills the rest of the detail area (the
-/// piano roll): on the left in a row, on top when `stacked`. Returns the rest. When the quantise
-/// block is open it takes the column's top and the properties move down under it, so the block
-/// is part of the column and nothing floats over the note grid.
-pub fn show_clip_column(
-    ui: &mut Ui,
-    info: &ClipInfo,
-    stacked: bool,
-    piano: &mut PianoRollState,
-    actions: &mut Vec<Action>,
-) -> Rect {
+/// piano roll): on the left in a row, on top when `stacked`. Returns the rest. The quantise
+/// controls and the MIDI tools live in the column beside this one
+/// (› Other note tools in `docs/spec/ui-clip-editor.md`).
+pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> Rect {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
-    let top = if piano.quantize_open {
-        let block = Rect::from_min_size(area.min, Vec2::new(CLIP_WIDTH.min(area.width()), quantise_height()));
-        quantise_block(ui, &painter, block, piano, actions);
-        block.height()
-    } else {
-        0.0
-    };
-    let below = Rect::from_min_max(Pos2::new(area.left(), area.top() + top), area.max);
-    let column = clip_properties(&painter, below, info, stacked);
+    let column = clip_properties(ui, &painter, area, info, stacked);
     clip_for_readers(ui, column, info);
     if stacked {
         Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max)
     } else {
         Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max)
-    }
-}
-
-/// The room the quantise block needs: its title, the grid, the amount, the ends box and the two
-/// buttons.
-fn quantise_height() -> f32 {
-    ROW + PAD + PARAM_ROW * 3.0 + BUTTON_HEIGHT + PAD
-}
-
-/// The quantise controls at the top of the clip column: title, Grid, Amount, "Move ends too",
-/// **Quantise notes** and **Close** (› Quantise in `docs/spec/ui-clip-editor.md`). The settings
-/// are kept for Ctrl+U; **Quantise notes** adds `note.quantize` to `actions`.
-fn quantise_block(
-    ui: &mut Ui,
-    painter: &egui::Painter,
-    rect: Rect,
-    piano: &mut PianoRollState,
-    actions: &mut Vec<Action>,
-) {
-    if rect.width() < 40.0 || rect.height() < 20.0 {
-        return;
-    }
-    painter.rect_filled(rect, 0.0, theme::panel_background());
-    let title = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
-    widgets::text_in(
-        painter,
-        title.shrink2(Vec2::new(PAD, 0.0)),
-        Align2::LEFT_CENTER,
-        "Quantise",
-        theme::ui_font(theme::TEXT),
-        theme::text_primary(),
-    );
-    let mut settings = piano.quantize;
-    let mut apply = false;
-    let body =
-        Rect::from_min_max(Pos2::new(rect.left() + PAD, title.bottom()), Pos2::new(rect.right() - PAD, rect.bottom()));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
-        let small = theme::ui_font(theme::TEXT_SMALL);
-        // Each field takes a row of its own in the 196 px column: beside another, its value would
-        // fall off the column's edge. The block still leaves room for the properties under it.
-        let mono = theme::mono_font(theme::TEXT_SMALL);
-        let mut chosen = settings.grid;
-        let shown = chosen;
-        let menu = egui::ComboBox::from_id_salt("piano-roll-quantise-grid")
-            .width(64.0)
-            .selected_text(egui::RichText::new(shown).font(mono.clone()))
-            .show_ui(ui, |ui| {
-                for grid in QUANTIZE_GRIDS {
-                    ui.selectable_value(&mut chosen, grid, egui::RichText::new(grid).font(mono.clone()));
-                }
-            });
-        menu.response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, format!("Quantise grid {shown}"))
-        });
-        if chosen != settings.grid {
-            settings.grid = chosen;
-        }
-        let slider = ui.add_sized(
-            Vec2::new(ui.available_width().min(150.0), 16.0),
-            egui::Slider::new(&mut settings.amount, 0.0..=100.0).suffix(" %").integer().max_decimals(0),
-        );
-        slider.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, format!("Amount {} %", settings.amount))
-        });
-        ui.checkbox(&mut settings.ends, egui::RichText::new("Move ends too").font(small.clone()));
-        ui.horizontal(|ui| {
-            let quantise = ui.button(egui::RichText::new("Quantise notes").font(small.clone()));
-            quantise.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Quantise notes"));
-            apply = quantise.clicked();
-            let close = ui.button(egui::RichText::new("Close").font(small.clone()));
-            close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close quantise"));
-            if close.clicked() {
-                piano.quantize_open = false;
-            }
-        });
-    });
-    piano.quantize = settings;
-    if apply && let Some(action) = piano.quantize_selected() {
-        actions.push(action);
-    }
-    // Escape closes the block, as it closes the panel it replaces (Escape also clears the note
-    // selection in the piano roll; both happen, as both are what the key means there).
-    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        piano.quantize_open = false;
     }
 }
 
@@ -1101,7 +1069,7 @@ fn device_panel(
 /// The selected clip: its name and where it is, how long, and what it plays. In a row it takes
 /// a column of [`CLIP_WIDTH`] at the left of `area`, stacked the rows it needs at the top;
 /// returns the space it took.
-fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked: bool) -> Rect {
+fn clip_properties(ui: &Ui, painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked: bool) -> Rect {
     let mut rows = vec![
         ("Track", info.track.clone()),
         (if info.scene { "Scene" } else { "Start" }, info.start.clone()),
@@ -1114,7 +1082,34 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
         rows.push(("Fade in", beats(info.fades.0)));
         rows.push(("Fade out", beats(info.fades.1)));
     } else {
-        rows.push(("Notes", info.notes.to_string()));
+        // With notes selected the row says how many of the clip's notes they are, and how many of
+        // them are muted (› Clip column in `docs/spec/ui-clip-editor.md`).
+        let selection = &info.selection;
+        let notes = if selection.selected == 0 {
+            info.notes.to_string()
+        } else if selection.muted == 0 {
+            format!("{} of {}", selection.selected, info.notes)
+        } else {
+            format!("{} of {}, {} muted", selection.selected, info.notes, selection.muted)
+        };
+        rows.push(("Notes", notes));
+        if let Some(from) = &selection.from {
+            rows.push(("From", from.clone()));
+        }
+        if let Some(to) = &selection.to {
+            rows.push(("To", to.clone()));
+        }
+        if let (Some(low), Some(high)) = (selection.low_key, selection.high_key) {
+            let one = low == high;
+            let low_name = crate::piano_roll::key_name(low);
+            rows.push((
+                "Pitch",
+                if one { low_name } else { format!("{low_name}–{}", crate::piano_roll::key_name(high)) },
+            ));
+        }
+        if let (Some(low), Some(high)) = (selection.low_velocity, selection.high_velocity) {
+            rows.push(("Velocity", if low == high { low.to_string() } else { format!("{low}–{high}") }));
+        }
     }
     let column = if stacked {
         let height = ROW + PAD * 2.0 + rows.len() as f32 * PARAM_ROW;
@@ -1137,6 +1132,11 @@ fn clip_properties(painter: &egui::Painter, area: Rect, info: &ClipInfo, stacked
     for (label, value) in rows {
         let row = Rect::from_min_max(Pos2::new(column.left() + PAD, y), Pos2::new(column.right() - PAD, y + PARAM_ROW));
         y += PARAM_ROW;
+        // The row is named for a reader and a test ("Notes: 1 of 4"), as the piano roll's notes
+        // are, so what the column says can be found by name.
+        let response = ui.interact(row, egui::Id::new(("clip-property", label)), Sense::hover());
+        let named = format!("{label}: {value}");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &named));
         // The value keeps clear of the label, so a long track name is shortened, not drawn over it.
         let value_rect = Rect::from_min_max(Pos2::new(row.left() + LABEL_WIDTH, row.top()), row.max);
         widgets::text_in(

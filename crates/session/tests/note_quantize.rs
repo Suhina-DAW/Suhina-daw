@@ -8,7 +8,7 @@ use suhina_model::*;
 use suhina_session::Session;
 
 fn note(time: f64, duration: f64) -> Note {
-    Note { time, duration, key: 60, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0 }
+    Note { time, duration, key: 60, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
 }
 
 fn clip(content: u32) -> Clip {
