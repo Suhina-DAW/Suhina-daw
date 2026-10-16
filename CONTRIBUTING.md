@@ -168,6 +168,15 @@ one build before they merge, run Actions › Test build › Run workflow with th
 test build stays linked. [`docs/releasing.md` › Merging many pull requests](docs/releasing.md#merging-many-pull-requests)
 says how the queue is set up and what runs in it.
 
+**The `ready to merge` label** does the waiting for you. A maintainer who has read a pull request
+adds it, and [`ready-to-merge.yml`](.github/workflows/ready-to-merge.yml) approves the commit it was
+added on and turns on *Merge when ready* for that commit: the queue takes the pull request once
+`ci` is green and every review thread is resolved (CodeRabbit's too), and a red check stops it. A
+contributor's pull request also needs `test-build`, so its build was tried first. A push by anyone
+but a maintainer takes the label off, so new commits are never merged unread; taking the label off
+by hand stops the merge. Only a maintainer adds it: an agent never adds `ready to merge`, also not
+when asked to finish a pull request.
+
 ## Clean-room
 
 Suhina reimplements the *behaviour* of commercial DAWs, Ableton Live in particular, without

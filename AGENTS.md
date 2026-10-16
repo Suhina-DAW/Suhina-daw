@@ -247,6 +247,12 @@ When an issue cannot start before another one is done, mark it on GitHub (the is
 *Relationships › Blocked by*), not only in prose: the claim bot refuses claims on it until the
 blocking issue is closed.
 
+**Merging is a maintainer's decision.** An agent never adds the `ready to merge` label, which
+approves a pull request and sends it to the merge queue
+([CONTRIBUTING.md › Merging many pull requests](CONTRIBUTING.md#merging-many-pull-requests)), and
+never merges or queues a pull request itself unless the user asks for that one. It gets a pull
+request green and mergeable and tells the user it is ready; the maintainer adds the label.
+
 ## 4. Before you finish a task
 
 ```sh

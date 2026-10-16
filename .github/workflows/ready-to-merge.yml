@@ -1,0 +1,191 @@
+name: Ready to merge
+
+# The label `ready to merge` is a maintainer's decision that a pull request may go in. This
+# workflow does the rest: it approves the commit the label was added on and turns on *merge when
+# ready* for that commit, so the merge queue takes the pull request once every required check is
+# green, with no other click. A red check stops it there. See docs/releasing.md › Merging many pull
+# requests.
+#
+# - Labelled by a maintainer: the app approves the head commit as the event saw it (main's rule
+#   needs one approval, and a maintainer cannot approve their own pull request), then enables
+#   auto-merge with that commit as the expected head, so a commit pushed in between is never what
+#   gets merged. A contributor's pull request also needs `test-build` (a maintainer read the code
+#   and its build); without it the label comes off with a comment saying why.
+# - A push by anyone but a maintainer takes the label off, turns auto-merge off and leaves the
+#   pull request out of the queue: the new commits wait for a maintainer to read them, as the
+#   `test-build` label does (test-build-links.yml, job `unlabel`). main's rule dismisses the
+#   approval of the older commit. A maintainer's push keeps the label: the app approves the new
+#   head and enables auto-merge for it again.
+# - The label taken off, by hand or by the job above: auto-merge off, out of the queue, and the
+#   app's approvals dismissed, so the label and the approval come and go together.
+#
+# pull_request_target runs this file as it is on main, and it never checks out or runs the pull
+# request's code: it only calls the GitHub API with numbers and commit ids from the event.
+#
+# It acts with a short-lived token of the repository's GitHub App (the one docs-generated.yml
+# pushes with), not GITHUB_TOKEN: GitHub starts no workflows for a merge made through
+# GITHUB_TOKEN, and the workflows on main must run after every merge. Setup: the app has
+# Repository permissions › Contents: Read and write and Pull requests: Read and write; its App ID
+# and private key are DOCS_BOT_APP_ID and DOCS_BOT_PRIVATE_KEY in the `docs-bot` environment
+# (pull_request_target runs on main, which the environment allows); Settings › General › Allow
+# auto-merge is on.
+
+on:
+  pull_request_target:
+    types: [labeled, unlabeled, synchronize]
+
+permissions: {}
+
+# No concurrency group: a group keeps one waiting run and drops the others, and every event here
+# must be handled. A push that lands while a run approves is caught by --match-head-commit.
+
+env:
+  # The maintainers are listed here, in test-build.yml and in test-build-links.yml.
+  MAINTAINERS: juhamikael
+  LABEL: ready to merge
+  # Shell functions the jobs source: whether the pull request has the label now (not as the event
+  # saw it), and stopping a merge: auto-merge off when it is on, and out of the queue when it is in
+  # it. Either call failing fails the job, so a merge is never left running without anyone seeing.
+  HELPERS: |
+    has_label() {
+      gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" --jq '.[].name' | grep -Fxq -- "$LABEL"
+    }
+    stop_merge() {
+      state=$(gh api graphql \
+        -f query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id isInMergeQueue autoMergeRequest { enabledAt } } } }' \
+        -f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$NUMBER" \
+        --jq '.data.repository.pullRequest | "\(.id) \(.isInMergeQueue) \(.autoMergeRequest != null)"')
+      read -r id queued auto <<< "$state"
+      if [ "$auto" = "true" ]; then
+        gh api graphql -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' \
+          -f id="$id" >/dev/null
+      fi
+      if [ "$queued" = "true" ]; then
+        gh api graphql -f query='mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }' \
+          -f id="$id" >/dev/null
+      fi
+    }
+
+jobs:
+  queue:
+    name: approve and queue
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'ready to merge') ||
+      (github.event.action == 'synchronize' &&
+        contains(github.event.pull_request.labels.*.name, 'ready to merge') &&
+        contains(fromJSON('["juhamikael"]'), github.event.sender.login))
+    runs-on: ubuntu-latest
+    environment: docs-bot
+    steps:
+      - name: Token of the app
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+      - name: Approve the commit and turn on merge when ready
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          SENDER: ${{ github.event.sender.login }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          HAS_TEST_BUILD: ${{ contains(github.event.pull_request.labels.*.name, 'test-build') }}
+        run: |
+          eval "$HELPERS"
+          is_maintainer() { printf '%s\n' $MAINTAINERS | grep -Fxq -- "$1"; }
+          if ! is_maintainer "$SENDER"; then
+            gh pr edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
+            echo "::notice::$SENDER is not a maintainer; the label was taken off."
+            exit 0
+          fi
+          if ! is_maintainer "$AUTHOR" && [ "$HAS_TEST_BUILD" != "true" ]; then
+            gh pr edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
+            gh pr comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+              "\`$LABEL\` needs \`test-build\` on a contributor's pull request: add \`test-build\`, try the build of the commit you read, then add \`$LABEL\` again (CONTRIBUTING.md › Merging many pull requests)."
+            echo "::notice::A contributor's pull request without test-build; the label was taken off."
+            exit 0
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/reviews" \
+            -f commit_id="$SHA" -f event=APPROVE \
+            -f body="\`$LABEL\`: a maintainer read ${SHA:0:7}; merge when every check is green." >/dev/null
+          # Turned off first, so a maintainer's push moves the expected head to the new commit.
+          gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
+          # Runs are not serialised (a concurrency group would drop waiting events), so the label
+          # is read again here: a run that waited must not undo a maintainer taking it off.
+          if ! has_label; then
+            echo "::notice::The label was taken off while this run waited; nothing queued."
+            exit 0
+          fi
+          # With main's merge queue this adds the pull request to the queue once it is mergeable;
+          # --match-head-commit refuses if the head is no longer the commit approved above.
+          gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash --match-head-commit "$SHA"
+          # Taken off between the read above and the merge call: the `stop` run may already have
+          # finished, so stop the merge here too.
+          if ! has_label; then
+            stop_merge
+            echo "::notice::The label was taken off while this run queued; the merge was stopped."
+          fi
+
+  unlabel:
+    name: take the label off new commits
+    if: >-
+      github.event.action == 'synchronize' &&
+      contains(github.event.pull_request.labels.*.name, 'ready to merge') &&
+      !contains(fromJSON('["juhamikael"]'), github.event.sender.login)
+    runs-on: ubuntu-latest
+    environment: docs-bot
+    steps:
+      - name: Token of the app
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+      # Taking the label off starts the `stop` job below, which turns auto-merge off.
+      - name: Remove the label
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --disable-auto 2>/dev/null || true
+          gh pr edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$LABEL"
+
+  stop:
+    name: stop the merge
+    if: github.event.action == 'unlabeled' && github.event.label.name == 'ready to merge'
+    runs-on: ubuntu-latest
+    environment: docs-bot
+    steps:
+      - name: Token of the app
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.DOCS_BOT_APP_ID }}
+          private-key: ${{ secrets.DOCS_BOT_PRIVATE_KEY }}
+      - name: Turn off merge when ready, leave the queue, dismiss the approvals
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          APP: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          eval "$HELPERS"
+          # Added again since: the newer `labeled` run decides.
+          if has_label; then
+            echo "::notice::The label is back on; nothing stopped."
+            exit 0
+          fi
+          stop_merge
+          # main's rule restricts no one from dismissing reviews, so the app may dismiss its own.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/reviews" \
+            --jq ".[] | select(.user.login == \"$APP[bot]\" and .state == \"APPROVED\") | .id" |
+          while read -r review; do
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/reviews/$review/dismissals" \
+              -f message="\`$LABEL\` was taken off." -f event=DISMISS >/dev/null
+          done
+          # Put back while this run stopped the merge: the newer `labeled` run may have queued it
+          # and been undone above. The pull request now waits rather than merging; say so.
+          if has_label; then
+            echo "::error::The label was added again while the merge was being stopped. Take \`$LABEL\` off and add it again to queue the pull request."
+            exit 1
+          fi
