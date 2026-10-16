@@ -13,11 +13,11 @@ use suhina_engine::Quantization;
 use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
 
 use crate::grid::default_track_colour;
-use crate::keymap::MouseSettings;
 use crate::midi_tools::ToolSettings;
 use crate::settings::ToolbarSize;
 use crate::theme;
 use crate::widgets::{self, Action};
+use crate::workflow::Workflow;
 
 /// Height of the toolbar, width of the key column, height of the ruler and the default height of
 /// the velocity lane.
@@ -57,6 +57,10 @@ const MIN_LENGTH: f64 = 0.01;
 const FREE_LENGTH: f64 = 0.25;
 const NEW_VELOCITY: u8 = 100;
 const EPSILON: f64 = 1e-9;
+/// Two clicks this close in time (seconds) and space (points) are a double-click
+/// (› Double-click in `docs/spec/ui-clip-editor.md`).
+const DOUBLE_CLICK_TIME: f64 = 0.3;
+const DOUBLE_CLICK_DISTANCE: f32 = 6.0;
 
 const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -379,6 +383,15 @@ pub struct PianoRollState {
     /// window turns a change into `preview.noteOn` and `preview.noteOff`.
     playing_key: Option<u8>,
     hover_key: Option<u8>,
+    /// When and where the last click in the grid was, while a second click could still make it a
+    /// double-click; the piano roll counts its own clicks (› Double-click).
+    last_click: Option<(f64, Pos2)>,
+    /// The index the note the last click added will have, so the second click of a double-click
+    /// selects that note rather than deleting it.
+    click_added: Option<usize>,
+    /// A workflow mode or setting picked in the toolbar's menu this frame, for the window to keep
+    /// in the keymap.
+    pub workflow_picked: Option<crate::workflow::Pick>,
 }
 
 impl Default for PianoRollState {
@@ -413,6 +426,9 @@ impl Default for PianoRollState {
             centred_for: 0.0,
             playing_key: None,
             hover_key: None,
+            last_click: None,
+            click_added: None,
+            workflow_picked: None,
         }
     }
 }
@@ -671,13 +687,11 @@ fn tool_of(action: &str) -> Option<Tool> {
 /// What the window tells the piano roll about the settings that change what it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Options {
-    /// A right-click on a note deletes it in the Draw and Paint tools: the Draw-first keymap
-    /// preset (› Keymap presets in `docs/spec/ui-clip-editor.md`).
-    pub right_click_deletes: bool,
     /// How large the toolbar is drawn: Settings › General › Piano roll › Toolbar size.
     pub toolbar_size: ToolbarSize,
-    /// The four jobs the Mouse-first preset gives the mouse buttons, each a switch of its own.
-    pub mouse: MouseSettings,
+    /// The workflow settings: what clicks, right-clicks and double-clicks do (› Workflow modes in
+    /// `docs/spec/ui-clip-editor.md`).
+    pub workflow: Workflow,
 }
 
 /// What the piano roll needs from the window besides its own state, for one frame: the settings
@@ -1262,64 +1276,35 @@ pub fn show(
             state.selected
         );
     }
-    if response.double_clicked()
-        && state.tool == Tool::Select
+    let workflow = options.workflow;
+    if response.clicked()
         && let Some(pos) = pointer
     {
-        match note_at(&layout, &clip.notes, pos) {
-            Some((index, _)) => {
-                state.selected.clear();
-                let mut params = clip.address.clone();
-                params["notes"] = json!([index]);
-                actions.push(Action::new("note.delete", params));
-            }
-            None => gesture.add_note(state, actions, pos, inputs.alt),
-        }
-    } else if response.clicked()
-        && let Some(pos) = pointer
-    {
-        match (note_at(&layout, &clip.notes, pos), state.tool) {
-            (Some((index, _)), Tool::Erase) => gesture.delete_note(state, actions, index),
-            // A click with Mute mutes the note, or unmutes it when it is already muted: one
-            // `note.setMuted`, one undo step (› Muting).
-            (Some((index, _)), Tool::Mute) => {
-                if let Some(note) = clip.notes.get(index) {
-                    let mut params = clip.address.clone();
-                    params["notes"] = json!([index]);
-                    params["muted"] = json!(!note.muted);
-                    actions.push(Action::new("note.setMuted", params));
-                }
-            }
-            (None, Tool::Erase | Tool::Mute) => {}
-            (Some((index, _)), _) if inputs.shift || inputs.command => {
-                if !state.selected.remove(&index) {
-                    state.selected.insert(index);
-                }
-            }
-            (Some((index, _)), _) => {
-                state.selected = BTreeSet::from([index]);
-                if let Some(note) = clip.notes.get(index) {
-                    state.remember(note);
-                }
-            }
-            (None, Tool::Draw | Tool::Paint) => gesture.add_note(state, actions, pos, inputs.alt),
-            // Left click draws: with the Mouse-first switch on, a click on an empty spot in the
-            // Select tool adds a note, the way the Draw tool does (› Keymap presets).
-            (None, Tool::Select) if options.mouse.left_draws => gesture.add_note(state, actions, pos, inputs.alt),
-            (None, Tool::Slice) => {}
-            (None, Tool::Select) => state.selected.clear(),
+        // The piano roll counts its own double-clicks: two clicks close in time and space, and a
+        // third starts a new pair (› Double-click).
+        let time = ui.input(|i| i.time);
+        let double = state
+            .last_click
+            .is_some_and(|(at, from)| time - at < DOUBLE_CLICK_TIME && from.distance(pos) < DOUBLE_CLICK_DISTANCE);
+        state.last_click = if double { None } else { Some((time, pos)) };
+        let added = state.click_added.take();
+        let over = note_at(&layout, &clip.notes, pos);
+        if double {
+            second_click(&gesture, state, actions, (over.map(|(i, _)| i), added), pos, inputs, workflow);
+        } else {
+            single_click(&gesture, state, actions, over.map(|(i, _)| i), pos, inputs, workflow);
         }
     }
     // The right button: the Mouse-first switches first, then the Draw-first preset's delete in
     // Draw and Paint (› Keymap presets).
+    let right_deletes = workflow.right_click_deletes(matches!(state.tool, Tool::Draw | Tool::Paint));
     if response.clicked_by(PointerButton::Secondary)
         && !state.right_stepped
         && !state.right_playing
-        && !(options.mouse.alt_right_plays && inputs.alt)
+        && !(workflow.alt_right_plays && inputs.alt)
         && let Some(pos) = pointer
         && let Some((index, _)) = note_at(&layout, &clip.notes, pos)
-        && (options.mouse.right_deletes
-            || (options.right_click_deletes && matches!(state.tool, Tool::Draw | Tool::Paint)))
+        && right_deletes
     {
         gesture.delete_note(state, actions, index);
     }
@@ -1331,7 +1316,7 @@ pub fn show(
         let from = pointer.unwrap_or(grid_rect.center());
         state.erasing.clear();
         state.muting.clear();
-        if options.mouse.alt_right_plays && inputs.alt {
+        if workflow.alt_right_plays && inputs.alt {
             // Alt (Option) and the right button: the clip plays from the point under the pointer
             // and stops when the button is let go. It is the transport, not an edit.
             if let Some(at) = clip.placement.arrangement_beat(layout.beat_at(from.x)) {
@@ -1339,11 +1324,9 @@ pub fn show(
                 actions.push(Action::new("transport.play", json!({})));
                 state.right_playing = true;
             }
-        } else if options.mouse.shift_right_splits && inputs.shift {
+        } else if workflow.shift_right_splits && inputs.shift {
             state.gesture = Some(Gesture::Slice { from });
-        } else if options.mouse.right_deletes
-            || (options.right_click_deletes && matches!(state.tool, Tool::Draw | Tool::Paint))
-        {
+        } else if right_deletes {
             state.gesture = Some(Gesture::Erase);
             if let Some((index, _)) = note_at(&layout, &clip.notes, from) {
                 state.erasing.insert(index);
@@ -1381,7 +1364,7 @@ pub fn show(
             }
             // Left click draws: with the Mouse-first switch on, the Select tool draws a note on an
             // empty spot the way Draw does (› Keymap presets).
-            (None, Tool::Select) if options.mouse.left_draws => Gesture::Draw { from },
+            (None, Tool::Select) if workflow.empty_click_draws => Gesture::Draw { from },
             (Some((grabbed, edge)), _) => {
                 if !state.selected.contains(&grabbed) {
                     if !(inputs.shift || inputs.command) {
@@ -1505,6 +1488,91 @@ pub fn show(
     for_readers(ui, &layout, clip, state);
 }
 
+/// A single click in the grid, on note `over` or an empty spot at `pos`: what the tool does with
+/// it (› Drawing notes, › Selecting, › Muting).
+fn single_click(
+    gesture: &Gestures<'_>,
+    state: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+    over: Option<usize>,
+    pos: Pos2,
+    inputs: Inputs,
+    workflow: Workflow,
+) {
+    let clip = gesture.clip;
+    match (over, state.tool) {
+        (Some(index), Tool::Erase) => gesture.delete_note(state, actions, index),
+        // A click with Mute mutes the note, or unmutes it when it is already muted: one
+        // `note.setMuted`, one undo step (› Muting).
+        (Some(index), Tool::Mute) => {
+            if let Some(note) = clip.notes.get(index) {
+                let mut params = clip.address.clone();
+                params["notes"] = json!([index]);
+                params["muted"] = json!(!note.muted);
+                actions.push(Action::new("note.setMuted", params));
+            }
+        }
+        (None, Tool::Erase | Tool::Mute) => {}
+        (Some(index), _) if inputs.shift || inputs.command => {
+            if !state.selected.remove(&index) {
+                state.selected.insert(index);
+            }
+        }
+        (Some(index), _) => {
+            state.selected = BTreeSet::from([index]);
+            if let Some(note) = clip.notes.get(index) {
+                state.remember(note);
+            }
+        }
+        // Draw and Paint add a note; so does Select when a click on empty grid draws (the
+        // Mouse-first setting, › Workflow modes).
+        (None, Tool::Draw | Tool::Paint) => click_adds(gesture, state, actions, pos, inputs),
+        (None, Tool::Select) if workflow.empty_click_draws => click_adds(gesture, state, actions, pos, inputs),
+        (None, Tool::Slice) => {}
+        (None, Tool::Select) => state.selected.clear(),
+    }
+}
+
+/// A click that adds a note at `pos`, remembering which index it will have, so the second click
+/// of a double-click selects it instead of deleting it.
+fn click_adds(
+    gesture: &Gestures<'_>,
+    state: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+    pos: Pos2,
+    inputs: Inputs,
+) {
+    let before = actions.len();
+    gesture.add_note(state, actions, pos, inputs.alt);
+    if actions.len() > before {
+        state.click_added = Some(gesture.clip.notes.len());
+    }
+}
+
+/// The second click of a double-click, on note `over` (with `added` the note the first click
+/// added, if it did) or an empty spot at `pos` (› Double-click in `docs/spec/ui-clip-editor.md`).
+fn second_click(
+    gesture: &Gestures<'_>,
+    state: &mut PianoRollState,
+    actions: &mut Vec<Action>,
+    (over, added): (Option<usize>, Option<usize>),
+    pos: Pos2,
+    inputs: Inputs,
+    workflow: Workflow,
+) {
+    match (state.tool, over) {
+        // The first click already erased or muted the note: the second adds nothing, so a
+        // double-click is one note and one undo step.
+        (Tool::Erase | Tool::Mute, _) => {}
+        // The first click added a note: the second selects it and never deletes it.
+        (_, Some(index)) if added.is_some() => state.selected = BTreeSet::from([index]),
+        (_, None) if added.is_some() => {}
+        (Tool::Select, Some(index)) if workflow.double_click_deletes => gesture.delete_note(state, actions, index),
+        (Tool::Select, None) if workflow.double_click_adds => click_adds(gesture, state, actions, pos, inputs),
+        _ => single_click(gesture, state, actions, over, pos, inputs, workflow),
+    }
+}
+
 fn draw_playhead(ui: &Ui, layout: &Layout, beat: f64) {
     let x = layout.x_of(beat).round() + 0.5;
     let area = layout.ruler.union(layout.grid).union(layout.lane);
@@ -1604,6 +1672,15 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     if paint.place(tools, IconButton::MidiTools, state.tools_open, true) {
         state.tools_open = !state.tools_open;
     }
+    // The workflow menu: the mode's name, the four modes and every workflow setting
+    // (› Workflow modes).
+    let hide_left = row.right() - side;
+    let workflow = Rect::from_min_size(Pos2::new(x.get() + 4.0, row.top()), Vec2::new(WORKFLOW_MENU, row.height()));
+    if workflow.right() + 4.0 + 104.0 < hide_left {
+        workflow_menu(ui, workflow, keymap, state);
+        x.set(workflow.right() + gap);
+    }
+    let paint = ButtonPaint { ui, painter: &painter, keymap, scale };
     let x = x.get();
     // At the very end the × that hides the editor, then the grid value before it.
     let hide =
@@ -1643,6 +1720,65 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     });
     if chosen != clip.grid_name {
         state.grid_picked = Some(chosen);
+    }
+}
+
+/// How wide the toolbar's workflow menu is, in points.
+const WORKFLOW_MENU: f32 = 96.0;
+
+/// The toolbar's workflow menu: its button shows the mode, its menu offers the four modes and,
+/// under a divider, a submenu per workflow setting with its choices. A pick is left in `state`
+/// for the window, which keeps it in the keymap.
+fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state: &mut PianoRollState) {
+    use crate::keymap::Preset;
+    use crate::workflow::{Pick, Setting};
+    let mode = keymap.preset();
+    let current = keymap.workflow();
+    let font = theme::ui_font(theme::TEXT_SMALL);
+    let mut picked = None;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        let text =
+            egui::RichText::new(format!("{} \u{25be}", mode.name())).font(font.clone()).color(theme::text_value());
+        let menu = ui.menu_button(text, |ui| {
+            for choice in Preset::MODES {
+                let response =
+                    ui.selectable_label(choice == mode, egui::RichText::new(choice.name()).font(font.clone()));
+                if response.clicked() {
+                    if choice != mode {
+                        picked = Some(Pick::Mode(choice));
+                    }
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for setting in Setting::ALL {
+                let chosen = current.get(setting);
+                let shown = setting.choices().get(chosen).copied().unwrap_or("");
+                let title = egui::RichText::new(format!("{}: {shown}", setting.name())).font(font.clone());
+                ui.menu_button(title, |ui| {
+                    for (index, choice) in setting.choices().iter().enumerate() {
+                        let response =
+                            ui.selectable_label(index == chosen, egui::RichText::new(*choice).font(font.clone()));
+                        let name = format!("{}: {choice}", setting.name());
+                        response.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, index == chosen, &name)
+                        });
+                        if response.clicked() {
+                            if index != chosen {
+                                picked = Some(Pick::Setting(setting, index));
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        });
+        let label = format!("Workflow {}", mode.name());
+        menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        menu.response.on_hover_text("How clicks, right-clicks and double-clicks work: a preset, or Custom");
+    });
+    if picked.is_some() {
+        state.workflow_picked = picked;
     }
 }
 

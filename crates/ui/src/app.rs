@@ -1692,11 +1692,8 @@ impl App {
             self.piano_roll.hide();
         }
         let mut places = Vec::new();
-        let options = piano_roll::Options {
-            right_click_deletes: self.keymap.preset().right_click_deletes(),
-            toolbar_size: self.settings.toolbar_size,
-            mouse: self.keymap.mouse(),
-        };
+        let options =
+            piano_roll::Options { toolbar_size: self.settings.toolbar_size, workflow: self.keymap.workflow() };
         // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
         // visible on the button.
         let keymap = self.keymap.clone();
@@ -1735,6 +1732,11 @@ impl App {
         // The toolbar's × hides the editor.
         if std::mem::take(&mut self.piano_roll.hide_requested) {
             self.hide_editor();
+        }
+        // A workflow mode or setting picked in the piano roll's toolbar: kept in the keymap.
+        if let Some(picked) = self.piano_roll.workflow_picked.take() {
+            picked.apply(&mut self.keymap);
+            self.keymap_changed = true;
         }
         // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
         // the piano roll follows it.

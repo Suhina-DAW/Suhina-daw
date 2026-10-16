@@ -272,6 +272,8 @@ A page starts with its title (10 px `text.hint` over a 1 px `border`), level wit
 the list; each setting is a 34 px row with its name (11 px `text.primary`), a note under it
 (10 px `text.secondary`) and its control on the right: a segmented control of 64 px per part, or a 260 px dropdown
 (Settings › Audio). A read-only setting (Audio › Now: Output, Latency) shows its value as the note.
+The page is drawn under the title only; the General page, taller than a small window, scrolls with
+the wheel over it, as far as its last row and no further.
 
 | Page | Setting | Values |
 |---|---|---|
@@ -287,7 +289,7 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | General › Transport | Play from | Marker (default): Play and Space start from the play start marker; Selected clip: from the start of the clip selected in the Arrangement view, the marker moving there ([spec](../spec/arrangement-editing.md) › Play position) |
 | General › Transport | Stop | Marker (default): back to the play start marker; Stay: the marker moves to where it stopped ([spec](../spec/arrangement-editing.md) › Play position) |
 | General › Piano roll | Toolbar size: Normal, Large (default), Larger; the toolbar's box, gaps and icon strokes scale with it ([clip editor spec](../spec/ui-clip-editor.md) › Layout) |
-| General › Piano roll | Left click draws, Right click deletes a note, Shift+right click splits, Alt+right plays from the point: the four mouse switches of the **Mouse-first** preset, each on or off on its own, kept in `keymap.json` ([shortcuts](../shortcuts.md) › Presets) |
+| General › Piano roll | Click on empty grid, Right click on a note, Shift+right drag, Alt+right button, Duplicate key, Double-click on empty grid, Double-click on a note: the workflow settings, one segmented control each (64 px a part, short choices such as Selects and Draws); changing one makes the workflow Custom; kept in `keymap.json` ([shortcuts](../shortcuts.md) › Presets) |
 | Interface | Animations | On (default), Off |
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |
 | Interface › Arrangement | Track headers | Left, Right (default) |
@@ -496,6 +498,10 @@ the note clipboard's Cut, Copy, Paste and Duplicate icons, greyed out (`text.hin
 when there is nothing to act on; then the quantise icon (notes snapping onto a line), which shows
 the MIDI tools column with the quantise block open, and the **MIDI tools** icon (three horizontal
 sliders, `control.activeBackground` while the column shows), which shows and hides that column.
+4 px after it the 96 px **workflow menu**: the mode's name and a ▾ in 10 px `text.value`, its menu
+the four modes as selectable rows, a divider, and one row per workflow setting ("Double-click on a
+note: Deletes it") opening a submenu of its choices, the chosen one highlighted; it is left out when
+the toolbar is too narrow for it and the grid menu.
 At the right end
 "Grid" in 10 px `text.hint` and a 64 px grid value menu (10 px mono `text.value`), then the
 **Hide editor** button: a box as tall as the tool buttons with a 1.1 px × in `text.secondary`

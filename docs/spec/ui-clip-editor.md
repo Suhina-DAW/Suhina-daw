@@ -1,6 +1,6 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -71,7 +71,8 @@ bottom:
 1. **Toolbar** (built, [#442](https://github.com/suhina-daw/suhina-daw/issues/442), icons
    [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
    [#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the tools, then the note
-   clipboard, then the MIDI tools column's toggle, and at the right end the piano roll's grid
+   clipboard, then the MIDI tools column's toggle, then the **workflow menu** (› Workflow
+   modes), and at the right end the piano roll's grid
    value (› Grid and snapping), and after it, at the very end, the **×** that hides the editor
    (› Least height and closing). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale
    with the scale name.
@@ -237,7 +238,8 @@ pull up.
 - **Built:** a **double-click** on an empty spot of the grid adds a note there: its start snapped
   down to the grid line before the pointer (Alt: where the pointer is), its key the row under the
   pointer, its length one grid step (a quarter beat with `none`), velocity 100. The new note is
-  selected. A double-click on a note deletes it.
+  selected. A double-click on a note deletes it. Both are workflow settings, and what a
+  double-click does with every tool and in every part of the editor is › Double-click.
 - **Built:** the toolbar's tools ([#442](https://github.com/suhina-daw/suhina-daw/issues/442),
   Slice [#443](https://github.com/suhina-daw/suhina-daw/issues/443)) decide
   what a press in the grid does (the velocity lane works the same with every tool):
@@ -283,6 +285,31 @@ pull up.
     Mute.
 - **Later ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):** dragging up or down while
   drawing sets the length.
+
+## Double-click
+
+**Built ([#490](https://github.com/suhina-daw/suhina-daw/issues/490)).** A double-click is two
+presses of the left button in the piano roll, the second within 0.3 s of the first and within 6
+points of it. The piano roll counts them itself, from its own clicks: a click anywhere else just
+before (selecting the clip, a button) never turns the pair into something else, and a third quick
+click starts a new pair rather than being read as a triple click. The first click of the pair
+always does what a single click does; the table says what the second one adds.
+
+| Where | Tool | The second click |
+|---|---|---|
+| Empty spot of the grid | **Select** | adds a note there (› Drawing notes) when **Double-click on empty grid** is **Adds a note** (every preset); with **Does nothing** it clears the selection, as a click does. When **Click on empty grid** is **Draws a note** (Mouse-first) the first click has already added the note, so the second one only selects it and never deletes it |
+| Empty spot of the grid | **Draw**, **Paint** | selects the note the first click added: one note, one undo step |
+| Empty spot of the grid | **Erase**, **Slice**, **Mute** | nothing |
+| A note, or its right edge | **Select** | deletes the note when **Double-click on a note** is **Deletes it** (every preset), else selects it alone, as a click does. A note the first click of the pair added is never deleted |
+| A note, or its right edge | **Draw**, **Paint**, **Slice** | selects it, as a click does |
+| A note, or its right edge | **Erase** | nothing: the first click deleted the note, and the second does not delete the note under it, so a double-click deletes one note |
+| A note, or its right edge | **Mute** | nothing: the first click muted (or unmuted) the note, and the second does not flip it back, so a double-click mutes a note in one undo step |
+| Velocity lane | any | selects the stem's note, as a click does; nothing else |
+| Key column | any | plays the key again, as a click does; nothing is added or selected |
+
+A double-click is never a drag: a pair whose second press moves further than egui's click distance
+is a drag and does what the tool's drag does. Every edit a double-click makes is one command and
+one undo step, so Ctrl+Z (Cmd+Z on macOS) takes back exactly what it did.
 
 ## Playing the keys
 
@@ -573,8 +600,8 @@ Built (the first version, and keyboard editing from [#344](https://github.com/su
 
 | Keys | Does |
 |---|---|
-| Double-click on an empty spot | Adds a note |
-| Double-click on a note | Deletes it |
+| Double-click on an empty spot | Adds a note (Select tool; › Double-click) |
+| Double-click on a note | Deletes it (Select tool; › Double-click) |
 | Click, Shift+click, Ctrl+click | Selects a note, adds or takes it out of the selection |
 | Drag from an empty spot | Selects the notes in the rectangle |
 | Drag a note | Moves the selection (time snapped by grid steps, pitch by semitones) |
@@ -611,6 +638,46 @@ while the piano roll has the keyboard, so they can be changed like the rest. `pi
 Later: Ctrl+G (glue), Ctrl+1 to Ctrl+4 (grid), Z (zoom to
 selection), added to the keymap when built.
 
+## Workflow modes
+
+**Built ([#490](https://github.com/suhina-daw/suhina-daw/issues/490)).** The way the piano roll
+works is a **mode**: one of the three presets below, or **Custom**. The **workflow menu** in the
+piano roll's toolbar, after the MIDI tools icon, shows the mode's name (its accessible label is
+"Workflow" and the name, such as "Workflow Select-first") and can be changed at any time, while
+editing; Settings › Shortcuts › **Preset** offers the same four modes. The menu lists the four
+modes, ticked as chosen, and under a divider every **workflow setting** with its choices:
+
+| Setting | Choices | Select-first | Draw-first | Mouse-first |
+|---|---|---|---|---|
+| **Click on empty grid** (Select tool) | Clears the selection, Draws a note | Clears | Clears | Draws |
+| **Right click on a note** | Does nothing, Deletes in Draw and Paint, Deletes in every tool | Nothing | Draw and Paint | Every tool |
+| **Shift+right drag** | Does nothing, Splits notes | Nothing | Nothing | Splits |
+| **Alt+right button** | Does nothing, Plays from the point | Nothing | Nothing | Plays |
+| **Duplicate key** | Ctrl+D, Ctrl+B | Ctrl+D | Ctrl+B | Ctrl+D |
+| **Double-click on empty grid** (Select tool) | Adds a note, Does nothing | Adds | Adds | Adds |
+| **Double-click on a note** (Select tool) | Deletes it, Does nothing | Deletes | Deletes | Deletes |
+
+- Choosing a preset fills in every setting with its column. Changing one setting, in the menu or
+  in Settings › General › Piano roll (one row per setting), makes the mode **Custom**, with the
+  other settings kept as they were. Choosing **Custom** itself changes no setting, so a preset's
+  column can be the start of a mix. A Custom mix that happens to equal a preset's column stays
+  Custom until the preset is chosen.
+- **Duplicate key** binds the key: Ctrl+B moves the browser's key to Ctrl+Shift+B, Ctrl+D gives
+  the browser Ctrl+B back. The key can still be changed in the Shortcuts list; the setting then
+  reads Ctrl+B only while the duplicate action is bound to Ctrl+B.
+- The mode and every setting are kept in `keymap.json` with the keys: `"preset"` names the mode
+  (`"Custom"` included) and each setting has its own entry, `"workflowEmptyClick"` (`"selects"`,
+  `"draws"`), `"workflowRightClick"` (`"nothing"`, `"drawAndPaint"`, `"everyTool"`),
+  `"workflowShiftRight"` and `"workflowAltRight"` (`"nothing"`, `"on"`), `"workflowDuplicate"`
+  (`"Ctrl+D"`, `"Ctrl+B"`), `"workflowDoubleClickEmpty"` (`"adds"`, `"nothing"`) and
+  `"workflowDoubleClickNote"` (`"deletes"`, `"nothing"`). The four `"mouse*"` entries of earlier
+  files are still written and read (› Keymap presets below). A setting the file leaves out is the
+  preset's; a value that is not one of its choices is ignored with a warning in the status bar. A
+  file whose settings are not the ones its preset fills in (an earlier file with a mouse switch
+  turned off by hand) opens as **Custom** with those settings.
+- Changing the mode or a setting is window state, saved with the keymap: it is not a command, not
+  part of the project and not an undo step, and it never changes the notes or the selection.
+
 ## Keymap presets
 
 - **Built ([#443](https://github.com/suhina-daw/suhina-daw/issues/443), Mouse-first
@@ -641,9 +708,8 @@ selection), added to the keymap when built.
     go. It is the transport preview of › Playing the keys, for the whole clip: nothing is added to
     the project and it is not an undo step. Held with the wheel, the right button still chooses the
     tool (› Zoom and scroll).
-- A switch turned off by hand leaves the preset's name in the file, so the four switches say what
-  the mouse does and the preset name says where the keys and the switches started; choosing
-  **Mouse-first** again turns them all back on. The switches are kept with the keymap in
+- A switch turned on or off by hand is a workflow setting changed by hand, so the mode becomes
+  **Custom** (› Workflow modes); choosing **Mouse-first** again turns them all back on. The switches are kept with the keymap in
   `keymap.json`, under `"mouseLeftDraws"`, `"mouseRightDeletes"`, `"mouseShiftRightSplits"` and
   `"mouseAltRightPlays"`, each `true` or `false`; a file without them takes Select-first's (all
   off), and a value that is not a boolean is ignored with a warning, as an unknown key is.
@@ -653,7 +719,7 @@ selection), added to the keymap when built.
   [`docs/shortcuts.md`](../shortcuts.md)). Choosing a preset twice sets them again, so a key that
   was changed by hand comes back to the preset's.
 - The choice is saved with the keymap in `keymap.json` under `"preset"`, and read back when the
-  file is read. A file without it is **Select-first**. A `"preset"` naming something else is
+  file is read. A file without it is **Select-first**; **Custom** is read and written too. A `"preset"` naming something else is
   ignored: the keymap is Select-first and the window says so in the status bar, so a hand-edited
   file never leaves Suhina with no keys.
 - The preset names describe the habit they suit; they are not the name of anything else.
@@ -716,6 +782,9 @@ never grow a clip past the 100 000 notes it holds; `at` is a beat from 0 to 120 
 - **Mute is the sixth tool**, after Slice, with the number key **6**. Another order (Mute before
   Slice) changes the labels of `pianoRoll.tool5` and `pianoRoll.tool6` and the icons; the
   maintainer decides ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)).
+- **Double-click on a note in Select deletes it** in every preset, as built before; making
+  **Does nothing** the default for Mouse-first (whose right button deletes) is the maintainer's
+  call ([#490](https://github.com/suhina-daw/suhina-daw/issues/490)).
 - **The preset names** (**Select-first**, **Draw-first** and **Mouse-first**) describe the habit;
   the maintainer may
   rename them ([#443](https://github.com/suhina-daw/suhina-daw/issues/443),

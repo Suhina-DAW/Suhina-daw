@@ -655,6 +655,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
   (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
   their own, kept in `keymap.json`.
+- **Piano roll workflow modes** ([#490](https://github.com/suhina-daw/suhina-daw/issues/490)): a
+  workflow menu in the piano roll's toolbar switches between Select-first, Draw-first, Mouse-first
+  and **Custom** at any time; every behaviour that differs between them (click on empty grid,
+  right-click on a note, Shift+right, Alt+right, the duplicate key, double-click on empty grid and
+  on a note) is a setting of its own, and changing one makes the mode Custom, kept in
+  `keymap.json`. A double-click is counted by the piano roll itself, so it works right after
+  another click, adds one note in Mouse-first instead of adding and deleting it, and mutes or
+  erases one note in the Mute and Erase tools.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the

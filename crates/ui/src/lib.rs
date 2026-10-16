@@ -43,5 +43,6 @@ pub mod themes;
 pub mod timeline;
 pub mod waveform;
 pub mod widgets;
+pub mod workflow;
 
 pub use app::{App, NewProject, OpenAs, Status, View};
