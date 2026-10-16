@@ -97,7 +97,7 @@ def preamble(lines: list[str], suffix: str) -> int:
     n = 0
     if lines and lines[0].startswith("#!") and not lines[0].startswith("#!["):
         n = 1
-    if suffix == ".py" and len(lines) > n and n < 2 and ENCODING.match(lines[n]):
+    if suffix == ".py" and len(lines) > n and ENCODING.match(lines[n]):
         n += 1
     return n
 
@@ -111,12 +111,12 @@ def apply(path: str, text: str) -> tuple[str, str]:
     body = text[len(bom) :]
     newline = "\r\n" if "\r\n" in body else "\n"
     lines = body.split(newline)
-    head = lines[:HEAD_LINES]
-    if any(m in line for line in head for m in GENERATED_MARKS):
-        return text, "generated"
     n = preamble(lines, Path(path).suffix)
     if lines[n : n + len(header)] == header:
         return text, "ok"
+    head = lines[:HEAD_LINES]
+    if any(m in line for line in head for m in GENERATED_MARKS):
+        return text, "generated"
     if any(SPDX in line for line in head):
         return text, "has an SPDX line that is not the expected one"
     if path not in PORTED and any(
