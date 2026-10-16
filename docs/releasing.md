@@ -212,9 +212,7 @@ It acts with a short-lived token of the GitHub App that also pushes the generate
 permissions › **Contents** and **Pull requests**: Read and write; its `DOCS_BOT_APP_ID` and
 `DOCS_BOT_PRIVATE_KEY` are in the `docs-bot` environment, which `pull_request_target` may use
 because it runs on `main`; and Settings › General › **Allow auto-merge** is on. Without that setting the
-*approve and queue* job fails, and nothing merges. The *stop the merge* job dismisses the app's
-approvals: if `main`'s rule ever restricts who may dismiss reviews, the app must be on that list,
-since Pull requests: Read and write alone is not enough, and the job fails until it is. The maintainers are listed in the workflow as in
+*approve and queue* job fails, and nothing merges. The maintainers are listed in the workflow as in
 the test build's.
 
 **One build of several pull requests.** To try a batch before merging it, run Actions › Test build
