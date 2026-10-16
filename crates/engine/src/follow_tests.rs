@@ -76,6 +76,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
                 length: 4.0,
                 lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
                 extensions: Extensions::default(),
+                scale: None,
             })
             .collect(),
         launcher: Launcher {

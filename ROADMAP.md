@@ -694,6 +694,14 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   other slots of its scene), the other clips of the same track, one clip picked from a list, or
   none. Ghost notes are mapped through each clip's start, offset and loop, never take a click, and
   the choice is a view setting kept until Suhina closes, not saved with the project.
+- **Clip scales and folding in the piano roll** ([#347](https://github.com/suhina-daw/suhina-daw/issues/347)):
+  a MIDI clip can have a scale (a root, C to B, and a mode: major, minor, harmonic and melodic
+  minor, the church modes, the pentatonics and blues), saved with the project. The toolbar's
+  **Scale** menu sets it (`clip.setScale`, one undo step) and the rows of its keys are lighter, with
+  a mark on the key column; **Fold** shows only the keys that have notes and **Fold to scale** the
+  scale's keys (and any key with a note), and clicks, drawing and drags work on the rows shown. The
+  project's default scale (`project.setDefaultScale`) is taken by new MIDI clips, and
+  `note.fitToScale` fits to the clip's scale when given none.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the

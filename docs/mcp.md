@@ -202,6 +202,16 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `seed`, so the same call gives the same result twice and a script can repeat it; the result says
   which seed it used when none was given. Each is one undo step and fails as a whole, and none of
   them changes a note's mute.
+- **Scales.** `clip.setScale {track, index | scene, root?, mode?, off?}` gives a MIDI clip a scale
+  (a root such as `"D"`, `"F#"` or 0 to 11, and a mode such as `major`, `minor`, `dorian` or
+  `blues`, the names `note.fitToScale` takes), keeping the part left out, or clears it with
+  `off: true`; the piano roll then marks the scale's keys. `clip.scale {track, index | scene}`
+  reads it back with the project's default, and `project.setDefaultScale {root?, mode?, off?}`
+  sets the scale new MIDI clips take (`clip.create`, recorded and dropped MIDI clips; clips that
+  exist keep theirs; `project.info` shows it as `default_scale`). A scale is the clip content's,
+  so a clip whose content others play gets its own copy first, as a note edit does; each is one
+  undo step and changes nothing on a bad root or mode. `note.fitToScale` with neither `root` nor
+  `scale` fits to the clip's own scale.
 - **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
   changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
   adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default

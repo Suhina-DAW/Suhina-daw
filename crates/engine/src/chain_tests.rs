@@ -79,6 +79,7 @@ pub(crate) fn project(notes: Vec<Note>, length: f64, devices: Vec<Device>) -> Pr
             length,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip(0.0, false)] }],

@@ -140,6 +140,17 @@ const CLIP_INDEX: Param =
     optional("index", ParamType::Integer, "an arrangement clip's index on the track, from project.clips");
 const CLIP_SCENE: Param =
     optional("scene", ParamType::Integer, "instead of index: the clip in the track's slot of this scene, from 1");
+/// A scale's root and mode, for `clip.setScale` and `project.setDefaultScale`.
+const SCALE_ROOT: Param = optional(
+    "root",
+    ParamType::Text,
+    "the key the scale starts on: a name such as C, F# or Bb, or 0 to 11 (default: the scale's root now, else C)",
+);
+const SCALE_MODE: Param = optional(
+    "mode",
+    ParamType::Text,
+    "major, minor, harmonicMinor, melodicMinor, dorian, phrygian, lydian, mixolydian, locrian, majorPentatonic, minorPentatonic or blues (default: the scale's mode now, else major)",
+);
 const NOTES: Param = param("notes", ParamType::Integers, "note indices, from note.list; at most 10000");
 /// The notes a MIDI tool acts on: the named ones, or every note of the clip.
 const NOTE_SELECTION: Param =
@@ -1778,7 +1789,7 @@ static COMMANDS: &[CommandSpec] = &[
             optional(
                 "root",
                 ParamType::Text,
-                "the key the scale starts on: a name such as C, F# or Bb, or 0 to 11 (default C)",
+                "the key the scale starts on: a name such as C, F# or Bb, or 0 to 11 (default C; with neither root nor scale, the clip's own scale when it has one)",
             ),
             optional(
                 "scale",
@@ -1855,6 +1866,38 @@ static COMMANDS: &[CommandSpec] = &[
         kind: CommandKind::Edit,
         run: note_tools::ramp_velocity,
     },
+    CommandSpec {
+        id: "clip.scale",
+        label: "The scale of a MIDI clip (root and mode, or null for none) and the project's default scale for new clips",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE],
+        kind: CommandKind::Read,
+        run: crate::scales::clip_scale,
+    },
+    CommandSpec {
+        id: "clip.setScale",
+        label: "Set the scale of a MIDI clip (the piano roll marks its keys), or clear it with off; a content other clips also play is copied for this clip first",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            SCALE_ROOT,
+            SCALE_MODE,
+            optional("off", ParamType::Bool, "true clears the scale; not with root or mode"),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::scales::set_scale,
+    },
+    CommandSpec {
+        id: "project.setDefaultScale",
+        label: "Set the scale new MIDI clips take (clip.create, recorded and dropped MIDI clips), or clear it with off; clips that exist keep theirs",
+        params: &[
+            SCALE_ROOT,
+            SCALE_MODE,
+            optional("off", ParamType::Bool, "true clears the default scale; not with root or mode"),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::scales::set_default_scale,
+    },
     CommandSpec { id: "edit.undo", label: "Undo the last edit", params: &[], kind: CommandKind::History, run: undo },
     CommandSpec {
         id: "edit.redo",
@@ -1909,6 +1952,7 @@ fn info(session: &mut Session, _: &Value) -> Result<Value, CommandError> {
         "launcher_clips": launcher_clips,
         "markers": p.arrangement.markers.len(),
         "loop": loop_value(p),
+        "default_scale": crate::scales::scale_value(p.default_scale),
         "can_undo": session.can_undo(),
         "can_redo": session.can_redo(),
     }))

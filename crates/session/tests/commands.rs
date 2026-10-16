@@ -67,6 +67,7 @@ fn project() -> Project {
                 }]),
             }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {
@@ -741,6 +742,7 @@ fn audio_project() -> Project {
             }),
         }],
         extensions: Extensions::default(),
+        scale: None,
     });
     p.arrangement.lanes[0].clips[1].content = ContentId(9);
     p

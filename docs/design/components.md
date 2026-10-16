@@ -1,6 +1,6 @@
 ---
 description: Measurements, states and tokens of every UI component, from the minimal v3 mockups
-read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout, audition button, velocity lane top edge, ghost menu, ghost notes look
+read_when: widget sizes, marker row, clip slot states, value field, slider, knob, toggle, meter, track header levels, device panel, piano roll layout, audition button, velocity lane top edge, ghost menu, ghost notes look, Scale menu, scale rows, key column mark, folded rows
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -476,7 +476,10 @@ device chain. Editing the properties is planned.
 Built so far (`crates/ui/src/piano_roll.rs`, the ruler in `crates/ui/src/piano_roll_ruler.rs`): the 24 px ruler (the 8 px clip loop row over 16 px of bar numbers and lines, with the start and end markers), the 36 px
 key column, the note rows, notes and the velocity lane (72 px, or 30 % of the detail area's height
 when that is less, with 127 and 1 in its scale column). Rows are drawn as white-key rows
-(`panel.background`) and black-key rows (`window.background`) until the clip has a scale; the
+(`panel.background`) and black-key rows (`window.background`) until the clip has a scale; with
+one, the rows of the keys in the scale are `control.background`, its root's `control.hoverBackground`,
+and the others `window.background`, and each key in the scale has a 2 px mark at the right edge of
+the key column, 1 px in from the column's line, in `text.secondary` (the root's `text.value`); the
 grid's lines are `border`, bar lines `border.strong`; the grid outside the part of the content the
 clip plays (before its start marker or loop, past its loop's end or end marker) is darkened, and
 the notes there are drawn at 0.45 of their opacity.
@@ -515,6 +518,16 @@ scrolling past 320 px. It is left out, before the workflow menu, when the toolba
 it and the grid menu. **Ghost notes** are plain rectangles in their own track's colour at 0.25,
 under the clip's notes, with no name, edge or velocity stem
 ([clip editor spec](../spec/ui-clip-editor.md) › Ghost notes).
+After it the **Scale menu** (at most 56 px): "Scale" in 10 px `text.value` (`text.hint` while the
+clip has no scale), its accessible label and tooltip naming the scale ("Scale D dorian", "Scale
+off"); its menu the row Off, a divider, **Root: D** and **Mode: Dorian** opening submenus of the
+twelve roots and the modes, a divider, and the toggles **Fold** and **Fold to scale** (greyed out
+without a scale), the chosen ones highlighted. The workflow, ghost and Scale menus each take the
+width their button needs, 4 px after the one before; the Scale menu is left out when the grid
+value would not fit after it, and the "Grid" caption is left out first when it needs the room.
+Folded, the rows are drawn the same way with no gap for the keys left out, and every key-column
+row is named in 9 px mono `text.secondary` when it is at least 8 px tall
+([clip editor spec](../spec/ui-clip-editor.md) › Scale and key).
 Each toolbar menu's button ends in a small filled triangle, 6 px wide, drawn as a shape 7 px from
 its right edge in the button's text colour.
 At the right end

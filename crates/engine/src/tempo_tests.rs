@@ -80,6 +80,7 @@ fn project(lane: LaneData, length: f64) -> Project {
             length,
             lanes: vec![ContentLane { target: None, data: lane }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip(0.0, length)] }],

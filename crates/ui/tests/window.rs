@@ -1590,6 +1590,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     let clip = Clip {
         content: ContentId(300),

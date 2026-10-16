@@ -98,7 +98,7 @@ CHAPTERS = [
      "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
      "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
      "automation envelope."),
-    (10, "Editing MIDI", 41, 0.42, "started",
+    (10, "Editing MIDI", 41, 0.44, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
      "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute "
      "tools (keys 1 to 6, the wheel with the right button held steps through them) and "
@@ -117,8 +117,10 @@ CHAPTERS = [
      "velocity lane sets many stems, the lane's height is dragged and an Audition button sounds "
      "drawn and moved notes. Ghost notes of the clips playing together, of the same track or of "
      "one picked clip are drawn faintly behind the notes. An empty "
-     "MIDI clip is made with a double-click on a slot or a lane (clip.create). No "
-     "fold, scales, chords, probability or MPE lanes."),
+     "MIDI clip is made with a double-click on a slot or a lane (clip.create). A clip has a scale "
+     "(clip.setScale, a project default new clips take) whose keys the rows mark, and Fold and Fold "
+     "to scale show only the keys with notes or in the scale. No "
+     "chords, probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.12, "started",
      "A MIDI tools column runs quantise, transpose, humanise, fit to scale, invert, reverse, legato, "
      "x2 and /2 and the velocity randomise and ramp over the selection or the whole clip, each one "

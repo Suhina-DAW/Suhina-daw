@@ -28,6 +28,7 @@ mod preview;
 mod projects;
 mod rack;
 mod relink;
+mod scales;
 mod sends;
 mod soundmap;
 mod tempo;

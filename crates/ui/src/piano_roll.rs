@@ -10,13 +10,14 @@ use std::collections::BTreeSet;
 use egui::{Align2, Color32, CursorIcon, Id, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::{Value, json};
 use suhina_engine::Quantization;
-use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
+use suhina_engine::model::{Clip, LaneData, Note, Project, Scale, TrackId};
 
 use crate::grid::default_track_colour;
 use crate::midi_tools::ToolSettings;
 use crate::piano_roll_ghosts::{self as ghost_view, GhostSource, Ghosts};
 use crate::piano_roll_grid::{FIXED_VALUES, GridMode, PianoGrid, Width};
 use crate::piano_roll_ruler::{self as ruler_view, ClipShape, RulerState};
+use crate::piano_roll_scale::{self as scale_view, Fold, KeyRows};
 use crate::settings::ToolbarSize;
 use crate::theme;
 use crate::widgets::{self, Action};
@@ -111,6 +112,8 @@ pub struct PianoClip {
     /// The notes of other clips drawn faintly behind this clip's own, and the clips the ghost
     /// menu offers (› Ghost notes); the window fills them in.
     pub ghosts: Ghosts,
+    /// The scale of the clip's content, whose keys the rows mark (› Scale and key).
+    pub scale: Option<Scale>,
 }
 
 /// Where a clip plays its content on the arrangement.
@@ -248,6 +251,7 @@ fn piano_clip_from(project: &Project, track: TrackId, clip: &Clip, quantization:
             room: None,
         },
         ghosts: Ghosts::default(),
+        scale: content.scale,
     })
 }
 
@@ -448,6 +452,9 @@ pub struct PianoRollState {
     /// Which other clips show as ghost notes, picked in the toolbar's ghost menu; kept until
     /// Suhina closes (› Ghost notes).
     pub ghost_source: GhostSource,
+    /// Which key rows show, picked in the toolbar's Scale menu (Fold, Fold to scale); kept until
+    /// Suhina closes (› Zoom and scroll).
+    pub fold: Fold,
 }
 
 impl Default for PianoRollState {
@@ -493,6 +500,7 @@ impl Default for PianoRollState {
             audition_off: None,
             audition_sounding: Vec::new(),
             ghost_source: GhostSource::default(),
+            fold: Fold::default(),
         }
     }
 }
@@ -1017,6 +1025,8 @@ struct Layout {
     scroll: Vec2,
     beat_width: f32,
     key_height: f32,
+    /// The key rows shown, from the top: every key, or the keys a fold leaves (› Scale and key).
+    rows: KeyRows,
 }
 
 impl Layout {
@@ -1028,14 +1038,22 @@ impl Layout {
         f64::from((x - self.grid.left() + self.scroll.x) / self.beat_width)
     }
 
+    /// The top of `key`'s row; far above the grid for a key the fold hides, so nothing on it is
+    /// drawn or hit.
     fn y_of(&self, key: u8) -> f32 {
-        self.grid.top() - self.scroll.y + f32::from(127 - key.min(127)) * self.key_height
+        match self.rows.row_of(key) {
+            Some(row) => self.grid.top() - self.scroll.y + row as f32 * self.key_height,
+            None => self.grid.top() - 1.0e6,
+        }
     }
 
     /// The key whose row is at `y`, if any.
     fn key_at(&self, y: f32) -> Option<u8> {
         let row = ((y - self.grid.top() + self.scroll.y) / self.key_height).floor();
-        (0.0..=127.0).contains(&row).then(|| 127 - row as u8)
+        if !(row >= 0.0 && row < self.rows.len() as f32) {
+            return None;
+        }
+        self.rows.key_of(row as usize)
     }
 
     fn note_rect(&self, note: &Note) -> Rect {
@@ -1342,10 +1360,11 @@ pub fn show(
     }
     // A newly shown clip fits the width with its notes in the middle; until the rows are scrolled
     // by hand, a change in height centres the notes again, so they are in view at any height.
+    let rows = scale_view::rows(clip, state.fold);
     if fresh {
-        fit(state, grid_rect, clip);
+        fit(state, grid_rect, clip, &rows);
     } else if !state.scrolled_by_hand && (grid_rect.height() - state.centred_for).abs() > 0.5 {
-        centre_notes(state, grid_rect.height(), clip);
+        centre_notes(state, grid_rect.height(), clip, &rows);
     }
 
     let inputs = Inputs {
@@ -1366,7 +1385,8 @@ pub fn show(
     // The ruler: its loop handles and markers, and dragging it to zoom and scroll time.
     let shape = ruler_view::interact(ui, ruler, grid_rect.left(), clip, state, inputs.alt, actions);
     state.view_width = grid_rect.width();
-    state.scroll.y = state.scroll.y.clamp(0.0, (128.0 * state.key_height - grid_rect.height()).max(0.0));
+    let rows_height = rows.len() as f32 * state.key_height;
+    state.scroll.y = state.scroll.y.clamp(0.0, (rows_height - grid_rect.height()).max(0.0));
     let width = ((clip.length + clip.bar_beats * 4.0) as f32 * state.beat_width).max(grid_rect.width());
     state.scroll.x = state.scroll.x.clamp(0.0, (width - grid_rect.width()).max(0.0));
     let layout = Layout {
@@ -1377,6 +1397,7 @@ pub fn show(
         scroll: state.scroll,
         beat_width: state.beat_width,
         key_height: state.key_height,
+        rows,
     };
     let grid = note_grid(clip, state.beat_width);
     let gesture = Gestures { layout: &layout, clip, grid };
@@ -1657,6 +1678,7 @@ pub fn show(
         draw_playhead(ui, &layout, beat);
     }
     for_readers(ui, &layout, clip, state);
+    scale_view::key_readers(ui, layout.keys, clip, &layout.rows, |key| layout.y_of(key), layout.key_height);
     // Notes the audition sounds go on now and off a moment later.
     let track = clip.address.get("track").and_then(Value::as_u64);
     state.audition_frame(ui, track, actions);
@@ -1858,14 +1880,31 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     let hide_left = row.right() - side;
     let workflow = Rect::from_min_size(Pos2::new(x.get() + 4.0, row.top()), Vec2::new(WORKFLOW_MENU, row.height()));
     if workflow.right() + 4.0 + 104.0 < hide_left {
-        workflow_menu(ui, workflow, keymap, state);
-        x.set(workflow.right() + gap);
+        // Each menu takes the width its button needs, so the next one starts right after it.
+        let shown = workflow_menu(ui, workflow, keymap, state);
+        x.set(shown.right().min(workflow.right()) + gap);
         // The ghost menu after it, when there is room for both (› Ghost notes).
         let ghosts =
             Rect::from_min_size(Pos2::new(x.get() + 4.0, row.top()), Vec2::new(ghost_view::MENU_WIDTH, row.height()));
         if ghosts.right() + 4.0 + 104.0 < hide_left {
-            ghost_view::menu(ui, ghosts, &clip.ghosts, &mut state.ghost_source);
-            x.set(ghosts.right() + gap);
+            let shown = ghost_view::menu(ui, ghosts, &clip.ghosts, &mut state.ghost_source);
+            x.set(shown.right().min(ghosts.right()) + gap);
+            // The Scale menu after it, when the grid value still fits after it (› Scale and key);
+            // the grid value's caption gives way to it.
+            let menu = Rect::from_min_size(
+                Pos2::new(x.get() + 4.0, row.top()),
+                Vec2::new(scale_view::MENU_WIDTH, row.height()),
+            );
+            if menu.right() + gap + 2.0 + GRID_MENU + 6.0 <= hide_left - gap {
+                let before = state.fold;
+                let shown = scale_view::menu(ui, menu, clip, &mut state.fold, actions);
+                if state.fold != before {
+                    // Another set of rows: the notes are centred again in them.
+                    state.scrolled_by_hand = false;
+                    state.centred_for = 0.0;
+                }
+                x.set(shown.right().min(menu.right()) + gap);
+            }
         }
     }
     let paint = ButtonPaint { ui, painter: &painter, keymap, scale };
@@ -1878,19 +1917,22 @@ fn toolbar(ui: &mut Ui, rect: Rect, cx: ToolbarCx<'_>, state: &mut PianoRollStat
     }
     let row = Rect::from_min_max(row.min, Pos2::new(hide.left() - gap - 2.0, row.bottom()));
     let menu = Rect::from_min_max(Pos2::new(row.right() - GRID_MENU, row.top()), row.max);
-    if menu.left() < x + 40.0 {
+    if menu.left() < x + 6.0 {
         return;
     }
-    let label =
-        Rect::from_min_max(Pos2::new(menu.left() - 34.0, row.top()), Pos2::new(menu.left() - 4.0, row.bottom()));
-    widgets::text_in(
-        &painter,
-        label,
-        Align2::RIGHT_CENTER,
-        "Grid",
-        theme::ui_font(theme::TEXT_SMALL),
-        theme::text_hint(),
-    );
+    // The caption, when there is room for it too.
+    if menu.left() >= x + 40.0 {
+        let label =
+            Rect::from_min_max(Pos2::new(menu.left() - 34.0, row.top()), Pos2::new(menu.left() - 4.0, row.bottom()));
+        widgets::text_in(
+            &painter,
+            label,
+            Align2::RIGHT_CENTER,
+            "Grid",
+            theme::ui_font(theme::TEXT_SMALL),
+            theme::text_hint(),
+        );
+    }
     if let Some(picked) = grid_menu(ui, menu, clip, keymap) {
         state.grid_picked = Some(picked);
     }
@@ -1982,13 +2024,14 @@ const WORKFLOW_MENU: f32 = 96.0;
 /// The toolbar's workflow menu: its button shows the mode, its menu offers the four modes and,
 /// under a divider, a submenu per workflow setting with its choices. A pick is left in `state`
 /// for the window, which keeps it in the keymap.
-fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state: &mut PianoRollState) {
+fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state: &mut PianoRollState) -> Rect {
     use crate::keymap::Preset;
     use crate::workflow::{Pick, Setting};
     let mode = keymap.preset();
     let current = keymap.workflow();
     let font = theme::ui_font(theme::TEXT_SMALL);
     let mut picked = None;
+    let mut shown = rect;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
         let text = egui::RichText::new(format!("{}   ", mode.name())).font(font.clone()).color(theme::text_value());
         let menu = ui.menu_button(text, |ui| {
@@ -2028,11 +2071,13 @@ fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state:
         let label = format!("Workflow {}", mode.name());
         menu_arrow(ui, menu.response.rect, theme::text_value());
         menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        shown = menu.response.rect;
         menu.response.on_hover_text("How clicks, right-clicks and double-clicks work: a preset, or Custom");
     });
     if picked.is_some() {
         state.workflow_picked = picked;
     }
+    shown
 }
 
 /// The toolbar's icon buttons as they are painted this frame: the surface they are drawn on, the
@@ -2116,9 +2161,11 @@ fn effect(
     free: bool,
 ) -> Effect {
     match gesture {
-        Gesture::Move { from, .. } => {
+        Gesture::Move { from, grabbed, .. } => {
             let raw = f64::from((now.x - from.x) / layout.beat_width);
-            let keys = (-(now.y - from.y) / layout.key_height).round() as i32;
+            let rows = (-(now.y - from.y) / layout.key_height).round() as i32;
+            // Folded, the grabbed note steps through the shown rows; the rest move as far.
+            let keys = clip.notes.get(*grabbed).map_or(rows, |n| layout.rows.semitones(n.key, rows));
             let (beats, keys) = move_delta(raw, keys, chosen, grid, free);
             Effect::Move(beats, keys)
         }
@@ -2372,21 +2419,21 @@ fn velocity_lane_height(room: f32, key_height: f32, wanted: Option<f32>) -> f32 
 }
 
 /// A newly shown clip: the whole clip fits the `grid`'s width, and its notes are in the middle.
-fn fit(state: &mut PianoRollState, grid: Rect, clip: &PianoClip) {
+fn fit(state: &mut PianoRollState, grid: Rect, clip: &PianoClip, rows: &KeyRows) {
     let width = grid.width().max(1.0);
     state.beat_width = (width / clip.length.max(1.0) as f32).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
     state.scroll.x = 0.0;
     state.scrolled_by_hand = false;
-    centre_notes(state, grid.height(), clip);
+    centre_notes(state, grid.height(), clip, rows);
 }
 
 /// Scrolls the key rows so the middle of the clip's lowest and highest note (C3 for an empty
-/// clip) is in the middle of a grid `height` tall.
-fn centre_notes(state: &mut PianoRollState, height: f32, clip: &PianoClip) {
+/// clip) is in the middle of a grid `height` tall, counting the rows `rows` shows.
+fn centre_notes(state: &mut PianoRollState, height: f32, clip: &PianoClip, rows: &KeyRows) {
     let (low, high) = clip.notes.iter().fold((u8::MAX, 0u8), |(lo, hi), n| (lo.min(n.key), hi.max(n.key)));
-    let middle = if low <= high { (f32::from(low) + f32::from(high)) / 2.0 } else { 60.0 };
+    let middle = if low <= high { rows.middle_row(low, high) } else { rows.middle_row(60, 60) };
     let height = height.max(1.0);
-    state.scroll.y = (127.0 - middle) * state.key_height + state.key_height / 2.0 - height / 2.0;
+    state.scroll.y = middle * state.key_height + state.key_height / 2.0 - height / 2.0;
     state.centred_for = height;
 }
 
@@ -2522,13 +2569,14 @@ fn draw(
 
     // Rows: black keys darker, a stronger line under each C.
     painter.rect_filled(layout.grid, 0.0, theme::window_background());
-    for key in first_key..=last_key {
+    for key in (first_key..=last_key).filter(|k| layout.rows.shows(*k)) {
         let top = layout.y_of(key);
         let row = Rect::from_min_max(
             Pos2::new(layout.grid.left(), top),
             Pos2::new(layout.grid.right(), top + layout.key_height),
         );
-        let fill = if is_black(key) { theme::window_background() } else { theme::panel_background() };
+        // With a scale, its keys are lighter; without one, the white keys are (› Scale and key).
+        let fill = scale_view::row_fill(clip.scale, key, is_black(key));
         grid_painter.rect_filled(row, 0.0, fill);
         let line = if key % 12 == 0 { theme::border_strong() } else { theme::border() };
         grid_painter.hline(row.x_range(), row.bottom() - 0.5, theme::hairline(line));
@@ -2712,7 +2760,7 @@ fn draw(
     // The key column: keys, every C named.
     let key_painter = painter.with_clip_rect(layout.keys);
     key_painter.rect_filled(layout.keys, 0.0, theme::window_background());
-    for key in first_key..=last_key {
+    for key in (first_key..=last_key).filter(|k| layout.rows.shows(*k)) {
         let top = layout.y_of(key);
         let row = Rect::from_min_max(
             Pos2::new(layout.keys.left(), top),
@@ -2728,7 +2776,9 @@ fn draw(
             theme::control_background()
         };
         key_painter.rect_filled(row.shrink2(Vec2::new(0.0, 0.5)), 0.0, fill);
-        if key % 12 == 0 && layout.key_height >= 8.0 {
+        scale_view::key_mark(&key_painter, clip.scale, key, row);
+        // Folded, every row is named: the keys beside each other are no longer neighbours.
+        if (key % 12 == 0 || layout.rows.folded()) && layout.key_height >= 8.0 {
             widgets::text_in(
                 &key_painter,
                 row.shrink2(Vec2::new(3.0, 0.0)),
@@ -2950,7 +3000,69 @@ mod tests {
             grid_follows: false,
             shape: ClipShape { offset: 0.0, length: 8.0, loop_range: None, room: None },
             ghosts: Ghosts::default(),
+            scale: None,
         }
+    }
+
+    /// A layout 200 points tall at 10 points a row, scrolled to the top, with `rows`.
+    fn folded_layout(rows: KeyRows) -> Layout {
+        let grid = Rect::from_min_size(Pos2::new(36.0, 24.0), Vec2::new(400.0, 200.0));
+        Layout {
+            keys: grid,
+            ruler: grid,
+            grid,
+            lane: grid,
+            scroll: Vec2::ZERO,
+            beat_width: 40.0,
+            key_height: 10.0,
+            rows,
+        }
+    }
+
+    #[test]
+    fn a_fold_maps_heights_to_the_shown_keys_and_back() {
+        use suhina_engine::model::ScaleMode;
+        let mut c = clip(vec![note(0.0, 1.0, 40), note(1.0, 1.0, 64), note(2.0, 1.0, 60)]);
+        // Fold: three rows, highest first; every height in a row is its key and back.
+        let layout = folded_layout(scale_view::rows(&c, Fold::Notes));
+        assert_eq!(layout.rows.len(), 3);
+        for (row, key) in [(0, 64), (1, 60), (2, 40)] {
+            let y = 24.0 + row as f32 * 10.0;
+            assert_eq!(layout.y_of(key), y);
+            assert_eq!(layout.key_at(y + 5.0), Some(key));
+        }
+        assert_eq!(layout.key_at(24.0 + 35.0), None, "below the last row is no key");
+        assert!(layout.y_of(62) < -1000.0, "a hidden key is far above the grid");
+        // A note is hit and a double-click adds on the row's key.
+        let state = PianoRollState::default();
+        let grid = note_grid(&c, 40.0);
+        assert_eq!(note_at(&layout, &c.notes, Pos2::new(36.0 + 100.0, 24.0 + 15.0)).map(|(i, _)| i), Some(2));
+        let added = state.new_note(&layout, &c, grid, Pos2::new(36.0 + 140.0, 24.0 + 25.0), false).unwrap();
+        assert_eq!(added.key, 40);
+        // A drag up one row from 40 moves by the 20 semitones to 60.
+        let moved = effect(
+            &Gesture::Move { from: Pos2::new(60.0, 50.0), grabbed: 0, copy: false },
+            Pos2::new(60.0, 40.0),
+            &layout,
+            &c,
+            &c.notes[..1],
+            grid,
+            false,
+        );
+        assert!(matches!(moved, Effect::Move(_, 20)), "{moved:?}");
+        // Fold to scale: C major's keys and every key with a note; without a scale, every key.
+        assert_eq!(scale_view::rows(&c, Fold::Scale).len(), 128);
+        c.scale = Scale::new(0, ScaleMode::Major);
+        let rows = scale_view::rows(&c, Fold::Scale);
+        assert!(rows.shows(60) && rows.shows(62) && !rows.shows(61));
+        assert!(rows.shows(40), "E is in C major");
+        c.notes.push(note(3.0, 1.0, 61));
+        assert!(scale_view::rows(&c, Fold::Scale).shows(61), "a note outside the scale keeps its row");
+        assert_eq!(scale_view::rows(&c, Fold::Off).len(), 128);
+        // Unfolded, the rows are the keys as they always were.
+        let layout = folded_layout(KeyRows::default());
+        assert_eq!(layout.y_of(127), 24.0);
+        assert_eq!(layout.key_at(24.0 + 67.0 * 10.0 + 1.0), Some(60));
     }
 
     #[test]

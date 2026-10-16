@@ -47,6 +47,7 @@ fn project() -> Project {
             }]),
         }],
         extensions: Extensions::default(),
+        scale: None,
     };
     Project {
         tracks: vec![Track {

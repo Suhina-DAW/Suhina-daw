@@ -252,6 +252,7 @@ mod tests {
                     }]),
                 }],
                 extensions: Extensions::default(),
+                scale: None,
             }],
             launcher: Launcher {
                 mappings: Vec::new(),

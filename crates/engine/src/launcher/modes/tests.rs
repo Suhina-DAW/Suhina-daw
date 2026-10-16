@@ -223,6 +223,7 @@ fn legato_audio_continues_from_the_replaced_clips_position() {
             }),
         }],
         extensions: Extensions::default(),
+        scale: None,
     };
     let render_with = |legato: bool| {
         let mut second = clip(2, 2.0, true);

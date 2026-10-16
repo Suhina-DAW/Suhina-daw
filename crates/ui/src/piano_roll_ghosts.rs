@@ -414,9 +414,10 @@ fn round(beat: f64) -> f64 {
 /// Playing together"); its menu offers
 /// None, Playing together, This track and, in a submenu, every other MIDI clip. A pick changes
 /// `source` at once: window state, not a command.
-pub(crate) fn menu(ui: &mut Ui, rect: Rect, ghosts: &Ghosts, source: &mut GhostSource) {
+pub(crate) fn menu(ui: &mut Ui, rect: Rect, ghosts: &Ghosts, source: &mut GhostSource) -> Rect {
     let font = theme::ui_font(theme::TEXT_SMALL);
     let mut picked = None;
+    let mut shown = rect;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
         // The button is short, so it fits beside the workflow menu; it is dimmed while nothing
         // shows, and its tooltip and accessible label name what does.
@@ -457,6 +458,7 @@ pub(crate) fn menu(ui: &mut Ui, rect: Rect, ghosts: &Ghosts, source: &mut GhostS
         let label = format!("Ghost notes {}", source.name(ghosts));
         crate::piano_roll::menu_arrow(ui, menu.response.rect, color);
         menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        shown = menu.response.rect;
         menu.response.on_hover_text(format!(
             "Ghost notes: {}. Notes of other clips drawn faintly behind this clip's notes",
             source.name(ghosts)
@@ -465,6 +467,7 @@ pub(crate) fn menu(ui: &mut Ui, rect: Rect, ghosts: &Ghosts, source: &mut GhostS
     if let Some(picked) = picked {
         *source = picked;
     }
+    shown
 }
 
 #[cfg(test)]

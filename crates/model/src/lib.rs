@@ -20,8 +20,10 @@ pub use tempo::{
 
 mod launch;
 mod mapping;
+mod scale;
 pub use launch::{LaunchMode, LaunchQuantization, LaunchSettings};
 pub use mapping::{KEY_NAME_MAX, LaunchMapping, MappingSource, MappingTarget};
+pub use scale::{ROOT_NAMES, Scale, ScaleMode};
 
 /// Identifies a [`Track`] within a project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -51,6 +53,9 @@ pub struct Project {
     pub arrangement: Arrangement,
     pub launcher: Launcher,
     pub extensions: Extensions,
+    /// The scale a new MIDI clip takes, if any; clips made before it was set keep theirs
+    /// ([ADR 0001](../../docs/decisions/0001-daw-neutral-model.md) › Amendment: clip scales).
+    pub default_scale: Option<Scale>,
 }
 
 /// The song's tempo and time signature: `tempo_bpm` and `time_signature` hold from the start,
@@ -321,6 +326,9 @@ pub struct ClipContent {
     pub length: f64,
     pub lanes: Vec<ContentLane>,
     pub extensions: Extensions,
+    /// The scale the notes are written in, if any: the piano roll marks its keys
+    /// ([ADR 0001](../../docs/decisions/0001-daw-neutral-model.md) › Amendment: clip scales).
+    pub scale: Option<Scale>,
 }
 
 /// One lane of a clip content. `target` is `None` when the lane plays on whichever track the
@@ -1158,6 +1166,7 @@ mod tests {
                     length: 4.0,
                     lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note(0.0, 36)]) }],
                     extensions: Extensions::default(),
+                    scale: None,
                 },
                 ClipContent {
                     id: ContentId(2),
@@ -1165,6 +1174,7 @@ mod tests {
                     length: 4.0,
                     lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note(1.0, 38)]) }],
                     extensions: Extensions::default(),
+                    scale: None,
                 },
             ],
             arrangement: Arrangement {
@@ -1204,6 +1214,7 @@ mod tests {
                 ContentLane { target: Some(TrackId(2)), data: LaneData::Notes(vec![note(1.0, 38), note(3.0, 38)]) },
             ],
             extensions: Extensions::default(),
+            scale: None,
         };
         let project = Project {
             tracks: vec![track(1, 1), track(2, 2)],
@@ -1314,6 +1325,7 @@ mod tests {
             length: 4.0,
             lanes: Vec::new(),
             extensions: Extensions::default(),
+            scale: None,
         };
         let project = Project {
             contents: vec![content],

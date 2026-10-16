@@ -76,6 +76,7 @@ fn sending(level: f64, pre_fader: bool, return_devices: Vec<Device>) -> Project 
                 data: LaneData::Notes(vec![crate::chain_tests::note(0.0, 1.0, 69)]),
             }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip] }],

@@ -99,6 +99,7 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
             length: CLIP_BEATS,
             lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: (1..=TRACKS)

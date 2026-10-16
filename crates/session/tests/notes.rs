@@ -33,7 +33,14 @@ fn clip(content: u32, start: f64) -> Clip {
 }
 
 fn content(id: u32, lanes: Vec<ContentLane>) -> ClipContent {
-    ClipContent { id: ContentId(id), name: format!("C{id}"), length: 4.0, lanes, extensions: Extensions::default() }
+    ClipContent {
+        id: ContentId(id),
+        name: format!("C{id}"),
+        length: 4.0,
+        lanes,
+        extensions: Extensions::default(),
+        scale: None,
+    }
 }
 
 /// Track 1 "Keys" has, on the arrangement, a MIDI clip with three notes (index 0), an empty MIDI

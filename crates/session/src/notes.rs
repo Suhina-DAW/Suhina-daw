@@ -110,10 +110,21 @@ pub(crate) fn edit_notes(
     params: &Value,
     edit: impl FnOnce(&mut Vec<Note>) -> Result<Value, CommandError>,
 ) -> Result<Value, CommandError> {
+    copy_on_write(p, params, |p| edit(notes_mut(p, params)?))
+}
+
+/// Runs `edit`, which changes the content of the clip `params` names, with the copy on write
+/// [`edit_notes`] describes: a content other clips also play is copied for this clip when the edit
+/// changes it, and a shared pattern stays shared.
+pub(crate) fn copy_on_write(
+    p: &mut Project,
+    params: &Value,
+    edit: impl FnOnce(&mut Project) -> Result<Value, CommandError>,
+) -> Result<Value, CommandError> {
     let (at, id, _) = locate(p, params)?;
     let original =
         p.content(id).filter(|c| c.lanes.iter().all(|l| l.target.is_none()) && placements(p, id) > 1).cloned();
-    let value = edit(notes_mut(p, params)?)?;
+    let value = edit(p)?;
     let Some(original) = original else { return Ok(value) };
     let new_id = p
         .contents
@@ -139,7 +150,7 @@ fn plays_on(lane: &ContentLane, track: TrackId) -> bool {
     lane.target.is_none_or(|t| t == track)
 }
 
-fn check_midi(p: &Project, content: ContentId) -> Result<(), CommandError> {
+pub(crate) fn check_midi(p: &Project, content: ContentId) -> Result<(), CommandError> {
     let content = p.content(content).ok_or("the clip's content is missing")?;
     if content.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))) {
         return Err("an audio clip has no notes; give a MIDI clip".into());

@@ -94,6 +94,7 @@ fn project(length: f64, devices: Vec<Device>) -> Project {
             length,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![note]) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {

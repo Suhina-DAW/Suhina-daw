@@ -30,6 +30,7 @@ pub mod piano_roll;
 pub mod piano_roll_ghosts;
 pub mod piano_roll_grid;
 pub mod piano_roll_ruler;
+pub mod piano_roll_scale;
 pub mod pick;
 pub mod project_dialog;
 pub mod sample_map;

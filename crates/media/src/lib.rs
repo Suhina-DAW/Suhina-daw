@@ -272,6 +272,7 @@ mod tests {
                     }),
                 }],
                 extensions: Extensions::default(),
+                scale: None,
             }],
             ..Project::default()
         }

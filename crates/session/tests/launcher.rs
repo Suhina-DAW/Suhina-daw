@@ -57,6 +57,7 @@ fn project() -> Project {
             }]),
         }],
         extensions: Extensions::default(),
+        scale: None,
     };
     let clip = |content: u32, enabled: bool| Clip {
         content: ContentId(content),

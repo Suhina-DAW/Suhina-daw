@@ -1358,6 +1358,7 @@ mod tests {
                 length: 4.0,
                 lanes,
                 extensions: Extensions::default(),
+                scale: None,
             }],
             arrangement: Arrangement {
                 lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips }],

@@ -208,6 +208,7 @@ fn everything() -> Project {
                     ]),
                 }],
                 extensions: ext("MidiClip"),
+                scale: None,
             },
             ClipContent {
                 id: ContentId(2),
@@ -233,6 +234,7 @@ fn everything() -> Project {
                     }),
                 }],
                 extensions: Extensions::default(),
+                scale: None,
             },
         ],
         arrangement: Arrangement {
@@ -283,6 +285,7 @@ fn everything() -> Project {
             }],
         },
         extensions: ext("LiveSet"),
+        default_scale: None,
     }
 }
 
@@ -781,4 +784,64 @@ fn a_missing_audio_file_is_found_by_its_absolute_path() {
     let LaneData::Audio(region) = &project.contents[1].lanes[0].data else { return };
     assert_eq!(region.file, "kept.wav");
     let _clean = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn clip_scales_and_the_default_scale_survive_a_round_trip() {
+    let mut project = everything();
+    let d_dorian = Scale::new(2, ScaleMode::Dorian).unwrap();
+    let f_sharp_blues = Scale::new(6, ScaleMode::Blues).unwrap();
+    if let Some(content) = project.contents.first_mut() {
+        content.scale = Some(d_dorian);
+    }
+    project.default_scale = Some(f_sharp_blues);
+    let text = to_json(&project);
+    let written: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(written["project"]["contents"][0]["scale"], json!({ "root": 2, "mode": "dorian" }));
+    assert_eq!(written["project"]["default_scale"], json!({ "root": 6, "mode": "blues" }));
+    // Only the content with a scale names one.
+    assert_eq!(text.matches(r#""scale""#).count(), 1, "{text}");
+    assert_eq!(from_json(&text), Ok(project));
+    for mode in ScaleMode::ALL {
+        let one = Project { default_scale: Scale::new(11, mode), ..Project::default() };
+        assert_eq!(from_json(&to_json(&one)), Ok(one), "{mode:?}");
+    }
+}
+
+#[test]
+fn a_project_without_scales_is_written_as_before() {
+    // No content has a scale and there is no default: neither key appears, so the file is the
+    // one a version before scales wrote, and it reads back with none.
+    let text = to_json(&everything());
+    assert!(!text.contains(r#""scale""#) && !text.contains(r#""default_scale""#), "{text}");
+    let read = from_json(&text).unwrap();
+    assert!(read.default_scale.is_none() && read.contents.iter().all(|c| c.scale.is_none()));
+}
+
+#[test]
+fn a_bad_scale_is_an_error_naming_where_it_is() {
+    let with = |project: &str| from_json(&format!(r#"{{ "format": "suhina", "version": 1, "project": {project} }}"#));
+    let content =
+        |scale: &str| format!(r#"{{ "contents": [ {{ "id": 1, "length": 4, "lanes": [], "scale": {scale} }} ] }}"#);
+    for (bad, says) in [
+        (content(r#"{ "root": 12, "mode": "major" }"#), "project.contents[0].scale.root: expected 0 to 11, got 12"),
+        (content(r#"{ "root": -1, "mode": "major" }"#), "project.contents[0].scale.root"),
+        (content(r#"{ "root": "C", "mode": "major" }"#), "project.contents[0].scale.root"),
+        (content(r#"{ "mode": "major" }"#), "project.contents[0].scale.root"),
+        (content(r#"{ "root": 0, "mode": "Major" }"#), r#"project.contents[0].scale.mode: unknown scale mode "Major""#),
+        (content(r#"{ "root": 0, "mode": "wholeTone" }"#), "unknown scale mode"),
+        (content(r#"{ "root": 0 }"#), "project.contents[0].scale.mode"),
+        (content(r#"{ "root": 0, "mode": 3 }"#), "project.contents[0].scale.mode"),
+        (content(r#""C major""#), "project.contents[0].scale: expected an object"),
+        (r#"{ "default_scale": { "root": 99999999999, "mode": "minor" } }"#.to_string(), "project.default_scale.root"),
+        (r#"{ "default_scale": [0, "minor"] }"#.to_string(), "project.default_scale: expected an object"),
+    ] {
+        match with(&bad) {
+            Err(e) => assert!(e.0.contains(says), "{bad}: {e}"),
+            Ok(_) => panic!("{bad} was read"),
+        }
+    }
+    // `null` is the same as no scale.
+    let read = with(&content("null")).unwrap();
+    assert_eq!(read.contents.first().and_then(|c| c.scale), None);
 }

@@ -1,6 +1,6 @@
 ---
 description: Functional spec of the MIDI clip editor (piano roll): layout, toolbar size and icons, the six tools and the Mute tool, the MIDI tools column, grid and snapping, zoom, drawing, selecting, moving, resizing, velocity, quantise, scales, ghost notes, slicing, a playable key column, chords, shortcuts and keymap presets, and the note.* and preview.* commands
-read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, grid menu, adaptive grid, fixed grid, snap to grid, snap off, triplet grid, narrow grid, widen grid, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes, ruler, loop row, loop region, loop handles, loop start, loop end, clip loop, start marker, end marker, clip length, clip offset, clip.setLoop, clip.setLength, clip.setStart, ruler drag zoom, ruler scroll, zoom to selection, zoom to clip, Z, Shift+Z, notes outside the loop, shaded notes, left edge, resize the start, startBy, Ctrl+drag copies, copy by dragging, Alt+drag velocity, velocity line, draw a line in the velocity lane, velocities, velocity lane height, lane top edge, audition, hear notes while editing, preview.noteOn keys, ghost menu, ghost notes of other clips, notes of other clips, playing together, write a bass line against the chords, faint notes behind
+read_when: piano roll, clip editor, toolbar, toolbar size, toolbar icons, tool icons, draw tool, paint tool, erase tool, slice tool, mute tool, muted note, note.setMuted, MIDI tools column, transpose, humanise, humanize, fit to scale, invert, reverse, legato, stretch, randomise velocity, ramp velocity, B key, number keys choose a tool, right button and wheel, Shift and Draw, pulled to the top, maximise piano roll, piano roll grid value, grid menu, adaptive grid, fixed grid, snap to grid, snap off, triplet grid, narrow grid, widen grid, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, MIDI editor, note editing, draw notes, select notes, move notes, resize notes, velocity lane, velocity, grid, snapping, Alt off-grid, zoom, detail area height, scale highlighting, fold, ghost notes, quantise, quantize, inline quantise, clip column, selection info, slice, glue, chords, strum, playable keyboard, key column plays, preview.noteOn, preview.noteOff, note.add, note.delete, note.move, note.resize, note.setVelocity, note.split, note.list, note.quantize, Ctrl+U, note.copy, note.cut, note.paste, note.duplicate, copy paste notes, arrow keys, select all notes, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, duplicate key, workflow mode, workflow menu, Custom mode, double-click, double-click adds a note, double-click deletes a note, triple click, least height, short detail area, close the piano roll, hide editor, close button, collapse the detail area, notes in view, centred notes, ruler, loop row, loop region, loop handles, loop start, loop end, clip loop, start marker, end marker, clip length, clip offset, clip.setLoop, clip.setLength, clip.setStart, ruler drag zoom, ruler scroll, zoom to selection, zoom to clip, Z, Shift+Z, notes outside the loop, shaded notes, left edge, resize the start, startBy, Ctrl+drag copies, copy by dragging, Alt+drag velocity, velocity line, draw a line in the velocity lane, velocities, velocity lane height, lane top edge, audition, hear notes while editing, preview.noteOn keys, ghost menu, ghost notes of other clips, notes of other clips, playing together, write a bass line against the chords, faint notes behind, Scale menu, clip scale, clip.setScale, clip.scale, project.setDefaultScale, default scale, scale rows, key column mark, Fold, Fold to scale, folded rows
 type: spec
 status: draft
 last_verified: 2026-10-16
@@ -10,9 +10,11 @@ covers:
   - crates/ui/src/piano_roll_ruler.rs
   - crates/ui/src/piano_roll_gestures.rs
   - crates/ui/src/piano_roll_ghosts.rs
+  - crates/ui/src/piano_roll_scale.rs
   - crates/ui/src/midi_tools.rs
   - crates/ui/src/detail_view.rs
   - crates/session/src/notes.rs
+  - crates/session/src/scales.rs
   - crates/session/src/note_tools.rs
   - crates/session/src/preview.rs
   - crates/session/src/clip_shape.rs
@@ -77,11 +79,16 @@ bottom:
    [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
    [#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the tools, then the note
    clipboard, then the MIDI tools column's toggle and the **Audition** button, then the
-   **workflow menu** (› Workflow modes) and the **ghost menu** (› Ghost notes), and at the right
-   end the piano roll's grid
+   **workflow menu** (› Workflow modes), the **ghost menu** (› Ghost notes) and the **Scale
+   menu** (› Scale and key, [#347](https://github.com/suhina-daw/suhina-daw/issues/347)), and at
+   the right end the piano roll's grid
    value (› Grid and snapping), and after it, at the very end, the **×** that hides the editor
-   (› Least height and closing). **Later:** tabs for Notes, Envelopes and Expression; Fold; Scale
-   with the scale name.
+   (› Least height and closing). Each of the three menus takes the width its button needs, so the
+   next starts right after it. A menu is shown only while there is room for it with the grid value
+   still after it, and is left out otherwise; the grid value's **Grid** caption is left out first
+   when the Scale menu needs the room (at 1280 px with the browser closed and the MIDI tools column
+   open, all three menus and the grid value show, without the caption). **Later:** tabs for Notes,
+   Envelopes and Expression.
 
    The tools are **Select**, **Draw**, **Paint**, **Erase**, **Slice** and **Mute** (› Drawing
    notes, › Muting), each an
@@ -311,8 +318,22 @@ pull up.
   the end of the part it plays), both within the zoom range and leaving the key rows as they are.
   Both keys work after a click in the piano roll (`pianoRoll.zoomSelection`, `pianoRoll.zoomClip`)
   and change the view only, not the project.
-- **Later:** dragging the key column zooms key height. Fold (show only the keys that have notes)
-  and Fold to scale come with scales.
+- **Built ([#347](https://github.com/suhina-daw/suhina-daw/issues/347)):** **Fold** and **Fold
+  to scale**, in the Scale menu (› Scale and key), show fewer key rows. Fold shows only the keys
+  that have notes in the clip (every key while it has none); Fold to scale shows the keys of the
+  clip's scale and any key that has a note, so no note is ever hidden (greyed out while the clip
+  has no scale). The two are one choice: picking one turns the other off, picking the ticked one
+  again shows every key. The rows sit one under the other with no gap for the keys left out, and
+  every row of the key column is named while folded, since the keys beside each other are no
+  longer neighbours. Everything that turns a height into a key goes through the rows shown: a
+  click or double-click lands on the row's key, painting and the key column play and select that
+  key, and a note dragged up or down steps through the shown rows (the grabbed note lands on the
+  key of the row under the pointer, and the other selected notes move by as many semitones, which
+  may put one on a key that was not shown: its row appears, as Fold shows every key with notes).
+  The arrow keys still move notes by a semitone or an octave. Ghost notes on a key that is not
+  shown are not drawn. Picking a fold centres the notes again. It is window state, kept until
+  Suhina closes and the same for every clip: not a command, not saved, not an undo step.
+- **Later:** dragging the key column zooms key height.
 
 ## Drawing notes
 
@@ -633,11 +654,37 @@ one undo step, so Ctrl+Z (Cmd+Z on macOS) takes back exactly what it did.
 
 ## Scale and key
 
-- **Later ([#347](https://github.com/suhina-daw/suhina-daw/issues/347)):** each clip has a scale (root and mode; where the model keeps it is decided with
-  [ADR 0001](../decisions/0001-daw-neutral-model.md)); the piano roll marks the keys in the scale (lighter rows, a mark on the key column) and can fold to
-  them. A note drawn with "snap to scale" on lands on the nearest scale key. The project can set
-  a default scale that new clips take. Fit to scale moves notes outside the scale to the nearest
-  key in it.
+**Built ([#347](https://github.com/suhina-daw/suhina-daw/issues/347)).** A MIDI clip can have a
+scale: a root (C to B) and a mode: major, minor, harmonic minor, melodic minor, the church modes
+(dorian, phrygian, lydian, mixolydian, locrian), major and minor pentatonic, and blues. The scale
+belongs to the clip's content ([ADR 0001](../decisions/0001-daw-neutral-model.md) › Amendment:
+clip scales) and is saved with the project; a clip has none until one is set.
+
+- **The Scale menu** in the toolbar, after the ghost menu (› Layout), reads **Scale**, dimmed while
+  the clip has none; its accessible label and its tooltip name the scale ("Scale D dorian", or
+  "Scale off"). Its entries: **Off**; a **Root** submenu ("Root: D") with the twelve roots; a
+  **Mode** submenu ("Mode: Dorian") with the modes; then **Fold** and **Fold to scale** (› Zoom and
+  scroll). The chosen ones are ticked. Off, a root and a mode each run `clip.setScale`, one undo
+  step (Ctrl+Z takes it back): a root keeps the mode the clip has (major when it has none), a mode
+  keeps the root (C when it has none).
+- **The rows of the keys in the scale are lighter** than the others (the root's lighter still),
+  in place of the white-key and black-key rows a clip without a scale shows; each key in the scale
+  has a 2 px mark at the right edge of the key column (the root's brighter). While the clip has a
+  scale, each row of the key column in view is named for readers and tests: "Key E3 in scale", or
+  "Key F3" for a key outside it.
+- **A shared content.** Setting the scale through a clip whose content other clips also play gives
+  that clip its own copy of the content first, as a note edit does (› Coordinates): the other
+  clips keep theirs, and one undo takes back both. A shared pattern stays one content.
+- **The project's default scale** (`project.setDefaultScale`, also in `project.info`) is the
+  scale a new MIDI clip takes: one `clip.create` makes, a recorded take and a MIDI file dropped
+  on a track. Clips that exist keep theirs; a new audio clip has none. There is no control for it
+  in the window yet; agents and the CLI set it.
+- **Fit to scale** (`note.fitToScale`, › Other note tools) fits to the clip's own scale when the
+  call names neither a root nor a scale; the MIDI tools column always names the root and mode in
+  its own fields.
+- **Later:** drawing that snaps to the nearest key of the scale (a toggle); the MIDI tools
+  column's Fit to scale fields following the clip's scale; a control for the default scale;
+  reading a Live Set clip's scale where the file has one.
 
 ## Ghost notes
 
@@ -916,7 +963,7 @@ nothing when it fails.
 | `note.quantize` | clip, `notes?`, `grid`, `amount?`, `ends?` | Moves the starts (with `ends: true` the ends too) of the notes, or of every note when `notes` is left out, towards the nearest line of `grid` (as `launcher.setQuantization` takes it, such as `"1/16"` or `"1/8T"`; not `none`) by `amount` percent, 0 to 100 (default 100); returns the indices and how many moved |
 | `note.setMuted` | clip, `notes`, `muted?` | Mutes them (`muted: true`) or unmutes them (`false`); with `muted` left out each note is flipped. Returns the indices and their state |
 | `note.humanize` | clip, `notes?`, `time?`, `velocity?`, `seed?` | Moves each note's start by up to `time` beats (0 to 1, default 0.02) and its velocity by up to `velocity` MIDI steps (0 to 127, default 8), each a fresh random draw; `seed` makes the same call repeatable; returns the indices |
-| `note.fitToScale` | clip, `notes?`, `root?`, `scale?` | Moves each note to the nearest key of `scale` (`major`, `minor`, `harmonicMinor`, `melodicMinor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `majorPentatonic`, `minorPentatonic`, `blues`; default `major`) over `root` (a key name such as `"C"`, `"F#"`, or 0 to 11; default `"C"`); a tie goes to the lower key; returns the indices and how many moved |
+| `note.fitToScale` | clip, `notes?`, `root?`, `scale?` | Moves each note to the nearest key of `scale` (`major`, `minor`, `harmonicMinor`, `melodicMinor`, `dorian`, `phrygian`, `lydian`, `mixolydian`, `locrian`, `majorPentatonic`, `minorPentatonic`, `blues`; default `major`) over `root` (a key name such as `"C"`, `"F#"`, or 0 to 11; default `"C"`); with neither `root` nor `scale`, the clip's own scale when it has one; a tie goes to the lower key; returns the indices and how many moved |
 | `note.invert` | clip, `notes?` | Mirrors the keys around the middle of the range the notes cover (the lowest key plus the highest, halved, rounded down); returns the indices |
 | `note.reverse` | clip, `notes?` | Turns the notes round in time inside their own span (the earliest start to the latest end): each note's start becomes `span end − its end`, its length unchanged; returns the indices |
 | `note.legato` | clip, `notes?` | Makes each note last until the next note **of its own key** starts, or leaves it when nothing follows; never shorter than a hundredth of a beat; returns the indices and how many changed |
@@ -928,6 +975,9 @@ nothing when it fails.
 | `note.paste` | clip, `time?` | Adds the copied notes, the first at `time` (default: right after the copied notes); returns their indices |
 | `note.duplicate` | clip, `notes`, `beats?`, `semitones?` | Adds a copy right after the notes' end; with `beats` or `semitones`, that far from the notes instead (a copy made by dragging; the copies keep length, velocity and mute). Returns the copies' indices |
 | `note.split` | clip, `notes`, `at` | Splits each named note that spans the beat `at` into two at `at`; a note that starts or ends at `at` is left alone; returns the indices the splits made |
+| `clip.scale` | clip | The clip's scale, `{ "root": "D", "mode": "dorian" }` or `null`, and the project's `default_scale` the same way; changes nothing |
+| `clip.setScale` | clip, `root?`, `mode?`, `off?` | Sets the clip's scale: `root` (a key name such as `"C"`, `"F#"` or `"Bb"`, or 0 to 11) and `mode` (one of the names `note.fitToScale` takes as `scale`), the one left out kept from the scale the clip has (C, major when it has none); `off: true` clears it, and is an error with `root` or `mode`; one of them is needed. A content other clips play is copied for this clip first (› Scale and key). Returns the scale and whether it changed; the same scale again changes nothing and is no undo step |
+| `project.setDefaultScale` | `root?`, `mode?`, `off?` | The same for the scale new MIDI clips take; clips that exist keep theirs |
 | `clip.setLoop` | clip, `loop?`, `start?`, `end?` | With `loop` alone: `true` turns the loop on (keeping the loop the clip has, else from 0 over its length), `false` off. With `start` and `end` (content beats, end after start), sets the loop and turns it on; while the clip loops, one of them alone moves that end. `loop: false` with `start` or `end` is an error. Any clip, MIDI or audio |
 | `clip.setLength` | clip, `length` | How long the clip plays, in beats (above 0, at most 120 000). An arrangement clip keeps its start and may not run into the next clip on its lane (the nearest that starts after it); fades are shortened to fit. Any clip |
 | `clip.setStart` | clip, `offset` | The start marker, in content beats (0 to 120 000). A clip that does not loop keeps its end marker, so its length changes by as much (and an arrangement clip may not run into the next clip); a looping clip keeps its length, and the marker must be before the loop's end. Any clip |
