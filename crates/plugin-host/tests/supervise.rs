@@ -402,9 +402,17 @@ fn close_editor_window() {
 #[cfg(not(any(windows, target_os = "linux")))]
 fn close_editor_window() {}
 
+/// Whether the test can close the host's window from here, as the user would: another
+/// process's window cannot be reached on macOS.
+fn user_closes_windows() -> bool {
+    cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
+}
+
 /// Whether editors can open here: on Windows, and on Linux with an X server.
 fn editors_open_here() -> bool {
-    cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
+    cfg!(windows)
+        || cfg!(target_os = "macos")
+        || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
 }
 
 #[test]
@@ -421,13 +429,19 @@ fn an_editor_opens_in_a_window_and_closes() {
         plugin.close_editor().unwrap();
         assert!(!plugin.editor_open());
         // And it opens again after being closed; when the user closes its window, the host
-        // says so unasked.
+        // says so unasked. (macOS: another process's window cannot be reached from the test,
+        // so there the user's close is a hand check with a real plug-in.)
         assert_eq!(plugin.open_editor().unwrap(), (300, 200));
-        close_editor_window();
-        let deadline = Instant::now() + PATIENT;
-        while plugin.editor_open() {
-            assert!(Instant::now() < deadline, "the closed window was not reported");
-            std::thread::sleep(Duration::from_millis(10));
+        if user_closes_windows() {
+            close_editor_window();
+            let deadline = Instant::now() + PATIENT;
+            while plugin.editor_open() {
+                assert!(Instant::now() < deadline, "the closed window was not reported");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        } else {
+            plugin.close_editor().unwrap();
+            assert!(!plugin.editor_open());
         }
     } else {
         assert!(matches!(opened, Err(PluginError::Host(_))), "{opened:?}");
@@ -447,7 +461,9 @@ fn an_editor_opens_in_a_window_and_closes() {
 }
 
 /// An editor asked for embedded opens as a child inside the window the engine names, hidden
-/// until placed; the engine learns its size, and closing it takes the child away.
+/// until placed; the engine learns its size, and closing it takes the child away. macOS cannot
+/// attach a view of the host's process to another process's window: the embedded open is
+/// refused with the clear error, and a floating one works instead.
 #[test]
 fn an_editor_embeds_in_the_window_the_engine_names() {
     use common::{ParentWindow, soon};
@@ -458,6 +474,18 @@ fn an_editor_embeds_in_the_window_the_engine_names() {
     }
     let parent = ParentWindow::open();
     let (mut plugin, mut audio) = start("test:vst3");
+    if !common::embeds_editors_here() {
+        assert!(
+            matches!(plugin.open_editor_embedded(parent.id()), Err(PluginError::Host(why)) if why.contains("window of its own")),
+            "the embedded open says why it cannot"
+        );
+        assert!(!plugin.editor_open());
+        assert_eq!(plugin.open_editor().unwrap(), (300, 200), "a floating editor still opens");
+        assert_eq!(block(&mut audio, PATIENT), (Outcome::Done, 0.125));
+        plugin.close_editor().unwrap();
+        assert!(!plugin.editor_open());
+        return;
+    }
     assert_eq!(plugin.open_editor_embedded(parent.id()).unwrap(), (300, 200));
     assert!(plugin.editor_open());
     assert_eq!(plugin.editor_size(), Some((300, 200)));

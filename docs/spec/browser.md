@@ -3,7 +3,7 @@ description: How the browser behaves: places, categories, search, the tree, prev
 read_when: browser, library, samples, drag from the browser, drop files, preview, audition, search, folders, pinned, recent, colour tags, track.add, clip.addFiles, library commands, preview.play, MIDI file import, .mid, presets, .syx, .sd, new track, empty area
 type: spec
 status: draft
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/library/**
   - crates/media/src/midi.rs
@@ -417,9 +417,11 @@ the user chooses the browser's folders ([`mcp.md`](../mcp.md)).
 
 ## Not decided yet
 
-- Loading presets of the other built-in effects and instruments (stock presets and their format:
-  [ADR 0014](../decisions/0014-stock-presets.md)), and presets of plug-ins (CLAP preset
-  discovery, VST3 presets).
+- Loading the shared JSON preset format for built-in and `.sd` devices, and saving user presets;
+  the format and `.sd` compatibility rules are decided in [ADR 0014](../decisions/0014-stock-presets.md),
+  but the loader and browser entries are not implemented. An `.sd` preset applies to an existing
+  device with a matching id and role; it does not install or create the graph.
+- Presets of plug-ins (CLAP preset discovery, VST3 presets).
 - Previewing in time with the project, and hot-swapping a device or sample by double-click.
 - Key detection by analysis.
 - A system file dialog for adding a folder (today a path is typed or a folder dropped).

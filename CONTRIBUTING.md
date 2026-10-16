@@ -16,11 +16,14 @@
   DSP and engine code is tested by rendering offline and comparing against golden files.
 - **Documentation:** a change that alters how something works updates the documents that
   describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
-  *Before you finish a task* lists which document covers what.
+  *Before you finish a task* lists which document covers what. Leave out what `main` writes after
+  the merge: `docs/INDEX.md`, `docs/commands.md`, the parity report's marked parts and figures, and
+  the `last_verified` line of a document you change (it is stamped with the day of the merge).
 - **Parity measurement:** a pull request that adds, changes or removes something a user can do
   updates its coverage in `scripts/parity/score.py` (and `scripts/parity/devices.json` for a
-  built-in effect or instrument), runs `python scripts/parity/update_report.py` and commits the
-  result, in the same pull request. One that moves no coverage writes `Parity: no change` and the
+  built-in effect or instrument) in the same pull request, and leaves the numbers in
+  `docs/research/parity-live-12.md` alone: they are regenerated on `main` after the merge. One
+  that moves no coverage writes `Parity: no change` and the
   reason in its description. CI warns, without failing, when a change to `crates/`, `devices/` or
   `apps/` does neither. `AGENTS.md` › *Before you finish a task* has the rule.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.

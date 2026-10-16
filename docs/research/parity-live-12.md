@@ -20,12 +20,16 @@ everything outside those markers is prose, and it is edited here. The rule that 
 > **A number lives in a marked part. Prose does not quote a number the marks already carry.** If a
 > sentence needs one, the sentence goes inside a marker.
 
-CI runs `update_report.py --check`, so changing the numbers fails a pull request until the marked
-parts are regenerated with it:
+The marked parts are regenerated on `main` after every merge, by the same workflow that writes
+[`docs/INDEX.md`](../INDEX.md) and [`docs/commands.md`](../commands.md)
+([`docs-generated.yml`](../../.github/workflows/docs-generated.yml)), so a pull request changes only
+the inputs and two pull requests never conflict on the numbers. The command count comes from the
+command registry, through `docs/commands.md`. CI checks that the inputs render and the markers are
+whole, not that the marked parts are current:
 
 ```sh
-python scripts/parity/update_report.py          # rewrite the marked parts
-python scripts/parity/update_report.py --check  # what CI runs
+python scripts/parity/update_report.py --check-inputs  # what CI runs on a pull request
+python scripts/parity/update_report.py                 # rewrite the marked parts, to look; not committed
 ```
 
 | To change | Edit |
@@ -36,8 +40,9 @@ python scripts/parity/update_report.py --check  # what CI runs
 | a **new measurement**: the page counts, the section counts, the date, the commit | run `scripts/parity/run.py --pdf <a manual you own>`, then `MEASURED_AT`, `MEASURED_COMMIT`, `MANUAL_CHAPTERS`, `MANUAL_PDF_PAGES` and `SECTIONS` in `score.py` |
 
 The measurement's date and commit appear in the title and on both figures, so a stale measurement is
-visible rather than implied. `last_verified` in the front matter is set by hand: it is the day
-someone last checked this text against the code.
+visible rather than implied. `last_verified` in the front matter is stamped on `main` when a pull
+request changes this text (`scripts/docs.py stamp`; the docs bot's regenerations do not count), and
+set by hand by someone who checks the text against the code without changing it.
 
 This is an internal status measurement, not product text: it names Live and its devices only to
 say what Suhina does and does not have yet (AGENTS.md rule 8 keeps those names out of Suhina's own
@@ -431,8 +436,9 @@ and the build order into a decision; the milestone assignment itself is still op
 The manual is not in the repository, and neither are the numbers it was read for. Two ways to get
 this document and its figures:
 
-**From the numbers already recorded** (no manual needed; this is what a contributor who changed
-`score.py` or `devices.json` runs, and what CI checks):
+**From the numbers already recorded** (no manual needed; this is what the workflow on `main` runs
+after every merge, and what a contributor who changed `score.py` or `devices.json` may run to look
+at the result before leaving it out of the commit):
 
 ```sh
 python scripts/parity/score.py          # the roll-ups, printed
@@ -460,8 +466,8 @@ figures:
 
 **Keeping it current.** Every pull request that adds, changes or removes something a user can do
 updates the coverage it moves in `score.py` (and `devices.json` for a built-in effect or
-instrument) and runs `update_report.py`, in the same pull request; one that moves no coverage says
-`Parity: no change` and why in its description
+instrument), in the same pull request, and leaves the marked parts to `main`; one that moves no
+coverage says `Parity: no change` and why in its description
 ([AGENTS.md › Before you finish a task](../../AGENTS.md#4-before-you-finish-a-task)).
 `scripts/parity/pr_notice.py`, run by
 [`.github/workflows/parity-notice.yml`](../../.github/workflows/parity-notice.yml), warns on a pull

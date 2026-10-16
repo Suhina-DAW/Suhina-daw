@@ -395,9 +395,11 @@ workspace forbids.
     editor (`editor_resized`, unasked); the user cannot drag an embedded one. A floating
     editor is never resized by the panel. Changing the setting closes the open editors and
     opens them again the other way; their state is in the plug-in, so nothing is lost. The
-    choice is shown but does nothing where the window is not a Win32 or X11 one. There editors
-    do not open yet: on macOS the host has no editor windows, and without an X server (`DISPLAY`
-    unset) it cannot open its X11 windows.
+    choice is shown but does nothing where the window is not a Win32 or X11 one. **macOS:**
+    the host's process cannot put a view inside another process's window, so an embedded
+    editor cannot open there: the host reports it and the rack falls back once to a window of
+    the editor's own, whatever the setting says. Without an X server (`DISPLAY` unset) Linux
+    cannot open its X11 windows either.
     An owned or child window shares its input queue with the owner's thread on Windows, so
     the host making one waits for Suhina's window thread; the session therefore opens and
     closes an editor on a thread of its own and the command answers at once (`editor_open:
@@ -435,8 +437,8 @@ workspace forbids.
     editor's frame and CLAP's `posix-fd-support` give it the descriptors it waits on (polled
     without waiting each turn) and timers; CLAP's `timer-support` serves timers on every system.
     Tested in CI under Xvfb with the VST3 test plug-in, floating and embedded in a window the
-    test makes; no real Linux plug-in has been tried yet. Wayland and macOS (floating) come
-    later.
+    test makes; no real Linux plug-in has been tried yet. macOS: floating editors open (the
+    test VST3 through the engine's commands, a real plug-in by hand); Wayland comes later.
 11. **Other architectures later, same protocol:** a 32-bit Windows host, an x86-64 host on Apple
     silicon, Windows plug-ins on Linux through Wine.
 12. **Windows plug-ins on Linux: yabridge first.** Linux has native CLAP and VST3 plug-ins, which

@@ -8,8 +8,16 @@ sections between `<!-- parity:begin key -->` and `<!-- parity:end -->` are writt
 `scripts/parity/score.py` and `scripts/parity/devices.json`, so the numbers cannot rot, and
 everything outside the markers is never touched.
 
-    python scripts/parity/update_report.py           # rewrite the marked sections
-    python scripts/parity/update_report.py --check    # what CI runs: non-zero when it would change
+    python scripts/parity/update_report.py                 # rewrite the marked sections
+    python scripts/parity/update_report.py --check-inputs  # what CI runs on a pull request
+    python scripts/parity/update_report.py --check          # non-zero when it would change
+
+The marked sections are written on main after every merge (.github/workflows/docs-generated.yml),
+like docs/INDEX.md and docs/commands.md, so pull requests change only the inputs (`CHAPTERS` in
+score.py, devices.json) and never conflict on the numbers. `--check-inputs` renders every section
+and checks the markers without comparing them with what is committed, so a pull request passes
+whether its marked sections are stale or were regenerated. The command count is read from
+docs/commands.md, which the same workflow writes from the command registry just before.
 
 The rule that keeps the two apart: **a number lives in a marked section, and prose does not quote a
 number the markers already carry.** If a sentence needs one, the sentence goes inside a marker.
@@ -27,6 +35,8 @@ import score
 REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 DOC = REPO / "docs" / "research" / "parity-live-12.md"
+# A row of the commands table in docs/commands.md: `| `id` | kind | ...`.
+COMMAND_ROW = re.compile(r"^\| `[^`]+` \|", re.M)
 
 MARKED = re.compile(r"<!-- parity:begin ([a-z0-9-]+) -->.*?<!-- parity:end -->", re.S)
 
@@ -65,6 +75,18 @@ def device_table(rows) -> str:
     for name, section, kind, status, note in rows:
         lines.append(f"| {name} | {section} | {kind} | {status} | {note} |")
     return block("\n".join(lines))
+
+
+def command_count(path: Path) -> int:
+    """The number of commands docs/commands.md lists, generated from the command registry."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"{path}: cannot read the command list ({error})")
+    count = len(COMMAND_ROW.findall(text))
+    if count == 0:
+        raise SystemExit(f"{path}: lists no commands")
+    return count
 
 
 def headline(devices) -> str:
@@ -197,12 +219,23 @@ def values(devices) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--doc", default=str(DOC))
-    parser.add_argument("--check", action="store_true",
-                        help="change nothing; fail when the marked sections are out of date")
+    parser.add_argument("--commands", type=Path, default=None,
+                        help="the generated command list to count (default docs/commands.md)")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true",
+                      help="change nothing; fail when the marked sections are out of date")
+    mode.add_argument("--check-inputs", action="store_true",
+                      help="change nothing; fail only when the sections cannot be rendered or "
+                           "the markers are wrong, whatever the marked sections hold now")
     args = parser.parse_args()
 
     path = Path(args.doc)
-    devices = json.loads((HERE / "devices.json").read_text(encoding="utf-8"))
+    try:
+        devices = json.loads((HERE / "devices.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"devices.json: {error}")
+    # The count the headline quotes comes from the generated command list, not from score.py.
+    score.COMMANDS = command_count(args.commands or REPO / "docs" / "commands.md")
     rendered = values(devices)
 
     text = path.read_text(encoding="utf-8")
@@ -224,6 +257,11 @@ def main() -> int:
     if missing:
         raise SystemExit(f"{path}: no marker for {', '.join(missing)}")
 
+    if args.check_inputs:
+        state = "up to date" if updated == text else "not current, which main regenerates after the merge"
+        print(f"{path.name}: the inputs render and the markers are fine; the marked sections are {state}")
+        return 0
+
     if updated == text:
         print(f"{path.name}: the marked sections are up to date")
         return 0
@@ -233,8 +271,8 @@ def main() -> int:
                                     fromfile="committed", tofile="rendered", lineterm="", n=1)
         sys.stderr.write("\n".join(diff) + "\n")
         sys.stderr.write(
-            f"\n{path.name}: the marked sections are out of date. Run "
-            f"`python scripts/parity/update_report.py` and commit the result.\n")
+            f"\n{path.name}: the marked sections are out of date. On main the docs workflow "
+            f"rewrites them; a pull request leaves them to it.\n")
         return 1
 
     path.write_text(updated, encoding="utf-8", newline="\n")

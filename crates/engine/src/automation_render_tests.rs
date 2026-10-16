@@ -142,31 +142,12 @@ fn a_groups_volume_lane_scales_the_tracks_routed_into_it() {
     let plain = render_offline(&automated(vec![], vec![]), SR, 512).unwrap();
     let mut p = automated(vec![], vec![]);
     p.channels.push(Channel {
-        id: ChannelId(2),
-        name: "G".into(),
         role: ChannelRole::Submix,
         volume: 0.1,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices: Vec::new(),
         automation: vec![lane("volume", &[(0.0, 1.0), (2.0, 1.0), (2.0, 0.5)])],
-        extensions: Extensions::default(),
+        ..Channel::new(ChannelId(2), "G")
     });
-    p.tracks.push(Track {
-        id: TrackId(2),
-        name: "G".into(),
-        color: None,
-        content: ContentKinds::default(),
-        channel: Some(ChannelId(2)),
-        parent: None,
-        extensions: Extensions::default(),
-        audio_input: Default::default(),
-        midi_input: Default::default(),
-    });
+    p.tracks.push(Track { channel: Some(ChannelId(2)), ..Track::new(TrackId(2), "G") });
     p.channels[0].output = Some(ChannelId(2));
     p.tracks[0].parent = Some(TrackId(2));
     let out = render_offline(&p, SR, 512).unwrap();
