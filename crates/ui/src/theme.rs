@@ -370,8 +370,6 @@ pub const STATUS_BAR: f32 = 20.0;
 pub const TRACK_COLUMN: f32 = 116.0;
 pub const RETURN_COLUMN: f32 = 84.0;
 pub const SCENE_COLUMN: f32 = 96.0;
-/// The mixer section under the Session grid.
-pub const MIXER: f32 = 72.0;
 pub const KNOB: f32 = 22.0;
 pub const TOGGLE: f32 = 18.0;
 /// Padding inside cells and strips.

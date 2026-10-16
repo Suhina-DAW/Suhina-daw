@@ -1357,8 +1357,13 @@ impl App {
             } else if missing_bar {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.missing.bar(ui, prompt));
             }
-            let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
-            let view_area = inner;
+            // With the detail area across the full width, the browser takes its side of what is
+            // left above it (Settings › Interface › Detail area › Layout).
+            let full_width = grid.is_some()
+                && self.settings.view.detail_layout == crate::view_settings::DetailLayout::FullWidth
+                && self.settings.device_layout != DeviceLayout::Stack;
+            let inner = if self.settings.browser_open && !full_width { self.browser_panel(ui, inner) } else { inner };
+            let mut view_area = inner;
             self.detail_drop = None;
             // A clip selected (or clicked) while the editor was closed by hand opens it again.
             let shown_clip = self.shown_clip();
@@ -1384,6 +1389,16 @@ impl App {
                 } else {
                     inner
                 }
+            };
+            let inner = if self.settings.browser_open && full_width {
+                let rest = self.browser_panel(ui, inner);
+                view_area = Rect::from_min_max(
+                    Pos2::new(rest.left(), view_area.top()),
+                    Pos2::new(rest.right(), view_area.bottom()),
+                );
+                rest
+            } else {
+                inner
             };
             // A drag from the browser, or files from the system: the views say what is under the
             // pointer.
@@ -1429,13 +1444,17 @@ impl App {
                         self.view.knobs = self.settings.mixer_controls == MixerControls::Knob;
                         // Both views fold the same groups: the Arrangement view keeps them.
                         self.view.folded = self.arrangement.folds.groups();
+                        self.view.mixer_height = self.settings.view.mixer_height as f32;
+                        self.view.double_click_does_nothing = !self.settings.view.double_click_clip;
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
                         self.arrangement.folds.set_groups(&self.view.folded);
+                        self.session_view_done();
                     }
                     (Some(_), View::Arrangement) => {
                         if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
                             self.arrangement.stack_audio = self.settings.sample_stacking;
                             self.arrangement.stack_midi = self.settings.midi_stacking;
+                            self.arrangement.double_click_does_nothing = !self.settings.view.double_click_clip;
                             self.arrangement.knobs = self.settings.mixer_controls == MixerControls::Knob;
                             let monitor = session.player().map(|p| p.monitor());
                             // A folded group's row shows the track being worked on, so the folds
@@ -1534,6 +1553,19 @@ impl App {
             g.running || g.columns.iter().any(|c| c.stop_queued || c.slots.iter().any(|s| s.state == SlotState::Queued))
         }) {
             ui.ctx().request_repaint();
+        }
+    }
+
+    /// What the Session view asked for this frame that the window keeps: the mixer's height,
+    /// saved in Settings, and the detail area opened from a strip's device list.
+    fn session_view_done(&mut self) {
+        let height = self.view.mixer_height.round() as u32;
+        if height != self.settings.view.mixer_height {
+            self.settings.view.mixer_height = height;
+            self.settings_changed = true;
+        }
+        if std::mem::take(&mut self.view.open_detail) {
+            self.show_editor();
         }
     }
 

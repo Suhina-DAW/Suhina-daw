@@ -103,6 +103,17 @@ pub struct Column {
     pub pan: f64,
     /// One per return track, in their order, for a track or group column; empty for a return.
     pub sends: Vec<SendKnob>,
+    /// The track's devices and plug-ins in chain order, for the channel strip's list.
+    pub devices: Vec<StripDevice>,
+}
+
+/// A device in a channel strip's list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StripDevice {
+    pub name: String,
+    pub enabled: bool,
+    /// A plug-in, run outside Suhina; otherwise a built-in effect or instrument.
+    pub plugin: bool,
 }
 
 /// A track's send to one return track, as the mixer strip shows it.
@@ -276,6 +287,21 @@ impl Grid {
                         })
                         .collect(),
                 },
+                devices: channel.map_or_else(Vec::new, |c| {
+                    c.devices
+                        .iter()
+                        .map(|d| StripDevice {
+                            name: d.name.clone(),
+                            enabled: d.enabled,
+                            plugin: matches!(
+                                d.kind,
+                                suhina_engine::model::DeviceKind::Clap { .. }
+                                    | suhina_engine::model::DeviceKind::Vst3 { .. }
+                                    | suhina_engine::model::DeviceKind::Vst2 { .. }
+                            ),
+                        })
+                        .collect()
+                }),
             };
             if kind == ColumnKind::Return { returns.push(column) } else { columns.push(column) }
         }

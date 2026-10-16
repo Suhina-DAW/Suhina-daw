@@ -268,6 +268,8 @@ pub struct Settings {
     /// Launching a clip in the Session view selects it, so the detail area shows it
     /// (`docs/spec/ui-session-view.md` › Launching and selecting).
     pub select_on_launch: bool,
+    /// The Session mixer's height, the detail area's layout and double-clicks that make clips.
+    pub view: crate::view_settings::ViewSettings,
     /// What stays above the piano roll pulled to the top.
     pub piano_roll_top: PianoRollTop,
     /// How large the piano roll's toolbar is drawn.
@@ -354,6 +356,7 @@ impl Default for Settings {
             play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
             select_on_launch: true,
+            view: crate::view_settings::ViewSettings::default(),
             piano_roll_top: PianoRollTop::Track,
             toolbar_size: ToolbarSize::Large,
             piano_grid_follows: false,
@@ -531,7 +534,8 @@ impl Settings {
                 MixerControls::Knob => "knob",
             },
             piano_toolbar = self.toolbar_size.param(),
-        ) + &self.midi_inputs_off.iter().map(|port| format!("midi_input_off = {port}\n")).collect::<String>()
+        ) + &self.view.to_text()
+            + &self.midi_inputs_off.iter().map(|port| format!("midi_input_off = {port}\n")).collect::<String>()
     }
 
     /// Reads a settings file. Unknown keys and values are skipped with a warning and leave the
@@ -549,6 +553,9 @@ impl Settings {
                 continue;
             };
             let (key, value) = (key.trim(), value.trim());
+            if settings.view.parse(key, value) {
+                continue;
+            }
             match (key, value) {
                 ("animations", "on" | "off") => settings.animations = value == "on",
                 ("sample_stacking", "on" | "off") => settings.sample_stacking = value == "on",
@@ -705,6 +712,7 @@ mod tests {
             play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
             select_on_launch: false,
+            view: crate::view_settings::ViewSettings::default(),
             piano_roll_top: PianoRollTop::Window,
             toolbar_size: ToolbarSize::Larger,
             piano_grid_follows: true,
