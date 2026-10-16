@@ -2727,9 +2727,11 @@ fn a_saved_map_window_opens_at_the_start() {
     let mut harness = window(app);
     assert!(harness.state().sample_map.view.window);
     assert!(harness.query_by_label("Dock").is_some());
-    // The large view takes the map out of its window.
+    // The large view takes the map out of its window; the map's layout repaints on the way,
+    // so the frames are stepped and not run to rest (a repaint each frame would out-run
+    // `Harness::run`'s max steps).
     harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::M);
-    harness.run();
+    harness.run_steps(3);
     assert!(!harness.state().sample_map.view.window);
     assert!(harness.state().sample_map.view.large);
     assert_eq!(harness.state_mut().take_changed_settings().map(|s| s.map_window), Some(false));
