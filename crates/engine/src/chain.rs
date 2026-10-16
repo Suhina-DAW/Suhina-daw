@@ -734,8 +734,11 @@ impl Chain {
                 }
                 Slot::Plugin(plugin) => {
                     // A plug-in still at a block it was late with gets this one as soon as it is
-                    // done, within the deadline (#506).
-                    if let Some(deadline) = *deadline {
+                    // done, within the deadline (#506). A span with nothing left to run (a chain
+                    // `advance` has finished) sends nothing, so nothing is waited for.
+                    if let Some(deadline) = *deadline
+                        && from < to
+                    {
                         plugin.ready(deadline);
                     }
                     let last = (to - from).saturating_sub(1);
