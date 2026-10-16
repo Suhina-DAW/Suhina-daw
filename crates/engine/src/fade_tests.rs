@@ -22,48 +22,14 @@ const GUARD: f64 = 0.002 * SR as f64;
 /// One audio track playing `file` from an arrangement clip of `length` beats with the given
 /// fades, and the same clip in its launcher slot.
 pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: f64) -> Project {
-    let clip = Clip {
-        content: ContentId(1),
-        start: 0.0,
-        length,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in,
-        fade_out,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-    };
+    let clip = Clip { fade_in, fade_out, ..Clip::new(ContentId(1), 0.0, length) };
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "Audio".into(),
-            color: None,
             content: ContentKinds { notes: false, audio: true },
             channel: Some(ChannelId(1)),
-            parent: None,
-            midi_input: Default::default(),
-            audio_input: Default::default(),
-            extensions: Extensions::default(),
+            ..Track::new(TrackId(1), "Audio")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "Audio".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: Vec::new(),
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel::new(ChannelId(1), "Audio")],
         contents: vec![ClipContent {
             id: ContentId(1),
             name: "c".into(),
@@ -86,8 +52,6 @@ pub(crate) fn project(region: AudioRegion, length: f64, fade_in: f64, fade_out: 
 
 pub(crate) fn region(file: &str, warped: bool, stretch: StretchMode, seconds: f64) -> AudioRegion {
     AudioRegion {
-        file: file.into(),
-        absolute_file: None,
         sample_rate: Some(SR),
         channels: Some(1),
         duration_seconds: Some(seconds),
@@ -97,9 +61,7 @@ pub(crate) fn region(file: &str, warped: bool, stretch: StretchMode, seconds: f6
             WarpMarker { time: 0.0, audio_time: 0.0 },
             WarpMarker { time: seconds * 2.0, audio_time: seconds },
         ],
-        gain: 1.0,
-        transpose: 0.0,
-        stream: None,
+        ..AudioRegion::new(file)
     }
 }
 

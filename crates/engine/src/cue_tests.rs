@@ -23,21 +23,7 @@ fn cued(mut project: Project) -> Project {
 }
 
 fn master(volume: f64) -> Channel {
-    Channel {
-        id: ChannelId(99),
-        name: "Main".into(),
-        role: ChannelRole::Master,
-        volume,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices: Vec::new(),
-        automation: Vec::new(),
-        extensions: Extensions::default(),
-    }
+    Channel { role: ChannelRole::Master, volume, ..Channel::new(ChannelId(99), "Main") }
 }
 
 #[test]

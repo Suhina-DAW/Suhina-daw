@@ -35,63 +35,29 @@ fn project(fades: Option<(FadeShape, f64)>) -> Project {
     let fade = fades.map_or(0.0, |_| CLIP_BEATS / 2.0);
     let curve = fades.map_or(FadeCurve::default(), |(shape, curve)| FadeCurve { shape, curve });
     let clip = |i: u32| Clip {
-        content: ContentId(1),
-        start: f64::from(i) * CLIP_BEATS,
-        length: CLIP_BEATS,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
         fade_in: fade,
         fade_out: fade,
         fade_in_curve: curve,
         fade_out_curve: curve,
-        follow_action: Default::default(),
-        extensions: Extensions::default(),
-        launch: Default::default(),
+        ..Clip::new(ContentId(1), f64::from(i) * CLIP_BEATS, CLIP_BEATS)
     };
     let region = AudioRegion {
-        file: "noise.wav".into(),
-        absolute_file: None,
         sample_rate: Some(SR),
         channels: Some(1),
         duration_seconds: Some(2.0),
-        warped: false,
         stretch: StretchMode::Repitch,
-        warp_markers: Vec::new(),
-        gain: 1.0,
-        transpose: 0.0,
-        stream: None,
+        ..AudioRegion::new("noise.wav")
     };
     Project {
         tracks: (1..=TRACKS)
             .map(|t| Track {
-                id: TrackId(t),
-                name: format!("Audio {t}"),
-                color: None,
                 content: ContentKinds { notes: false, audio: true },
                 channel: Some(ChannelId(t)),
-                parent: None,
-                extensions: Extensions::default(),
-                audio_input: Default::default(),
-                midi_input: Default::default(),
+                ..Track::new(TrackId(t), format!("Audio {t}"))
             })
             .collect(),
         channels: (1..=TRACKS)
-            .map(|t| Channel {
-                id: ChannelId(t),
-                name: format!("Audio {t}"),
-                role: ChannelRole::Regular,
-                volume: 0.1,
-                pan: 0.0,
-                mute: false,
-                solo: false,
-                cue: false,
-                output: None,
-                sends: Vec::new(),
-                devices: Vec::new(),
-                automation: Vec::new(),
-                extensions: Extensions::default(),
-            })
+            .map(|t| Channel { volume: 0.1, ..Channel::new(ChannelId(t), format!("Audio {t}")) })
             .collect(),
         contents: vec![ClipContent {
             id: ContentId(1),

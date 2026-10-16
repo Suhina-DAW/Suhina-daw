@@ -15,48 +15,13 @@ const SR: u32 = 48_000;
 /// Two tracks, "Lead" and "Quiet" (at -inf, so never heard), each playing an A4 for 16 beats.
 fn project(volume: f64) -> Project {
     let track = |id: u32, name: &str| Track {
-        id: TrackId(id),
-        name: name.into(),
-        color: None,
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
-        parent: None,
-        extensions: Extensions::default(),
-        audio_input: Default::default(),
-        midi_input: Default::default(),
+        ..Track::new(TrackId(id), name)
     };
-    let channel = |id: u32, volume: f64| Channel {
-        id: ChannelId(id),
-        name: format!("C{id}"),
-        role: ChannelRole::Regular,
-        volume,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices: Vec::new(),
-        automation: Vec::new(),
-        extensions: Extensions::default(),
-    };
-    let note =
-        Note { time: 0.0, duration: 16.0, key: 69, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false };
-    let clip = Clip {
-        content: ContentId(1),
-        start: 0.0,
-        length: 16.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        extensions: Extensions::default(),
-        launch: Default::default(),
-    };
+    let channel = |id: u32, volume: f64| Channel { volume, ..Channel::new(ChannelId(id), format!("C{id}")) };
+    let note = Note::new(0.0, 16.0, 69, 1.0);
+    let clip = Clip::new(ContentId(1), 0.0, 16.0);
     Project {
         tracks: vec![track(1, "Lead"), track(2, "Quiet")],
         channels: vec![channel(1, volume), channel(2, 0.0)],

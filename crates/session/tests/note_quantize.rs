@@ -11,25 +11,11 @@ use suhina_model::*;
 use suhina_session::Session;
 
 fn note(time: f64, duration: f64) -> Note {
-    Note { time, duration, key: 60, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
+    Note::new(time, duration, 60, 100.0 / 127.0)
 }
 
 fn clip(content: u32) -> Clip {
-    Clip {
-        content: ContentId(content),
-        start: 0.0,
-        length: 8.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        extensions: Extensions::default(),
-        launch: Default::default(),
-    }
+    Clip::new(ContentId(content), 0.0, 8.0)
 }
 
 /// Track 1 has, on the arrangement, a MIDI clip with `notes` (index 0) and an empty MIDI clip
@@ -44,17 +30,7 @@ fn project(notes: Vec<Note>) -> Project {
     };
     let lane = |n: Vec<Note>| vec![ContentLane { target: None, data: LaneData::Notes(n) }];
     Project {
-        tracks: vec![Track {
-            id: TrackId(1),
-            name: "Keys".into(),
-            color: None,
-            content: ContentKinds { notes: true, audio: false },
-            channel: None,
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
-        }],
+        tracks: vec![Track { content: ContentKinds { notes: true, audio: false }, ..Track::new(TrackId(1), "Keys") }],
         contents: vec![content(1, lane(notes.clone())), content(2, Vec::new()), content(3, lane(notes))],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {

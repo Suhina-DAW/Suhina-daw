@@ -210,47 +210,16 @@ mod tests {
     fn project() -> Project {
         Project {
             tracks: vec![Track {
-                id: TrackId(1),
-                name: "Drums".into(),
-                color: None,
                 content: ContentKinds { notes: true, audio: false },
                 channel: Some(ChannelId(1)),
-                parent: None,
-                midi_input: Default::default(),
-                audio_input: Default::default(),
-                extensions: Extensions::default(),
+                ..Track::new(TrackId(1), "Drums")
             }],
-            channels: vec![Channel {
-                id: ChannelId(1),
-                name: "Drums".into(),
-                role: ChannelRole::Regular,
-                volume: 1.0,
-                pan: 0.0,
-                mute: false,
-                solo: false,
-                cue: false,
-                output: None,
-                sends: Vec::new(),
-                devices: Vec::new(),
-                extensions: Extensions::default(),
-                automation: Vec::new(),
-            }],
+            channels: vec![Channel::new(ChannelId(1), "Drums")],
             contents: vec![ClipContent {
                 id: ContentId(1),
                 name: "Beat".into(),
                 length: 1.0,
-                lanes: vec![ContentLane {
-                    target: None,
-                    data: LaneData::Notes(vec![Note {
-                        time: 0.0,
-                        duration: 0.25,
-                        key: 36,
-                        velocity: 1.0,
-                        release_velocity: 0.5,
-                        channel: 0,
-                        muted: false,
-                    }]),
-                }],
+                lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 0.25, 36, 1.0)]) }],
                 extensions: Extensions::default(),
             }],
             launcher: Launcher {
@@ -260,19 +229,8 @@ mod tests {
                     track: TrackId(1),
                     slots: vec![Slot {
                         clip: Some(Clip {
-                            content: ContentId(1),
-                            start: 0.0,
-                            length: 1.0,
-                            offset: 0.0,
                             loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
-                            enabled: true,
-                            fade_in: 0.0,
-                            fade_out: 0.0,
-                            fade_in_curve: Default::default(),
-                            fade_out_curve: Default::default(),
-                            follow_action: Default::default(),
-                            launch: Default::default(),
-                            extensions: Extensions::default(),
+                            ..Clip::new(ContentId(1), 0.0, 1.0)
                         }),
                         has_stop: true,
                     }],
