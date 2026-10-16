@@ -776,11 +776,14 @@ fn device_panel(
         .interact(rect, Id::new(("device-panel", track.0, device.index)), Sense::click())
         .on_hover_text("Right-click for the device's menu");
     panel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Device {}", device.name)));
-    if selected {
-        painter.rect_stroke(rect, 1.0, theme::hairline(theme::selection()), egui::StrokeKind::Inside);
-    }
     let clicked = panel.clicked();
     panel.context_menu(|ui| menus::device_menu(ui, track, device.index, actions));
+    // The selection outline, over everything the panel draws — on every path out of here.
+    let outline = |painter: &egui::Painter| {
+        if selected {
+            painter.rect_stroke(rect, 1.0, theme::hairline(theme::selection()), egui::StrokeKind::Inside);
+        }
+    };
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
     painter.rect_filled(header, 0.0, theme::control_background());
@@ -830,6 +833,7 @@ fn device_panel(
             theme::ui_font(theme::TEXT_SMALL),
             color,
         );
+        outline(painter);
         return clicked;
     }
     if device.params.is_empty() && device.graph.is_none() {
@@ -846,6 +850,7 @@ fn device_panel(
             theme::ui_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
+        outline(painter);
         return clicked;
     }
     if let Some(graph) = &device.graph {
@@ -1116,6 +1121,7 @@ fn device_panel(
         }
             });
         });
+        outline(painter);
         return clicked;
     }
     for (index, (id, value)) in device.params.iter().enumerate() {
@@ -1143,6 +1149,7 @@ fn device_panel(
             theme::text_value(),
         );
     }
+    outline(painter);
     clicked
 }
 
