@@ -25,6 +25,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use suhina_model::TrackId;
 
 use crate::chain::Chain;
+use crate::record::Recorder;
 
 /// Notes waiting for the render thread: more than a hand plays within one block of any size.
 pub const LIVE_QUEUE: usize = 1024;
@@ -315,6 +316,11 @@ impl Live {
         self.armed.get(..self.armed_count).unwrap_or_default()
     }
 
+    /// Frames a stamped note plays after it was played.
+    pub(crate) fn delay(&self) -> u64 {
+        self.delay
+    }
+
     /// Whether `track` is armed.
     pub(crate) fn is_armed(&self, track: TrackId) -> bool {
         self.armed().iter().any(|(t, _)| *t == track)
@@ -394,7 +400,7 @@ impl Live {
     /// frame `position`: a note without a time, or one whose frame has passed, plays at the
     /// block's first frame; a stamped one waits for its frame ([`Live::frame`]). Call it once
     /// the chains have begun the block.
-    pub(crate) fn receive(&mut self, chains: &mut [Chain], position: u64) {
+    pub(crate) fn receive(&mut self, chains: &mut [Chain], recorder: &mut Recorder, position: u64) {
         // Bounded: what arrives while this runs waits for the next block.
         for _ in 0..LIVE_QUEUE {
             let Some(Ok((source, event, time))) = self.consumer.as_mut().map(Consumer::pop) else { break };
@@ -418,14 +424,14 @@ impl Live {
                 self.next_due = self.next_due.min(at);
                 continue;
             }
-            self.play(chains, source, event, 0, position);
+            self.play(chains, recorder, source, event, 0, position);
         }
-        self.frame(chains, 0, position);
+        self.frame(chains, recorder, 0, position);
     }
 
     /// Plays the waiting notes due by renderer frame `position`, at `frame` of the block, in the
     /// order they came. Never allocates.
-    pub(crate) fn frame(&mut self, chains: &mut [Chain], frame: usize, position: u64) {
+    pub(crate) fn frame(&mut self, chains: &mut [Chain], recorder: &mut Recorder, frame: usize, position: u64) {
         if self.next_due > position {
             return;
         }
@@ -434,7 +440,7 @@ impl Live {
         for index in 0..self.waiting_count {
             let Some(waiting) = self.waiting.get(index).copied() else { break };
             if waiting.at <= position {
-                self.play(chains, waiting.source, waiting.event, frame, position);
+                self.play(chains, recorder, waiting.source, waiting.event, frame, position);
             } else {
                 if let Some(slot) = self.waiting.get_mut(kept) {
                     *slot = waiting;
@@ -448,14 +454,24 @@ impl Live {
     }
 
     /// Plays one note from `source` at `frame` of the block (renderer frame `position`) on the
-    /// instrument chains of the armed tracks that hear the source.
-    fn play(&mut self, chains: &mut [Chain], source: LiveSource, event: LiveEvent, frame: usize, position: u64) {
+    /// instrument chains of the armed tracks that hear the source, and records it on each of
+    /// those tracks while recording is on (a key down, or a sound let go).
+    fn play(
+        &mut self,
+        chains: &mut [Chain],
+        recorder: &mut Recorder,
+        source: LiveSource,
+        event: LiveEvent,
+        frame: usize,
+        position: u64,
+    ) {
         #[cfg(test)]
         self.played.push((position, event));
         let Some(slot) = self.keys_of(source) else { return };
         let Self { armed, armed_count, keys, .. } = self;
         let armed = armed.get(..*armed_count).unwrap_or_default();
         let Some(keys) = keys.get_mut(slot) else { return };
+        let hearing = || armed.iter().filter(|(_, f)| f.takes(source)).map(|(t, _)| *t);
         let targets =
             chains.iter_mut().filter(|c| c.instrument && armed.iter().any(|(t, f)| *t == c.track && f.takes(source)));
         match event {
@@ -468,6 +484,9 @@ impl Live {
                 let velocity = if velocity.is_finite() { velocity } else { 1.0 };
                 for chain in targets {
                     chain.note_on(frame, position, key, velocity, UNTIL_RELEASED);
+                }
+                for track in hearing() {
+                    recorder.note(track, position, key, Some(velocity));
                 }
             }
             LiveEvent::NoteOff { key } => {
@@ -485,6 +504,9 @@ impl Live {
                 for chain in targets {
                     chain.release_key(frame, key);
                 }
+                for track in hearing() {
+                    recorder.note(track, position, key, None);
+                }
             }
             LiveEvent::Sustain { on } => {
                 keys.sustain = on;
@@ -498,6 +520,13 @@ impl Live {
                         }
                     }
                 }
+                for key in 0..=127u8 {
+                    if keys.sustained.get(usize::from(key)).copied().unwrap_or(false) {
+                        for track in hearing() {
+                            recorder.note(track, position, key, None);
+                        }
+                    }
+                }
                 keys.sustained = [false; 128];
             }
             LiveEvent::AllNotesOff => {
@@ -505,6 +534,13 @@ impl Live {
                     for key in 0..=127u8 {
                         if keys.sounding(key) {
                             chain.release_key(frame, key);
+                        }
+                    }
+                }
+                for key in 0..=127u8 {
+                    if keys.sounding(key) {
+                        for track in hearing() {
+                            recorder.note(track, position, key, None);
                         }
                     }
                 }

@@ -29,6 +29,7 @@ pub mod nesting;
 pub mod piano_roll;
 pub mod pick;
 pub mod project_dialog;
+pub mod record_controls;
 pub mod sample_map;
 mod sample_map_crowd;
 pub mod sample_map_panel;

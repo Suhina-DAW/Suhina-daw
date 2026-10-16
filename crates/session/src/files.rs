@@ -286,14 +286,14 @@ fn file_stem(path: &Path) -> String {
 }
 
 /// One clip to place, made from a file.
-struct Source {
-    kind: TrackKind,
-    name: String,
+pub(crate) struct Source {
+    pub(crate) kind: TrackKind,
+    pub(crate) name: String,
     /// Content length in beats (the clip's length too).
-    length: f64,
-    lane: LaneData,
+    pub(crate) length: f64,
+    pub(crate) lane: LaneData,
     /// Whether the clip loops in a slot.
-    loops: bool,
+    pub(crate) loops: bool,
 }
 
 /// `clip.addFiles`: samples and MIDI files as clips on a track, or on new tracks.
@@ -553,7 +553,7 @@ pub(crate) fn create_clip(session: &mut Session, params: &Value) -> Result<Value
 
 /// Puts one source as a clip on `track`: in slot `row` of the Session, or at beat `at` in the
 /// Arrangement (replacing what it covers unless `stack`).
-fn place_clip(
+pub(crate) fn place_clip(
     p: &mut Project,
     track: TrackId,
     source: Source,

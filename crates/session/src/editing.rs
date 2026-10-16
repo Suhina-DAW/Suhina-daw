@@ -19,7 +19,7 @@ const MIN_PART: f64 = 1e-6;
 /// The sample rate a consolidated audio clip is rendered at when its sources do not say.
 const DEFAULT_RATE: u32 = 48_000;
 /// Files with the same name tried before giving up on finding a free one.
-const MAX_NAME_TRIES: u32 = 1000;
+pub(crate) const MAX_NAME_TRIES: u32 = 1000;
 /// The folder next to the project file that consolidated audio is written to.
 pub(crate) const CONSOLIDATED_FOLDER: &str = "Consolidated";
 
@@ -302,7 +302,7 @@ fn track_name(p: &Project, track: TrackId) -> String {
 }
 
 /// A track name made safe as part of a file name on every system.
-fn sanitized(name: &str) -> String {
+pub(crate) fn sanitized(name: &str) -> String {
     let clean: String =
         name.chars().map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '_' }).collect();
     let clean = clean.trim();

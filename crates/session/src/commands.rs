@@ -868,6 +868,34 @@ static COMMANDS: &[CommandSpec] = &[
         run: set_arm,
     },
     CommandSpec {
+        id: "clip.record",
+        label: "Record into an empty clip slot of an armed track from the next launch boundary (after the count-in when the transport is stopped); clip.launch on the slot ends the take at the next boundary and plays it, looped",
+        params: &[TRACK, SCENE],
+        kind: CommandKind::Transport,
+        run: crate::recording::record_clip,
+    },
+    CommandSpec {
+        id: "transport.record",
+        label: "Record every armed track into the arrangement from the playhead (from the play start marker after the count-in when stopped), or end every take; each take is one undo step",
+        params: &[param("on", ParamType::Bool, "true starts recording, false ends every take")],
+        kind: CommandKind::Transport,
+        run: crate::recording::record_arrangement,
+    },
+    CommandSpec {
+        id: "transport.setCountIn",
+        label: "Set the count-in recording waits for when it starts the transport: 0 (none), 1, 2 or 4 bars of clicks",
+        params: &[param("bars", ParamType::Integer, "0, 1, 2 or 4")],
+        kind: CommandKind::Transport,
+        run: crate::recording::set_count_in,
+    },
+    CommandSpec {
+        id: "record.state",
+        label: "What is being recorded: whether the arrangement records, each take (track, slot or arrangement, start and end beat, notes, frames, file), the count-in setting and the beats it has left",
+        params: &[],
+        kind: CommandKind::Transport,
+        run: crate::recording::record_state,
+    },
+    CommandSpec {
         id: "clip.launch",
         label: "Launch the clip in a track's slot at the next quantisation boundary (an empty slot with a stop button stops the track)",
         params: &[TRACK, SCENE],
@@ -3396,6 +3424,8 @@ fn stop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
         Some(Value::String(s)) if s == "here" => LaunchCommand::StopHere,
         Some(other) => return Err(format!("return must be \"marker\" or \"here\", got {other}").into()),
     };
+    // Takes end where the transport stops (docs/spec/recording.md).
+    session.end_takes_now();
     send(session, command)?;
     Ok(json!({ "transport": "stopped" }))
 }
@@ -3412,6 +3442,10 @@ fn set_position(session: &mut Session, params: &Value) -> Result<Value, CommandE
 fn launch_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let column = column_index(session.project(), params)?;
     let scene = scene_index(session.project(), params)?;
+    // A slot that records ends its take instead (docs/spec/recording.md).
+    if let Some(ended) = session.end_slot_take(column, scene) {
+        return Ok(ended);
+    }
     let slot = session.project().launcher.columns.get(column).and_then(|c| c.slots.get(scene));
     let queued = match slot {
         Some(slot) if slot.clip.as_ref().is_some_and(|c| c.enabled) => "launch",

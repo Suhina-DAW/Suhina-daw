@@ -65,14 +65,14 @@ documentation and UI). The scope decision it leads to is
 | Measure | Value |
 |---|---|
 | The manual it was measured from | 43 chapters, 1039 PDF pages, 999 pages of feature text |
-| Page-weighted coverage of everything the manual documents | **about 22 %** |
+| Page-weighted coverage of everything the manual documents | **about 23 %** |
 | Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 26 %** |
-| Same, over the scope the roadmap aims at (also without accessibility) | **about 26 %** |
+| Same, over the scope the roadmap aims at (also without accessibility) | **about 27 %** |
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **186**, every one reachable from the UI, the CLI and MCP |
-| Still absent as whole features | MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
+| Commands | **190**, every one reachable from the UI, the CLI and MCP |
+| Still absent as whole features | MPE, Grooves, Tuning, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
 "Page-weighted coverage" is the chapter table below aggregated: each chapter gets a coverage
@@ -140,7 +140,7 @@ documented behaviour that exists today.
 | 16 | Launching Clips | 12 | 77 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time signature), stop, loop, back to arrangement (the arrangement's dimmed lanes and the ruler's button), warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by command and in the detail area), samples looping in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop), launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch quantisation, slots and scenes launched from computer keys. Missing velocity amount, clip offset/nudge, launching from live MIDI notes, follow-action multiplier and scene follow actions. |
 | 17 | Routing and I/O | 22 | 35 % | partial | Track output to main or a group (track.setOutput); MIDI controllers play the armed tracks, each track choosing its MIDI port and channel (track.setMidiInput); an audio input device with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No MIDI out, external instrument, resampling, sidechain, multi-timbral. |
 | 18 | Mixing | 18 | 57 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute through the levels), master, latency compensation, sends pre or post fader into return tracks that run their device chains (track.setSend, track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output on a second pair of the device (previews, per-track cue, cue volume); return tracks imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers. |
-| 19 | Recording New Clips | 13 | 0 % | absent | Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI recording, no overdub, no count-in, no capture MIDI. |
+| 19 | Recording New Clips | 13 | 45 % | partial | Arming and input monitoring (MIDI controllers, audio inputs); MIDI and audio recording into an empty slot from the next launch boundary (ended on the next one, then played looped) or into the arrangement, several armed tracks at once, a count-in of 1, 2 or 4 bars, takes lined up with what was heard, audio written to WAV files off the audio thread, one undo step per take. Missing overdub, punch in/out, recording automation, capture MIDI, session record button. |
 | 20 | Bounce to Audio | 6 | 15 % | partial | Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its running plug-ins' state as heard; no per-track or group bounce, no paste. |
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
 | 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, resampling) exists in crates/separation with a test backend; no model and nothing a user can run yet. |
@@ -178,7 +178,7 @@ documented behaviour that exists today.
 | Mixing, routing, I/O (ch 17, 18, 38) | 47 | 44 % |
 | Automation, envelopes (ch 26, 27) | 35 | 28 % |
 | Generative/transform (ch 11-15) | 67 | 7 % |
-| Recording, bounce, comp (ch 19-22) | 33 | 3 % |
+| Recording, bounce, comp (ch 19-22) | 33 | 20 % |
 | Outside scope (ch 28, 32-37, 41) | 175 | 2 % |
 | Setup, shortcuts (ch 2, 3, 42) | 61 | 43 % |
 <!-- parity:end -->
@@ -349,7 +349,7 @@ or does something Live does not:
 | Views and clip editing | 140 (ch 6-10, 16) | 42 % | MIDI note editor, clip view panels, time selections |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 7 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 28 % | drawing and recording automation lanes, send and tempo automation, clip envelopes |
-| Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
+| Recording, bounce, comping | 33 (ch 19-22) | 20 % | overdub, punch in and out, take lanes, comping, per-track bounce |
 | Mixing, routing, I/O | 47 (ch 17, 18, 38) | 44 % | crossfader, inputs and monitoring, resampling |
 | Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 2 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
 <!-- parity:end -->
@@ -359,8 +359,8 @@ Two observations the numbers make plain:
 1. **The device catalogue is the single largest lever.** The device reference chapters are the
    biggest block of the manual and Suhina covers the smallest share of them. Nothing else moves the
    headline number as much.
-2. **Whole features, not thin features, dominate the rest.** Recording, automation, racks and MIDI
-   editing are each absent, not partial. They are also the areas where a DAW is judged by people
+2. **Whole features, not thin features, dominate the rest.** Racks, comping and MIDI effects are
+   each absent, not partial. They are also the areas where a DAW is judged by people
    coming from Live, because a missing channel is felt at once.
 
 ## 8. What the roadmap covers, and what nothing covers

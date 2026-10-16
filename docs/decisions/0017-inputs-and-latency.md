@@ -5,6 +5,7 @@ type: decision
 status: current
 last_verified: 2026-10-16
 covers:
+  - crates/engine/src/record.rs
   - crates/engine/src/live.rs
   - crates/engine/src/live_tests.rs
   - crates/session/src/midi.rs
@@ -17,7 +18,7 @@ covers:
 
 # 0017: Inputs, arming and live latency
 
-- **Status:** accepted (MIDI input; the shallower queue while armed, #265; a MIDI input per track, #278; audio input and monitoring, #267; notes placed by the driver's timestamps, #269); recording is planned in [#263](https://github.com/suhina-daw/suhina-daw/issues/263)
+- **Status:** accepted (MIDI input; the shallower queue while armed, #265; a MIDI input per track, #278; audio input and monitoring, #267; notes placed by the driver's timestamps, #269; MIDI and audio recording with a count-in, #266 and #268)
 - **Date:** 2026-10-14
 
 ## Context
@@ -152,6 +153,27 @@ engine code.
     buffers) for none of the jitter. Tested with synthetic timestamps against the render clock
     (`live_tests.rs`): every block size, a note anywhere in a block, a jittering render thread.
 
+11. **Recording** (amendment, [#266](https://github.com/suhina-daw/suhina-daw/issues/266) and
+    [#268](https://github.com/suhina-daw/suhina-daw/issues/268);
+    [`docs/spec/recording.md`](../spec/recording.md) has the behaviour). While recording is on
+    (`LaunchCommand::SetRecording`) and the transport runs, the render thread copies what the
+    armed tracks play into two rings made with the controller and taken by the session
+    (`Controller::take_recorder`): every key down and every sound let go (`RecordedNote`), and
+    every armed track's input channel or pair in chunks of 64 frames (`RecordedAudio`), each
+    stamped with the beat that was heard when it was played: a note's frame less the
+    key-to-sound latency (decision 10's delay and the output's latency), an input frame's less
+    the output's latency, the input device's (measured in its callback) and the frames that
+    waited in the input ring. The output layer tells the renderer the two latencies before each
+    block (`Renderer::set_record_latency`). What finds a ring full is dropped and counted;
+    nothing is allocated, locked or written on the render thread. A thread in the session
+    (`record_writer.rs`) empties the rings as they fill, writes each audio take to a 32-bit
+    float WAV file in `Recorded/` next to the project file, and hands the notes on; the session
+    decides what a take keeps (its start and end beats) and makes each take one undo step.
+    The count-in is the engine's (`LaunchCommand::CountIn`): it clicks the beats with the
+    transport stopped and starts the transport on the frame it ends. A loopback test (the
+    output fed back into the input offline, with a known delay) checks that a recorded frame
+    lands on the frame it was played at.
+
 ## Consequences
 
 - A MIDI keyboard plays any instrument, built in or a plug-in, on armed tracks, with the sustain
@@ -171,8 +193,6 @@ engine code.
 
 ## Planned
 
-The rest of [#263](https://github.com/suhina-daw/suhina-daw/issues/263) follows this ADR and
-amends it as it lands: MIDI recording with count-in (#266), and audio recording of every armed
-track at once into files of its own, lined up for input and output latency (#268). An input
-device on another host than the output, or at another sample rate (resampled), is not planned
-yet.
+Overdubbing into a clip that exists, punch in and out, and recording automation follow recording
+([`docs/spec/recording.md`](../spec/recording.md) › Not yet). An input device on another host
+than the output, or at another sample rate (resampled), is not planned yet.

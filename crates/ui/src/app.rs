@@ -1303,6 +1303,7 @@ impl App {
                 s.player().and_then(suhina_session::Player::output_info).map_or(0, |i| i.input_channels);
             for column in &mut grid.columns {
                 column.armed = s.is_armed(column.track);
+                column.recording = s.recording_slot(column.track);
             }
             grid
         });
@@ -3675,9 +3676,12 @@ impl App {
         if chosen != current {
             actions.push(Action::new("launcher.setQuantization", json!({ "value": chosen })));
         }
+        let count_in = row(quant_rect.right() + PAD, 64.0);
+        let bars = self.session().map_or(0, |s| s.count_in_bars());
+        crate::record_controls::count_in_menu(ui, count_in, bars, actions);
 
-        // Centre: play, stop, position.
-        let transport_width = 28.0 * 2.0 + 1.0 + PAD + 64.0;
+        // Centre: play, stop, record, position.
+        let transport_width = 28.0 * 3.0 + 2.0 + PAD + 64.0;
         let mut x = bar.center().x - transport_width / 2.0;
         let play = row(x, 28.0);
         let response = widgets::button_area(ui, play, Id::new("play"), "Play");
@@ -3706,7 +3710,10 @@ impl App {
             motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response)),
         );
         painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::text_primary());
-        x = stop.right() + PAD;
+        let record = row(stop.right() + 1.0, 28.0);
+        let recording = self.session().is_some_and(|s| s.records_arrangement());
+        crate::record_controls::record_button(ui, &painter, record, recording, actions);
+        x = record.right() + PAD;
         let position = row(x, 64.0);
         painter.rect_filled(position, 0.0, theme::window_background());
         widgets::text_in(

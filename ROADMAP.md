@@ -576,14 +576,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   and the Arrangement headers (`track.setArm`; a click arms one track, Ctrl adds), every MIDI
   input port opened and Settings › Audio › MIDI inputs to turn one off (`midi.inputs`,
   `midi.setInput`); a controller plugged in later is found within seconds. The latency follows
-  the buffer size. Still to do: recording
-  ([#263](https://github.com/suhina-daw/suhina-daw/issues/263)).
+  the buffer size.
 - **Audio input and monitoring:** choose an input device in Settings › Audio (off by default);
   each audio track hears one channel or a stereo pair of it, monitored while armed (Auto),
   always (In) or never (Off), through its devices and mix (`track.setAudioInput`); arm many
   tracks at once to hear a band on separate tracks
-  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017). Recording is next
-  ([#268](https://github.com/suhina-daw/suhina-daw/issues/268)).
+  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017).
 - **A MIDI input per track:** each track hears every MIDI port, one port, or none, and every
   channel or one, so a keyboard and a pad controller (or two players) each play their own armed
   track; set from the track's menu or the Arrangement header (`track.setMidiInput`), saved with
@@ -592,6 +590,20 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ahead of the device instead of two, and Settings › Audio and `audio.info` say how long a key
   takes to be heard (`live_latency_ms`); at 128 frames, at most about 5 ms plus the device
   ([#265](https://github.com/suhina-daw/suhina-daw/issues/265), ADR 0017).
+- **Notes keep their timing:** a note from a MIDI controller is played a fixed delay after the
+  time the driver stamped it with, at the frame where that falls, instead of on the next block's
+  first frame, so fast playing no longer jitters by up to a block
+  ([#269](https://github.com/suhina-daw/suhina-daw/issues/269), ADR 0017).
+- **Recording:** an armed track records into an empty clip slot from the next launch boundary
+  (the slot's record button, `clip.record`; a second click ends the take on the next boundary
+  and plays it, looped) or into the arrangement (the control bar's record button,
+  `transport.record`), with a count-in of 1, 2 or 4 bars (`transport.setCountIn`). Tracks that
+  play notes record what their MIDI controllers play; tracks with an audio input record it to a
+  WAV file in `Recorded/` next to the project, written off the audio thread. Takes are lined up
+  with what was heard (the key-to-sound and input latency taken off), and each take is one undo
+  step ([#266](https://github.com/suhina-daw/suhina-daw/issues/266),
+  [#268](https://github.com/suhina-daw/suhina-daw/issues/268),
+  [spec](docs/spec/recording.md)).
 - A buffer size is never asked of a driver that did not declare it: the dropdown lists the sizes
   the device's own range allows, a range holding none of the engine's sizes (or no range at all)
   leaves the driver its own buffer size and the notice says which size plays, and on WASAPI shared

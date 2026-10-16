@@ -33,7 +33,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 186
+COMMANDS = 190
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -142,9 +142,12 @@ CHAPTERS = [
      "meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output "
      "on a second pair of the device (previews, per-track cue, cue volume); return tracks "
      "imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers."),
-    (19, "Recording New Clips", 13, 0.00, "absent",
-     "Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI "
-     "recording, no overdub, no count-in, no capture MIDI."),
+    (19, "Recording New Clips", 13, 0.45, "partial",
+     "Arming and input monitoring (MIDI controllers, audio inputs); MIDI and audio recording into "
+     "an empty slot from the next launch boundary (ended on the next one, then played looped) or "
+     "into the arrangement, several armed tracks at once, a count-in of 1, 2 or 4 bars, takes lined "
+     "up with what was heard, audio written to WAV files off the audio thread, one undo step per "
+     "take. Missing overdub, punch in/out, recording automation, capture MIDI, session record button."),
     (20, "Bounce to Audio", 6, 0.15, "partial",
      "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
      "running plug-ins' state as heard; no per-track or group bounce, no paste."),
