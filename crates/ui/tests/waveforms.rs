@@ -11,8 +11,8 @@ use std::sync::Arc;
 use egui::{Color32, Pos2, Rect, vec2};
 use egui_kittest::Harness;
 use suhina_engine::AudioData;
-use suhina_ui::theme;
-use suhina_ui::waveform::{Colors, Scale, geometry, paint, peaks, steady_columns};
+use suhina_ui::kit::theme;
+use suhina_ui::kit::waveform::{Colors, Scale, geometry, paint, peaks, steady_columns};
 
 /// Two seconds of stereo at 8 kHz: a decaying chord on the left, a quieter noise burst on the
 /// right.

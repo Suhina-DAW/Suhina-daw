@@ -90,7 +90,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Author a data-only SDK device](device-sdk.md) | howto | current | make an effect, MIDI effect or instrument, SDK tutorial, .sd example, node discovery | Author data-only effects, MIDI effects and instruments in Rust or with AI agents |
 | [Keyboard shortcuts](guide/keyboard-shortcuts.md) | howto | current | user guide, keyboard shortcuts, what does this key do, list of keys, every shortcut explained, keybindings, hotkeys, action ids, which action a key runs, back up keys, share keymap, keymap.json, rebind a key, keys for agents | User guide to the keyboard shortcuts, one entry per action with its default key, where it works and what it does, written for users and for agents |
 | [How to check it](how-to-check.md) | howto | current | how to check it, test steps, QA steps, how to test, pull request description, manual testing, reviewer steps, check a change | How to write a pull request's "How to check it" section, steps a newcomer can follow from the test build to check a change in what Suhina does |
-| [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made, and how many pull requests are merged through the merge queue |
+| [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, ready to merge label, auto-merge, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made, and how many pull requests are merged through the merge queue |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, Ctrl+drag copies notes, Alt+drag velocity, left edge, keymap.json, keymap preset, workflow mode, workflow menu, workflow settings, Custom mode, double-click, Draw-first, Select-first, Mouse-first, mouse switches, right click deletes, left click draws, Alt right plays, rebind, cut copy paste, duplicate, mute clips, hotkeys, quantise, Ctrl+U, piano roll keys, tool keys, number keys choose a tool, arrow keys, select all, mute tool key, grid keys, Ctrl+1, Ctrl+2, Ctrl+3, Ctrl+4, narrow grid, widen grid, triplet grid, snap to grid, Z, Shift+Z, zoom to selection, zoom to clip, ruler zoom | Keyboard shortcuts in the desktop app: the default keys, the keymap presets, the keymap file and how to change them |
 | [Making the `.als` test corpus](spec/als-corpus.md) | howto | current | making test sets, locators, corpus, new series, what to save in Live, test files, device corpus, bounce, device parameters, test signal, automation, envelopes | How to author the Live Sets used to learn the .als format and test the importer, series by series, including the device series with bounces |
 | [Making the `.flp` test corpus](spec/flp-corpus.md) | howto | draft | making .flp test files, flp corpus, what to save in FL Studio, corpus/flp, flp series | How to author the FL Studio projects (.flp) that confirm the format spec and test crates/flp, series by series |
@@ -113,6 +113,7 @@ Change this code, and check these documents.
 | `.github/workflows/discord.yml` | [Releasing](releasing.md) |
 | `.github/workflows/parity-notice.yml` | [parity-live-12](research/parity-live-12.md) |
 | `.github/workflows/project-sync.yml` | [The claim bot](claim-bot.md) |
+| `.github/workflows/ready-to-merge.yml` | [Releasing](releasing.md) |
 | `.github/workflows/release.yml` | [Releasing](releasing.md) |
 | `.github/workflows/test-build-links.yml` | [Releasing](releasing.md) |
 | `.github/workflows/test-build.yml` | [Releasing](releasing.md) |
@@ -287,53 +288,58 @@ Change this code, and check these documents.
 | `crates/stretch/src/lib.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
 | `crates/ui/Cargo.toml` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md) |
 | `crates/ui/src/app.rs` | [0020: Latency: what the number is, and where it is shown](decisions/0020-latency-and-its-readout.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
-| `crates/ui/src/automation_lanes.rs` | [Components](design/components.md), [Automation](spec/automation.md) |
+| `crates/ui/src/app/loading_dialog.rs` | [Components](design/components.md) |
+| `crates/ui/src/app/missing_files.rs` | [Architecture](architecture.md), [Components](design/components.md), [Missing files](spec/missing-files.md) |
+| `crates/ui/src/app/project_dialog.rs` | [Components](design/components.md), [About Suhina](spec/about.md), [Backups](spec/backups.md) |
+| `crates/ui/src/app/splash.rs` | [Components](design/components.md) |
+| `crates/ui/src/app/start_panel.rs` | [Components](design/components.md) |
+| `crates/ui/src/arrangement.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/arrangement/arrangement_view.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
+| `crates/ui/src/arrangement/automation_lanes.rs` | [Components](design/components.md), [Automation](spec/automation.md) |
+| `crates/ui/src/arrangement/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
 | `crates/ui/src/browser.rs` | [Architecture](architecture.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
-| `crates/ui/src/browser_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
-| `crates/ui/src/colour_picker.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/detail_view.rs` | [Components](design/components.md), [Suhina device graph (`.sd`)](spec/sd-device-format.md), [Custom device panels](spec/sdk-custom-ui.md), [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/device_canvas.rs` | [Custom device panels](spec/sdk-custom-ui.md) |
-| `crates/ui/src/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
-| `crates/ui/src/follow_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](guide/keyboard-shortcuts.md), [Keyboard shortcuts](shortcuts.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
-| `crates/ui/src/launch_keys.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/browser/browser_view.rs` | [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Browser](spec/browser.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
+| `crates/ui/src/browser/sample_map.rs` | [Sample map](spec/sample-map.md) |
+| `crates/ui/src/browser/sample_map_crowd.rs` | [Sample map](spec/sample-map.md) |
+| `crates/ui/src/browser/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
+| `crates/ui/src/detail.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/detail/detail_view.rs` | [Components](design/components.md), [Suhina device graph (`.sd`)](spec/sd-device-format.md), [Custom device panels](spec/sdk-custom-ui.md), [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/detail/device_canvas.rs` | [Custom device panels](spec/sdk-custom-ui.md) |
+| `crates/ui/src/detail/follow_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/detail/midi_tools.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/detail/piano_roll.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/detail/piano_roll_gestures.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/detail/piano_roll_ghosts.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/detail/piano_roll_grid.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/detail/piano_roll_ruler.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/detail/piano_roll_scale.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
+| `crates/ui/src/interaction.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/interaction/colour_picker.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/interaction/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
+| `crates/ui/src/interaction/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/interaction/menus.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
+| `crates/ui/src/interaction/pick.rs` | [Components](design/components.md) |
+| `crates/ui/src/kit.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/kit/logo.rs` | [Components](design/components.md) |
+| `crates/ui/src/kit/meter.rs` | [Components](design/components.md), [Level meters](spec/level-meters.md) |
+| `crates/ui/src/kit/motion.rs` | [Components](design/components.md) |
+| `crates/ui/src/kit/theme.rs` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md), [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/kit/waveform.rs` | [Components](design/components.md), [Waveforms](spec/waveforms.md) |
+| `crates/ui/src/kit/waveform/tests.rs` | [Waveforms](spec/waveforms.md) |
+| `crates/ui/src/kit/widgets.rs` | [Components](design/components.md), [Cue output](spec/cue-output.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
-| `crates/ui/src/loading_dialog.rs` | [Components](design/components.md) |
-| `crates/ui/src/logo.rs` | [Components](design/components.md) |
-| `crates/ui/src/menus.rs` | [Arrangement editing](spec/arrangement-editing.md), [Clip launching](spec/clip-launching.md) |
-| `crates/ui/src/meter.rs` | [Components](design/components.md), [Level meters](spec/level-meters.md) |
-| `crates/ui/src/midi_tools.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/missing_files.rs` | [Architecture](architecture.md), [Components](design/components.md), [Missing files](spec/missing-files.md) |
-| `crates/ui/src/mixer_strip.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/motion.rs` | [Components](design/components.md) |
-| `crates/ui/src/piano_roll.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/piano_roll_gestures.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/piano_roll_ghosts.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/piano_roll_grid.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/piano_roll_ruler.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/piano_roll_scale.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
-| `crates/ui/src/pick.rs` | [Components](design/components.md) |
-| `crates/ui/src/project_dialog.rs` | [Components](design/components.md), [About Suhina](spec/about.md), [Backups](spec/backups.md) |
-| `crates/ui/src/record_controls.rs` | [Recording](spec/recording.md) |
-| `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |
-| `crates/ui/src/sample_map_crowd.rs` | [Sample map](spec/sample-map.md) |
-| `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
-| `crates/ui/src/session_view.rs` | [Components](design/components.md), [Browser](spec/browser.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/session.rs` | [Architecture](architecture.md) |
+| `crates/ui/src/session/launch_keys.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/session/mixer_strip.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/session/record_controls.rs` | [Recording](spec/recording.md) |
+| `crates/ui/src/session/session_view.rs` | [Components](design/components.md), [Browser](spec/browser.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/session/slot_launch.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md), [The Settings window](spec/ui-settings.md), [Window zoom](spec/window-zoom.md) |
-| `crates/ui/src/settings_rows.rs` | [The Settings window](spec/ui-settings.md) |
-| `crates/ui/src/settings_view.rs` | [0020: Latency: what the number is, and where it is shown](decisions/0020-latency-and-its-readout.md), [Design brief](design/brief.md), [Components](design/components.md), [Keyboard shortcuts](guide/keyboard-shortcuts.md), [Keyboard shortcuts](shortcuts.md), [The Settings window](spec/ui-settings.md), [Window zoom](spec/window-zoom.md) |
-| `crates/ui/src/slot_launch.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/splash.rs` | [Components](design/components.md) |
-| `crates/ui/src/start_panel.rs` | [Components](design/components.md) |
-| `crates/ui/src/theme.rs` | [0009: egui for the UI; familiar workflow, Suhina's own look](decisions/0009-ui-toolkit-and-look.md), [Design brief](design/brief.md), [Components](design/components.md) |
-| `crates/ui/src/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
-| `crates/ui/src/timeline.rs` | [Components](design/components.md), [Arrangement editing](spec/arrangement-editing.md) |
-| `crates/ui/src/view_settings.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/waveform.rs` | [Components](design/components.md), [Waveforms](spec/waveforms.md) |
-| `crates/ui/src/waveform/tests.rs` | [Waveforms](spec/waveforms.md) |
-| `crates/ui/src/widgets.rs` | [Components](design/components.md), [Cue output](spec/cue-output.md), [UI: main window and Session view](spec/ui-session-view.md) |
+| `crates/ui/src/settings/keymap.rs` | [Keyboard shortcuts](guide/keyboard-shortcuts.md), [Keyboard shortcuts](shortcuts.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/settings/settings_rows.rs` | [The Settings window](spec/ui-settings.md) |
+| `crates/ui/src/settings/settings_view.rs` | [0020: Latency: what the number is, and where it is shown](decisions/0020-latency-and-its-readout.md), [Design brief](design/brief.md), [Components](design/components.md), [Keyboard shortcuts](guide/keyboard-shortcuts.md), [Keyboard shortcuts](shortcuts.md), [The Settings window](spec/ui-settings.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/settings/themes.rs` | [Design brief](design/brief.md), [Components](design/components.md) |
+| `crates/ui/src/settings/view_settings.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/tests/automation_lanes.rs` | [Automation](spec/automation.md) |
 | `crates/ui/tests/launch_keys.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/tests/meters.rs` | [Level meters](spec/level-meters.md) |

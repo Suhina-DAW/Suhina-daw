@@ -14,9 +14,9 @@ covers:
   - crates/session/src/preview.rs
   - crates/engine/src/preview.rs
   - crates/ui/src/browser.rs
-  - crates/ui/src/browser_view.rs
-  - crates/ui/src/drop.rs
-  - crates/ui/src/session_view.rs
+  - crates/ui/src/browser/browser_view.rs
+  - crates/ui/src/interaction/drop.rs
+  - crates/ui/src/session/session_view.rs
 ---
 
 # Browser
@@ -324,7 +324,9 @@ Purple and Grey; a right-click on a tag's dot in the footer renames it (a field,
 inside that menu do not close it),
 recolours it (the swatches of the track colour palette, [components](../design/components.md#colour-palette), or a colour button for any colour) or removes it; new ones are added from a row's Tag menu, up to 64
 (Settings › Browser › Tag limit raises it, at most 1024). Any item can carry any
-number of tags; a tag is a 6 px dot after the name. Clicking a tag's dot in the footer shows
+number of tags; a tag is a 6 px dot after the name. Hovering a dot — the footer's or an item
+row's — says the tag's name: as a tooltip, and in the status bar (the footer's dot adds how
+many items carry it). Clicking a tag's dot in the footer shows
 only items with that tag (several: items with any of them); clicking it again stops.
 
 The **tag editor** is all of that in one place: the footer's **Edit tags** button opens a

@@ -92,7 +92,7 @@ its comments say what the work waits for, so ask there instead of starting.
 **Claim it** in a comment on the issue before you write code:
 
 > /claim Plan: … When: …
-> Touches: crates/ui/src/piano_roll, crates/session
+> Touches: crates/ui/src/detail, crates/session
 
 The claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) moves the card to `In progress` and
 assigns you, and refuses the claim when the work is not free or another issue it is *Blocked by*
@@ -143,7 +143,10 @@ issues, not the epic.
 apart from `AGENTS.md` and the documents those point at, so write it to stand on its own: goal,
 acceptance criteria, where the code goes. Keep the plan in the issue and the result in the pull
 request. An agent searches for an existing issue before it opens one, and for an open pull request
-before it opens one; it continues work that is open rather than starting it again. The rules in
+before it opens one; it continues work that is open rather than starting it again. An agent run
+by someone with write access opens issues through the
+[Open issue](.github/workflows/open-issue.yml) workflow, so they show the bot `suhina-bot[bot]` as
+their author rather than that person (`AGENTS.md` › Tasks has the commands). The rules in
 [AI-assisted contributions](#ai-assisted-contributions) apply to what the agent wrote.
 
 ## Trying a pull request
@@ -164,6 +167,15 @@ one build before they merge, run Actions › Test build › Run workflow with th
 (`302 303 304`). A push that only merges `main` into a pull request is not built again; its last
 test build stays linked. [`docs/releasing.md` › Merging many pull requests](docs/releasing.md#merging-many-pull-requests)
 says how the queue is set up and what runs in it.
+
+**The `ready to merge` label** does the waiting for you. A maintainer who has read a pull request
+adds it, and [`ready-to-merge.yml`](.github/workflows/ready-to-merge.yml) approves the commit it was
+added on and turns on *Merge when ready* for that commit: the queue takes the pull request once
+`ci` is green and every review thread is resolved (CodeRabbit's too), and a red check stops it. A
+contributor's pull request also needs `test-build`, so its build was tried first. A push by anyone
+but a maintainer takes the label off, so new commits are never merged unread; taking the label off
+by hand stops the merge. Only a maintainer adds it: an agent never adds `ready to merge`, also not
+when asked to finish a pull request.
 
 ## Clean-room
 

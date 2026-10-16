@@ -6,6 +6,11 @@
 //! known about files (length, tempo, key, waveform), read on a thread of its own so the window
 //! never waits for the disk. `browser_view` draws it.
 
+pub mod browser_view;
+pub mod sample_map;
+mod sample_map_crowd;
+pub mod sample_map_panel;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,8 +21,8 @@ use suhina_library::{FileKind, Group, Item, Listing};
 use suhina_media::info::{Tempo, TempoSource};
 use suhina_session::{Category, Found, Projects};
 
-use crate::drop::{BrowserItem, ItemKind};
-use crate::waveform::{Peaks, peaks};
+use crate::interaction::drop::{BrowserItem, ItemKind};
+use crate::kit::waveform::{Peaks, peaks};
 
 /// What the sidebar can show instead of the whole tree.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

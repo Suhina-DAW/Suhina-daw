@@ -5,21 +5,21 @@ type: spec
 status: draft
 last_verified: 2026-10-16
 covers:
-  - crates/ui/src/session_view.rs
-  - crates/ui/src/mixer_strip.rs
-  - crates/ui/src/view_settings.rs
+  - crates/ui/src/session/session_view.rs
+  - crates/ui/src/session/mixer_strip.rs
+  - crates/ui/src/settings/view_settings.rs
   - crates/ui/tests/mixer_strip.rs
-  - crates/ui/src/colour_picker.rs
+  - crates/ui/src/interaction/colour_picker.rs
   - crates/ui/tests/track_colour.rs
-  - crates/ui/src/grid.rs
-  - crates/ui/src/slot_launch.rs
-  - crates/ui/src/launch_keys.rs
+  - crates/ui/src/interaction/grid.rs
+  - crates/ui/src/session/slot_launch.rs
+  - crates/ui/src/session/launch_keys.rs
   - crates/ui/tests/launch_keys.rs
   - crates/ui/src/app.rs
-  - crates/ui/src/widgets.rs
-  - crates/ui/src/detail_view.rs
-  - crates/ui/src/keymap.rs
-  - crates/ui/src/follow_view.rs
+  - crates/ui/src/kit/widgets.rs
+  - crates/ui/src/detail/detail_view.rs
+  - crates/ui/src/settings/keymap.rs
+  - crates/ui/src/detail/follow_view.rs
   - crates/engine/src/cpu.rs
 ---
 

@@ -11,7 +11,7 @@ use egui_kittest::kittest::Queryable;
 use suhina_engine::model::{AutomationPoint, Project};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 

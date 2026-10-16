@@ -14,11 +14,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use suhina_session::{OutputChoice, Session};
-use suhina_ui::keymap::Keymap;
+use suhina_ui::app::splash::Splash;
+use suhina_ui::settings::keymap::Keymap;
+use suhina_ui::settings::settings_view::About;
+use suhina_ui::settings::themes::FileAction;
 use suhina_ui::settings::{Graphics, Settings};
-use suhina_ui::settings_view::About;
-use suhina_ui::splash::Splash;
-use suhina_ui::themes::FileAction;
 use suhina_ui::{App, NewProject, OpenAs, Status};
 
 const USAGE: &str = "\
@@ -140,7 +140,7 @@ fn main() -> ExitCode {
         app_id(),
         options,
         Box::new(move |cc| {
-            suhina_ui::theme::install(&cc.egui_ctx);
+            suhina_ui::kit::theme::install(&cc.egui_ctx);
             let owner = native_window(cc);
             window.editors_embeddable = owner.is_some();
             window.app.set_editor_owner(owner);
@@ -377,7 +377,7 @@ impl Window {
         let folder = session.audio_folder().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         let (audio, audio_warnings) = suhina_media::load_project_audio(session.project(), &folder);
         warnings.extend(audio_warnings);
-        let waveforms = suhina_ui::waveform::from_pool(&audio);
+        let waveforms = suhina_ui::kit::waveform::from_pool(&audio);
         session.set_audio(audio);
         let choice = self.app.projects().output_choice().clone();
         // A device may only be open once: the previews' own output closes first (ADR 0011).
@@ -442,7 +442,7 @@ impl Window {
         if let Some(warning) = warnings.first() {
             self.app.set_status(Status::Error(warning.clone()));
         }
-        if !suhina_ui::theme::is_built_in(&self.app.settings().theme) {
+        if !suhina_ui::kit::theme::is_built_in(&self.app.settings().theme) {
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
         }
     }
@@ -481,7 +481,7 @@ impl Window {
 /// "<what> <file>", and the file shown in the file manager.
 /// Shows the system's file or folder dialog `request` asks for; `None` when it was cancelled.
 /// It waits on the main thread, as macOS requires, while the window stays behind it.
-fn pick(request: &suhina_ui::pick::PickRequest) -> Option<PathBuf> {
+fn pick(request: &suhina_ui::interaction::pick::PickRequest) -> Option<PathBuf> {
     let mut dialog = rfd::FileDialog::new().set_title(request.field.title());
     if let Some(start) = request.start.as_ref().filter(|s| s.is_dir()) {
         dialog = dialog.set_directory(start);

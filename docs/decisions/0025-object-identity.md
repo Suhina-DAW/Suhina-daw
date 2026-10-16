@@ -185,10 +185,10 @@ The same reasoning applies to the release of `.locr` (its own decision, not this
   agents; renaming one is a breaking change."* A parameter that keeps its name but changes its
   meaning is worse than a rename, so the deprecation window is part of the change, not a courtesy.
 - The UI's `(TrackId, usize)` disappears: `selected_clip() -> Option<(TrackId, usize)>`
-  (`crates/ui/src/arrangement_view.rs:201`), `clip_menu(ui, track, index, …)`
-  (`crates/ui/src/menus.rs:95`), copy/cut/paste from `(track, index)`
+  (`crates/ui/src/arrangement/arrangement_view.rs:201`), `clip_menu(ui, track, index, …)`
+  (`crates/ui/src/interaction/menus.rs:95`), copy/cut/paste from `(track, index)`
   (`crates/ui/src/app.rs:1674`), and `ClipBox`'s `index`/`row`/`rows`
-  (`crates/ui/src/timeline.rs:66`, `:83–84`) with `sub_rows` (`:247`) computing the stacking layout
+  (`crates/ui/src/arrangement/timeline.rs:66`, `:83–84`) with `sub_rows` (`:247`) computing the stacking layout
   from positions.
 - `crates/project-file` gains a v1 reader that **derives ids in document order**, and the writer
   emits them; the round-trip test and every model field's line in the spec move with it
@@ -246,6 +246,6 @@ meantime.
   [ADR 0027](0027-merge-and-versions.md).
 - Code as it is: `crates/model/src/lib.rs`, `crates/session/src/commands.rs`,
   `crates/session/src/files.rs`, `crates/session/src/blank.rs`, `crates/project-file/src/lib.rs`,
-  `crates/ui/src/arrangement_view.rs`, `crates/ui/src/menus.rs`, `crates/ui/src/app.rs`,
-  `crates/ui/src/timeline.rs`, `crates/engine/src/lib.rs`, `crates/engine/src/buses.rs`.
+  `crates/ui/src/arrangement/arrangement_view.rs`, `crates/ui/src/interaction/menus.rs`, `crates/ui/src/app.rs`,
+  `crates/ui/src/arrangement/timeline.rs`, `crates/engine/src/lib.rs`, `crates/engine/src/buses.rs`.
 - [#352](https://github.com/suhina-daw/suhina-daw/issues/352) (duplicated clips share their notes).

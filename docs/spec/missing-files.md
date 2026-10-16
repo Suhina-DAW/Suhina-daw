@@ -7,7 +7,7 @@ last_verified: 2026-10-13
 covers:
   - crates/library/src/find.rs
   - crates/session/src/relink.rs
-  - crates/ui/src/missing_files.rs
+  - crates/ui/src/app/missing_files.rs
 ---
 
 # Missing files

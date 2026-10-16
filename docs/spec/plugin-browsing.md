@@ -6,7 +6,7 @@ status: current
 last_verified: 2026-10-14
 covers:
   - crates/ui/src/browser.rs
-  - crates/ui/src/browser_view.rs
+  - crates/ui/src/browser/browser_view.rs
   - crates/session/src/rack.rs
   - crates/session/src/library.rs
   - crates/library/src/store.rs

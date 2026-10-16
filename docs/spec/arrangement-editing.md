@@ -6,21 +6,21 @@ status: draft
 last_verified: 2026-10-16
 covers:
   - crates/session/src/commands.rs
-  - crates/ui/src/timeline.rs
-  - crates/ui/src/arrangement_view.rs
+  - crates/ui/src/arrangement/timeline.rs
+  - crates/ui/src/arrangement/arrangement_view.rs
   - crates/model/src/lib.rs
   - crates/engine/src/audio.rs
   - crates/engine/src/fade_cost_tests.rs
   - crates/engine/src/launcher.rs
   - crates/engine/src/loop_tests.rs
   - apps/suhina-cli/src/play.rs
-  - crates/ui/src/menus.rs
-  - crates/ui/src/colour_picker.rs
-  - crates/ui/src/drop.rs
+  - crates/ui/src/interaction/menus.rs
+  - crates/ui/src/interaction/colour_picker.rs
+  - crates/ui/src/interaction/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
   - crates/ui/src/settings.rs
-  - crates/ui/src/keymap.rs
+  - crates/ui/src/settings/keymap.rs
   - crates/session/src/editing.rs
   - crates/engine/src/track_render.rs
   - crates/ui/src/app.rs

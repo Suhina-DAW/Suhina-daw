@@ -5,8 +5,8 @@ type: howto
 status: current
 last_verified: 2026-10-16
 covers:
-  - crates/ui/src/keymap.rs
-  - crates/ui/src/settings_view.rs
+  - crates/ui/src/settings/keymap.rs
+  - crates/ui/src/settings/settings_view.rs
 ---
 
 # Keyboard shortcuts

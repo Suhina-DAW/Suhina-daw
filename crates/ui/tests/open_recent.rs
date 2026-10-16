@@ -11,7 +11,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
 use suhina_ui::settings::{OnOpen, Settings};
-use suhina_ui::{App, OpenAs, Status, theme};
+use suhina_ui::{App, OpenAs, Status, kit::theme};
 
 fn window(app: App) -> Harness<'static, App> {
     let mut harness = Harness::builder()

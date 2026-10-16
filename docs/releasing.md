@@ -1,6 +1,6 @@
 ---
 description: How versions are numbered, how release builds, the nightly and test builds of pull requests are made, and how many pull requests are merged through the merge queue
-read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog
+read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, ready to merge label, auto-merge, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog
 type: howto
 status: current
 last_verified: 2026-10-15
@@ -10,6 +10,7 @@ covers:
   - .github/workflows/discord.yml
   - .github/workflows/test-build.yml
   - .github/workflows/test-build-links.yml
+  - .github/workflows/ready-to-merge.yml
   - scripts/branch_update.py
   - scripts/release_notes.py
   - scripts/discord_post.py
@@ -188,6 +189,31 @@ required from another workflow would keep the queue waiting.
 Without a queue, turn off *Require branches to be up to date before merging* and merge each green
 pull request without updating it; CI on `main`, which runs on every push, catches the rare
 conflict in meaning between two of them.
+
+**The `ready to merge` label.** A maintainer who has read a pull request adds the label instead of
+coming back to press *Merge when ready* once CI is green.
+[`ready-to-merge.yml`](../.github/workflows/ready-to-merge.yml) (`pull_request_target`, never
+checking out or running the pull request's code) then:
+
+| Event | What happens |
+|---|---|
+| a maintainer adds the label | the app approves the head commit as the event saw it (the rule for `main` needs one approval, and a maintainer cannot approve their own pull request) and turns on auto-merge with that commit as the expected head; the queue takes the pull request once `ci` is green and every review thread is resolved |
+| the label on a contributor's pull request without `test-build` | the label comes off, with a comment: a maintainer tries the build of the commit they read first |
+| anyone else adds the label | it comes off |
+| a push by a maintainer | the label stays; the app approves the new head and turns auto-merge on for it |
+| a push by anyone else | the label comes off, so the new commits wait to be read (the rule for `main` dismisses the older approval) |
+| the label comes off | auto-merge off, out of the queue, and the app's approvals dismissed; a call that fails fails the run. When the label was added again meanwhile, the run fails and asks for the label to be taken off and added again, so the pull request waits rather than merging |
+
+The merge method is the queue's (squash). Agents never add the label (`AGENTS.md` › Tasks).
+
+It acts with a short-lived token of the GitHub App that also pushes the generated docs
+(`docs-generated.yml`), not with `GITHUB_TOKEN`: GitHub starts no workflows for a merge made through
+`GITHUB_TOKEN`, and those on `main` must run after every merge. Setup, once: the app has Repository
+permissions › **Contents** and **Pull requests**: Read and write; its `DOCS_BOT_APP_ID` and
+`DOCS_BOT_PRIVATE_KEY` are in the `docs-bot` environment, which `pull_request_target` may use
+because it runs on `main`; and Settings › General › **Allow auto-merge** is on. Without that setting the
+*approve and queue* job fails, and nothing merges. The maintainers are listed in the workflow as in
+the test build's.
 
 **One build of several pull requests.** To try a batch before merging it, run Actions › Test build
 › Run workflow with their numbers (`302 303 304`), as described under [Test builds](#test-builds):

@@ -19,7 +19,7 @@ covers:
   - crates/engine/src/chain.rs
   - crates/engine/src/chain_tests.rs
   - crates/session/src/devices.rs
-  - crates/ui/src/detail_view.rs
+  - crates/ui/src/detail/detail_view.rs
   - crates/media/src/info.rs
 ---
 

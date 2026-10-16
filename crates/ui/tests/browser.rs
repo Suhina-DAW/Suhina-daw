@@ -12,11 +12,12 @@ use std::time::{Duration, Instant};
 use egui::{Key, Modifiers, Pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use serde_json::json;
 use suhina_engine::model::{ChannelId, LaneData};
 use suhina_library::Library;
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, Status, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 
@@ -950,7 +951,7 @@ fn plug_ins_group_by_type() {
 
 #[test]
 fn a_folder_for_the_browser_is_chosen_in_the_systems_dialog() {
-    use suhina_ui::pick::PickField;
+    use suhina_ui::interaction::pick::PickField;
     let (settings, folder) = (temp("pick-settings"), temp("pick"));
     let other = temp("pick-other");
     pack(&folder);
@@ -1112,6 +1113,71 @@ fn the_tag_editor_lists_renames_adds_and_removes_tags() {
     harness.get_by_label("Place Pinned").click();
     harness.run();
     assert!(harness.query_by_label_contains("Tag row").is_none(), "a click outside closed the popup");
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn hovering_the_footers_tag_dot_says_the_tags_name_and_count_in_the_status_bar() {
+    let (settings, folder) = (temp("dot-footer-settings"), temp("dot-footer"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    // Tag one of the samples: the footer's dot's hover says the tag's name and the count.
+    let item = folder.join("Drums").join("Kick Hard.wav").display().to_string();
+    harness
+        .state_mut()
+        .projects_mut()
+        .execute("library.tag", &json!({ "item": item, "tag": "Red", "on": true }))
+        .unwrap();
+    harness.run();
+    let at = harness.get_by_label("Tag Red").rect().center();
+    harness.hover_at(at);
+    harness.run();
+    assert!(
+        matches!(harness.state().status(), Status::Hint(text) if text.contains("Red") && text.contains("1 item")),
+        "{:?}",
+        harness.state().status()
+    );
+    let _ = std::fs::remove_dir_all(&settings);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn hovering_an_items_tag_dot_says_the_tag_in_the_status_bar() {
+    let (settings, folder) = (temp("dot-row-settings"), temp("dot-row"));
+    pack(&folder);
+    let mut harness = window(&settings, &folder);
+    // The library's folder opens to its files, the tag dots beside their names.
+    let name = folder.file_name().unwrap().to_string_lossy().to_string();
+    double_click(&mut harness, &row(&name));
+    harness.run();
+    // Tag two of the root's files: each row carries the tag's dot, whose hover says the tag's
+    // name in the status bar.
+    for (file, tag) in [("Loop 120bpm.wav", "Green"), ("Groove.mid", "Blue")] {
+        harness
+            .state_mut()
+            .projects_mut()
+            .execute("library.tag", &json!({ "item": folder.join(file).display().to_string(), "tag": tag, "on": true }))
+            .unwrap();
+    }
+    harness.run();
+    let at = harness.get_by_label("Tagged Green").rect().center();
+    harness.hover_at(at);
+    harness.run();
+    assert!(
+        matches!(harness.state().status(), Status::Hint(text) if text.contains("Green") && !text.contains("Blue")),
+        "{:?}",
+        harness.state().status()
+    );
+    // The other row's dot says its own tag, not the first's.
+    let at = harness.get_by_label("Tagged Blue").rect().center();
+    harness.hover_at(at);
+    harness.run();
+    assert!(
+        matches!(harness.state().status(), Status::Hint(text) if text.contains("Blue") && !text.contains("Green")),
+        "{:?}",
+        harness.state().status()
+    );
     let _ = std::fs::remove_dir_all(&settings);
     let _ = std::fs::remove_dir_all(&folder);
 }

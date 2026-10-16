@@ -15,10 +15,10 @@ use egui_kittest::kittest::Queryable;
 use suhina_engine::model::{Device, DeviceKind, Extensions};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::mixer_strip::{DEVICES_AT, FADER_AT, NAME_AT, OUTPUT_AT, PAN_AT, SENDS_AT};
+use suhina_ui::session::mixer_strip::{DEVICES_AT, FADER_AT, NAME_AT, OUTPUT_AT, PAN_AT, SENDS_AT};
 use suhina_ui::settings::Settings;
-use suhina_ui::view_settings::{DetailLayout, MIXER_HEIGHTS};
-use suhina_ui::{App, theme};
+use suhina_ui::settings::view_settings::{DetailLayout, MIXER_HEIGHTS};
+use suhina_ui::{App, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 900.0);
 

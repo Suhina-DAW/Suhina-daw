@@ -210,6 +210,13 @@ fn pins_recent_and_tags_are_kept() {
     assert_eq!(again.recent(Group::Instruments), ["device:fm-synth"]);
     assert_eq!(again.item_tags("/x.wav"), ["Vocals"]);
     assert!(again.tags().iter().any(|t| t.name == "Vocals"));
+    // The count the footer's dot hovers with, without copying the tagged items.
+    assert_eq!(again.tagged_count("Vocals"), 1);
+    assert_eq!(again.tagged_count("Nothing"), 0);
+    again.tag("/y.wav", "Vocals", true).unwrap();
+    assert_eq!(again.tagged_count("Vocals"), 2);
+    again.tag("/y.wav", "Vocals", false).unwrap();
+    assert_eq!(again.tagged_count("Vocals"), 1);
     assert!(again.take_warnings().is_empty());
     let _ = std::fs::remove_dir_all(&settings);
 }

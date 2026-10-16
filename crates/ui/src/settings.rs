@@ -4,6 +4,13 @@
 //! The user's settings: what they are, their defaults, and the text file they are kept in
 //! (`key = value` lines, so a person can read and fix it). The app decides where the file lives.
 
+pub mod keymap;
+mod settings_rows;
+pub mod settings_view;
+pub mod themes;
+pub mod view_settings;
+pub mod workflow;
+
 /// Which side of the timeline the track headers are on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Side {
@@ -269,7 +276,7 @@ pub struct Settings {
     /// (`docs/spec/ui-session-view.md` › Launching and selecting).
     pub select_on_launch: bool,
     /// The Session mixer's height, the detail area's layout and double-clicks that make clips.
-    pub view: crate::view_settings::ViewSettings,
+    pub view: crate::settings::view_settings::ViewSettings,
     /// What stays above the piano roll pulled to the top.
     pub piano_roll_top: PianoRollTop,
     /// How large the piano roll's toolbar is drawn.
@@ -281,7 +288,7 @@ pub struct Settings {
     pub mixer_controls: MixerControls,
     /// Where plug-in editors open.
     pub plugin_editors: EditorPlacement,
-    /// The theme in use: [`crate::theme::BUILT_IN`] or the name of a file in the themes folder,
+    /// The theme in use: [`crate::kit::theme::BUILT_IN`] or the name of a file in the themes folder,
     /// without `.json`.
     pub theme: String,
     /// Where new projects are saved and templates are kept; empty for the defaults the app gives
@@ -356,13 +363,13 @@ impl Default for Settings {
             play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
             select_on_launch: true,
-            view: crate::view_settings::ViewSettings::default(),
+            view: crate::settings::view_settings::ViewSettings::default(),
             piano_roll_top: PianoRollTop::Track,
             toolbar_size: ToolbarSize::Large,
             piano_grid_follows: false,
             mixer_controls: MixerControls::Field,
             plugin_editors: EditorPlacement::Window,
-            theme: crate::theme::BUILT_IN.into(),
+            theme: crate::kit::theme::BUILT_IN.into(),
             projects_folder: String::new(),
             templates_folder: String::new(),
             browser_open: true,
@@ -823,7 +830,7 @@ midi_input_off = Keys
             play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
             select_on_launch: false,
-            view: crate::view_settings::ViewSettings::default(),
+            view: crate::settings::view_settings::ViewSettings::default(),
             piano_roll_top: PianoRollTop::Window,
             toolbar_size: ToolbarSize::Larger,
             piano_grid_follows: true,

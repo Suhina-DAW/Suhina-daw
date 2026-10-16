@@ -11,7 +11,7 @@ use egui_kittest::kittest::Queryable;
 use serde_json::json;
 use suhina_session::{Projects, Session, blank_project};
 use suhina_ui::browser::BrowserState;
-use suhina_ui::browser_view;
+use suhina_ui::browser::browser_view;
 use suhina_ui::settings::Settings;
 
 struct State {

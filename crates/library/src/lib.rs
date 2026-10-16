@@ -625,6 +625,13 @@ impl Library {
         self.load();
         self.store.tagged.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
+
+    /// How many items carry the tag `name`, counted where the tags are kept: no item key and no
+    /// tag list is copied, so a hover over a tag's dot costs no allocation.
+    pub fn tagged_count(&mut self, name: &str) -> usize {
+        self.load();
+        self.store.tagged.values().filter(|names| names.iter().any(|n| n == name)).count()
+    }
 }
 
 /// The words of a search, lower-cased.

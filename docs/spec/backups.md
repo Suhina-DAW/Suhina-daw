@@ -6,7 +6,7 @@ status: draft
 last_verified: 2026-10-15
 covers:
   - crates/session/src/backup.rs
-  - crates/ui/src/project_dialog.rs
+  - crates/ui/src/app/project_dialog.rs
 ---
 
 # Backups

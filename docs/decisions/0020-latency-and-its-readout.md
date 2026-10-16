@@ -9,7 +9,7 @@ covers:
   - crates/output/src/devices.rs
   - crates/session/src/audio.rs
   - crates/ui/src/app.rs
-  - crates/ui/src/settings_view.rs
+  - crates/ui/src/settings/settings_view.rs
 ---
 
 # 0020: Latency: what the number is, and where it is shown
@@ -24,7 +24,7 @@ covers:
 Suhina already measures the latency it plays at, and already publishes it: `OutputInfo` carries
 `latency_ms` together with the device's measured `buffer_frames`, the engine's `engine_block`,
 `underruns` and `failed`; `audio.info` reports them to agents ([mcp.md](../mcp.md)), and
-Settings › Audio › Now prints the number while a project plays (`crates/ui/src/settings_view.rs`).
+Settings › Audio › Now prints the number while a project plays (`crates/ui/src/settings/settings_view.rs`).
 What the window does not have is a surface for it while someone works: the control bar shows the
 CPU load from the engine's monitor and the program's RAM
 ([components.md](../design/components.md) › Control bar), and the number a person tunes the buffer

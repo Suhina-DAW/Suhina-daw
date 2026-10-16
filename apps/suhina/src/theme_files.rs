@@ -12,9 +12,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
+use suhina_ui::kit::theme::{self, Theme};
 use suhina_ui::settings::is_theme_id;
-use suhina_ui::theme::{self, Theme};
-use suhina_ui::themes::{ThemeEntry, slug};
+use suhina_ui::settings::themes::{ThemeEntry, slug};
 
 /// Larger files are not themes; they are skipped instead of read.
 const MAX_FILE: u64 = 256 * 1024;
@@ -369,7 +369,7 @@ mod tests {
 
     fn night() -> Theme {
         let mut theme = Theme { name: "Night".into(), ..Theme::default() };
-        theme.colors.accent = suhina_ui::theme::parse_hex("#123456").unwrap_or_default();
+        theme.colors.accent = suhina_ui::kit::theme::parse_hex("#123456").unwrap_or_default();
         theme
     }
 

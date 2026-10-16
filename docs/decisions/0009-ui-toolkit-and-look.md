@@ -7,7 +7,7 @@ last_verified: 2026-10-14
 covers:
   - apps/suhina/Cargo.toml
   - crates/ui/Cargo.toml
-  - crates/ui/src/theme.rs
+  - crates/ui/src/kit/theme.rs
 ---
 
 # 0009: egui for the UI; familiar workflow, Suhina's own look
