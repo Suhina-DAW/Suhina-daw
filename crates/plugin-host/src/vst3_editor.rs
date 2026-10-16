@@ -123,8 +123,15 @@ pub(crate) struct Editor {
     resized: Option<Size>,
 }
 
-/// The platform type a view is attached as on this system.
-const PLATFORM: FIDString = if cfg!(windows) { kPlatformTypeHWND } else { kPlatformTypeX11EmbedWindowID };
+/// The platform type a view is attached as on this system: Win32 on Windows, an `NSView` on
+/// macOS (there is no X11 on a Mac), an X11 window id elsewhere.
+const PLATFORM: FIDString = if cfg!(windows) {
+    kPlatformTypeHWND
+} else if cfg!(target_os = "macos") {
+    kPlatformTypeNSView
+} else {
+    kPlatformTypeX11EmbedWindowID
+};
 
 impl Editor {
     /// Opens `controller`'s editor in a window of `mode`, titled `title` when it has a title.
