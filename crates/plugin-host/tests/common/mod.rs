@@ -7,6 +7,15 @@
 
 /// Whether editors can open here: on Windows, and on Linux with an X server.
 pub fn editors_open_here() -> bool {
+    cfg!(windows)
+        || cfg!(target_os = "macos")
+        || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
+}
+
+/// Whether an editor can open EMBEDDED in this window: on macOS a view of the host's process
+/// cannot attach to another process's window, so there it always falls back to a window of
+/// its own.
+pub fn embeds_editors_here() -> bool {
     cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
 }
 

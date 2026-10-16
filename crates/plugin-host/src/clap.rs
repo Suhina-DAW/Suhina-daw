@@ -104,9 +104,18 @@ struct ClapEditor {
     resized: Option<crate::window::Size>,
 }
 
-/// How the editor is embedded on this system.
-const GUI: GuiConfiguration<'static> =
-    GuiConfiguration { api_type: if cfg!(windows) { GuiApiType::WIN32 } else { GuiApiType::X11 }, is_floating: false };
+/// How the editor is embedded on this system: Win32 on Windows, Cocoa on macOS (there is no
+/// X11 on a Mac), X11 elsewhere.
+const GUI: GuiConfiguration<'static> = GuiConfiguration {
+    api_type: if cfg!(windows) {
+        GuiApiType::WIN32
+    } else if cfg!(target_os = "macos") {
+        GuiApiType::COCOA
+    } else {
+        GuiApiType::X11
+    },
+    is_floating: false,
+};
 
 /// Most audio ports one direction may have, and most channels one port may have: a plug-in's
 /// numbers are not trusted.
@@ -858,8 +867,16 @@ fn parent_window(window: &crate::window::Window) -> clack_extensions::gui::Windo
     unsafe { clack_extensions::gui::Window::from_win32_hwnd(window.handle()) }
 }
 
+/// The host's window as the parent CLAP's `gui` extension takes on this system: the content
+/// view's pointer, for the plug-in's view to attach beside it.
+#[cfg(target_os = "macos")]
+fn parent_window(window: &crate::window::Window) -> clack_extensions::gui::Window<'static, 'static> {
+    // SAFETY: the view stays open until the editor is destroyed in `close_editor`.
+    unsafe { clack_extensions::gui::Window::from_cocoa_nsview(window.handle()) }
+}
+
 /// The host's window as the parent CLAP's `gui` extension takes on this system: the X11 id.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn parent_window(window: &crate::window::Window) -> clack_extensions::gui::Window<'static, 'static> {
     clack_extensions::gui::Window::from_x11_handle(window.handle() as usize as std::ffi::c_ulong)
 }

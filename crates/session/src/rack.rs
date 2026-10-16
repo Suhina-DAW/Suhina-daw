@@ -595,6 +595,10 @@ struct Instance {
     placement_sent: Option<Placement>,
     /// The editor is being closed to open again the other way (the embedding setting changed).
     reopen_editor: bool,
+    /// An embedded editor cannot open on this system (macOS: a view of the host's process
+    /// cannot attach to another process's window), so editors open in a window of their own
+    /// instead, whatever the setting says.
+    force_floating: bool,
     /// How it keeps up with the engine, while its audio half runs there.
     counts: Option<Arc<BlockCounts>>,
     /// Its parameters' ids and ranges (lowest, highest), once listed ([`Rack::params`]).
@@ -617,6 +621,7 @@ impl Instance {
             placement_wanted: None,
             placement_sent: None,
             reopen_editor: false,
+            force_floating: false,
             counts: None,
         }
     }
@@ -780,6 +785,7 @@ impl Rack {
     /// making an editor's window that waits for the session's own window). It comes back
     /// through [`Rack::take_returned`].
     fn lend(&mut self, key: u64, work: impl FnOnce(&mut Plugin) -> Done + Send + 'static) -> Result<(), CommandError> {
+        eprintln!("PROBE lend {key}");
         let instance = self.instances.get_mut(&key).ok_or("the device's plug-in is not running")?;
         let mut control = instance.control.take().ok_or("the plug-in is busy; try again in a moment")?;
         let (sender, generation) = (self.returned_sender.clone(), instance.generation);
@@ -806,6 +812,7 @@ impl Rack {
             }
             let Some(control) = control else { continue };
             let mut reopen = false;
+            let mut fall_back = false;
             match self.instances.get_mut(&key).filter(|i| i.generation == generation && i.control.is_none()) {
                 Some(instance) => {
                     let name = instance.plugin.as_ref().map_or_else(String::new, |p| p.0.clone());
@@ -814,7 +821,18 @@ impl Rack {
                             instance.editor_open = true;
                             instance.editor_size = Some(size);
                         }
-                        Done::Opened(Err(why)) => notices.push(format!("{name}: its editor did not open ({why})")),
+                        Done::Opened(Err(why)) => {
+                            // Some systems cannot show an editor inside this window's process
+                            // (macOS): a window of its own still can. One fall back to it, so
+                            // the default setting works everywhere.
+                            if instance.editor_embedded && !instance.force_floating {
+                                instance.force_floating = true;
+                                instance.editor_gone();
+                                fall_back = true;
+                            } else {
+                                notices.push(format!("{name}: its editor did not open ({why})"));
+                            }
+                        }
                         Done::Closed(result) => {
                             instance.editor_gone();
                             reopen = std::mem::take(&mut instance.reopen_editor);
@@ -829,7 +847,9 @@ impl Rack {
                 // The device went while its plug-in was out: stop it like the others.
                 None => self.stop(key, control),
             }
-            if reopen && let Err(e) = self.open_editor(key) {
+            if (reopen || fall_back)
+                && let Err(e) = self.open_editor(key)
+            {
                 notices.push(format!("the editor did not open again: {}", e.0));
             }
         }
@@ -1132,10 +1152,13 @@ impl Rack {
         let to_move: Vec<u64> = self
             .instances
             .iter()
-            .filter(|(_, i)| i.editor_open && i.editor_embedded != embed)
+            .filter(|(_, i)| (i.editor_open && i.editor_embedded != embed) || (!embed && i.force_floating))
             .map(|(key, _)| *key)
             .collect();
         for key in to_move {
+            if let Some(instance) = self.instances.get_mut(&key) {
+                instance.force_floating = false;
+            }
             if self.close_editor(key).is_ok()
                 && let Some(instance) = self.instances.get_mut(&key)
             {
@@ -1171,7 +1194,7 @@ impl Rack {
         self.running(key)?;
         match self.owner {
             Some(owner) => {
-                let embed = self.embed;
+                let embed = self.embed && !self.instances.get(&key).is_some_and(|i| i.force_floating);
                 self.lend(key, move |control| {
                     let opened = if embed {
                         control.open_editor_embedded(owner)
