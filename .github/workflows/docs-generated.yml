@@ -2,6 +2,8 @@ name: Generated docs
 
 # Regenerates, on main after every merge, and commits when they changed:
 #   - docs/commands.md, from the command registry;
+#   - last_verified in the front matter of every document changed since it was last set
+#     (scripts/docs.py stamp);
 #   - the marked parts of the parity report, from scripts/parity/score.py, devices.json and the
 #     command count of docs/commands.md (scripts/parity/update_report.py);
 #   - docs/INDEX.md, from the documents' front matter;
@@ -45,12 +47,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # `docs.py stamp` reads each document's history; a shallow clone would date them all.
+          fetch-depth: 0
       - name: Install ALSA headers (cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: docs/commands.md
         run: cargo run --quiet -p suhina-cli -- commands --markdown > docs/commands.md
+      - name: last_verified of the documents changed on main
+        run: python3 scripts/docs.py stamp
       # After commands.md, whose rows it counts for the command count.
       - name: The parity report's marked parts
         run: python3 scripts/parity/update_report.py
@@ -166,7 +172,8 @@ jobs:
           git add docs/INDEX.md docs/commands.md docs/research/parity-live-12-by-area.png \
             docs/research/parity-live-12-overview.png
           git add -u -- 'docs/*.md'
-          git commit -m "Docs: regenerate INDEX.md, commands.md, the parity report and figures"
+          # The subject starts "Docs: regenerate", which `docs.py stamp` skips (scripts/docs.py).
+          git commit -m "Docs: regenerate INDEX.md, commands.md, the parity report and figures, and last_verified dates"
           if ! git push origin HEAD:main; then
             echo "::notice::main moved on during this run; the run for the newer commit regenerates the files."
           fi

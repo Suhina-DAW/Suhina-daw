@@ -40,8 +40,9 @@ python scripts/parity/update_report.py                 # rewrite the marked part
 | a **new measurement**: the page counts, the section counts, the date, the commit | run `scripts/parity/run.py --pdf <a manual you own>`, then `MEASURED_AT`, `MEASURED_COMMIT`, `MANUAL_CHAPTERS`, `MANUAL_PDF_PAGES` and `SECTIONS` in `score.py` |
 
 The measurement's date and commit appear in the title and on both figures, so a stale measurement is
-visible rather than implied. `last_verified` in the front matter is set by hand: it is the day
-someone last checked this text against the code.
+visible rather than implied. `last_verified` in the front matter is stamped on `main` when a pull
+request changes this text (`scripts/docs.py stamp`; the docs bot's regenerations do not count), and
+set by hand by someone who checks the text against the code without changing it.
 
 This is an internal status measurement, not product text: it names Live and its devices only to
 say what Suhina does and does not have yet (AGENTS.md rule 8 keeps those names out of Suhina's own
