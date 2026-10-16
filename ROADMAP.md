@@ -345,8 +345,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   another and answers once, which at small buffers takes about a third of the time of a round
   trip each, with the same sound
   ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)).
-- Still to do: waiting for each chain's plug-in as it answers
-  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), checking an imported Live Set
+- Each track's chain goes on to its next plug-in as soon as its own plug-in answers, while the
+  other tracks' plug-ins are still working, so heavy plug-ins on different tracks cost a block
+  about one heavy plug-in, and a slow or hung plug-in holds up only its own track
+  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)).
+- Still to do: checking an imported Live Set
   with real plug-ins ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and
   macOS editors, VST2 hosting (not decided).
 
