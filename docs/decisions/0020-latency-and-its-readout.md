@@ -62,7 +62,7 @@ Two facts decide the shape of this:
    will assume.
 3. **It is reachable where the work happens, on demand.** The control bar's performance block opens
    a small panel with those figures instead of adding a third always-visible number. An
-   always-visible block, or the same readout behind a Settings › Interface option, are accepted
+   always-visible block, or the same readout behind a Settings option, are accepted
    variants: they change the layout, not this decision.
 4. **It is sampled, not per frame.** A surface reads the value about once a second, or smooths it as
    the CPU load is smoothed. A control bar repaints continuously, and a number rewritten per

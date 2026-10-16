@@ -38,6 +38,8 @@ pub(crate) struct Input {
     scratch: Vec<f32>,
     /// Frames in `scratch`.
     frames: usize,
+    /// Frames that waited in the ring when this block's were read, them included.
+    waiting: usize,
 }
 
 impl Input {
@@ -48,6 +50,7 @@ impl Input {
             underruns: Arc::new(AtomicU64::new(0)),
             scratch: vec![0.0; MAX_INPUT_CHANNELS * MAX_BLOCK],
             frames: 0,
+            waiting: 0,
         }
     }
 
@@ -73,6 +76,7 @@ impl Input {
             return;
         };
         let available = ring.slots() / channels;
+        self.waiting = available.min(frames * MAX_BACKLOG_BLOCKS);
         if available > frames * MAX_BACKLOG_BLOCKS {
             let drop = (available - frames * 2) * channels;
             if let Ok(chunk) = ring.read_chunk(drop) {
@@ -96,6 +100,13 @@ impl Input {
             }
             self.underruns.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Frames that waited in the ring when this block's were read, them included: how long
+    /// ago, beyond the input device's own latency, this block's first frame came in. 0 without
+    /// an input device.
+    pub(crate) fn waiting(&self) -> u64 {
+        if self.ring.is_some() { self.waiting as u64 } else { 0 }
     }
 
     /// The sample of input channel `channel` (from 0) at `frame` of this block; silence for a

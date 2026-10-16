@@ -13,25 +13,11 @@ use suhina_model::*;
 use suhina_session::{MAX_NOTES_PER_COMMAND, Session, midi_velocity};
 
 fn note(time: f64, duration: f64, key: u8) -> Note {
-    Note { time, duration, key, velocity: 100.0 / 127.0, release_velocity: 0.5, channel: 0, muted: false }
+    Note::new(time, duration, key, 100.0 / 127.0)
 }
 
 fn clip(content: u32) -> Clip {
-    Clip {
-        content: ContentId(content),
-        start: 0.0,
-        length: 8.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-    }
+    Clip::new(ContentId(content), 0.0, 8.0)
 }
 
 /// Track 1 "Keys" has, on the arrangement, a MIDI clip with `notes` (index 0), an empty MIDI clip
@@ -43,33 +29,12 @@ fn project(notes: Vec<Note>) -> Project {
         length: 8.0,
         lanes,
         extensions: Extensions::default(),
+        scale: None,
     };
     let lane = |n: Vec<Note>| vec![ContentLane { target: None, data: LaneData::Notes(n) }];
-    let audio = AudioRegion {
-        file: "a.wav".into(),
-        absolute_file: None,
-        sample_rate: None,
-        channels: None,
-        duration_seconds: None,
-        warped: false,
-        stretch: StretchMode::default(),
-        warp_markers: Vec::new(),
-        gain: 1.0,
-        transpose: 0.0,
-        stream: None,
-    };
+    let audio = AudioRegion::new("a.wav");
     Project {
-        tracks: vec![Track {
-            id: TrackId(1),
-            name: "Keys".into(),
-            color: None,
-            content: ContentKinds { notes: true, audio: true },
-            channel: None,
-            parent: None,
-            midi_input: Default::default(),
-            audio_input: Default::default(),
-            extensions: Extensions::default(),
-        }],
+        tracks: vec![Track { content: ContentKinds { notes: true, audio: true }, ..Track::new(TrackId(1), "Keys") }],
         contents: vec![
             content(1, lane(notes)),
             content(2, Vec::new()),

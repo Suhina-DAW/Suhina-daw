@@ -1,29 +1,27 @@
 // Copyright (C) 2026 The Suhina contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The Settings page: replaces the main view until it is closed (the design brief keeps one
-//! window and no dialogs). Its pages are listed down the left; each setting is a row: a label, a
-//! short note and its control.
+//! The Settings page, drawn over the main view until it is closed. Its pages are listed down the
+//! left under a search field; each setting is a row: a label, a short note and its control. What
+//! is on which page is the table in `settings_rows.rs` (`docs/spec/ui-settings.md`).
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use crate::keymap::{Keymap, MouseSwitch, Preset, Shortcut, actions};
+use crate::keymap::{Keymap, Preset, Shortcut, actions};
 use crate::motion;
 use crate::pick::PickField;
-use crate::settings::{
-    AtStart, DeviceLayout, EditorPlacement, Graphics, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side,
-    StopReturn, ToolbarSize,
-};
+use crate::settings::{Graphics, Settings};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
+use crate::workflow::Setting;
 
 const PAGE_WIDTH: f32 = 560.0;
 /// The list of pages on the left, and the gap between it and the page.
 const SIDEBAR: f32 = 140.0;
 const SIDEBAR_GAP: f32 = 24.0;
 const SIDEBAR_ROW: f32 = 20.0;
-/// How far a sub-page is indented under its page.
-const SUB_INDENT: f32 = 12.0;
+/// The search field over the list of pages.
+const SEARCH_FIELD: f32 = 18.0;
 const LABEL_WIDTH: f32 = 180.0;
 const SETTING_ROW: f32 = 34.0;
 const SEGMENT: f32 = 15.0;
@@ -35,6 +33,11 @@ const BROWSE_WIDTH: f32 = 60.0;
 const THEME_ROWS: usize = 8;
 /// A dropdown on the right of its row (Settings › Audio).
 const DROPDOWN_FIELD: f32 = 260.0;
+/// Room right of the page for its scroll bar.
+const SCROLL_GUTTER: f32 = 12.0;
+/// The least height of a list that fills the space left on its page; a shorter window scrolls
+/// the page to it.
+const LIST_LEAST: f32 = 160.0;
 
 /// Facts the page shows but does not change.
 #[derive(Debug, Clone)]
@@ -147,36 +150,46 @@ pub enum ThemeRequest {
     ExportTemplate,
 }
 
-/// The pages of Settings, in the order the list on the left shows them.
+/// The pages of Settings, in the order the list on the left shows them
+/// (`docs/spec/ui-settings.md` › Pages and sections).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
     #[default]
     General,
-    Interface,
-    Theme,
+    Audio,
+    Midi,
+    Plugins,
     Arrangement,
+    Session,
+    ClipEditor,
+    Transport,
     DetailArea,
     Browser,
-    Graphics,
-    Audio,
+    Appearance,
     Shortcuts,
-    Plugins,
 }
 
 impl Page {
-    /// Every page with its name, and whether it belongs to the page above it (Interface).
-    pub const ALL: [(Page, &'static str, bool); 10] = [
-        (Page::General, "General", false),
-        (Page::Interface, "Interface", false),
-        (Page::Theme, "Theme", true),
-        (Page::Arrangement, "Arrangement", true),
-        (Page::DetailArea, "Detail area", true),
-        (Page::Browser, "Browser", true),
-        (Page::Graphics, "Graphics", false),
-        (Page::Audio, "Audio", false),
-        (Page::Shortcuts, "Shortcuts", false),
-        (Page::Plugins, "Plug-ins", false),
+    /// Every page with its name.
+    pub const ALL: [(Page, &'static str); 12] = [
+        (Page::General, "General"),
+        (Page::Audio, "Audio"),
+        (Page::Midi, "MIDI"),
+        (Page::Plugins, "Plug-ins"),
+        (Page::Arrangement, "Arrangement"),
+        (Page::Session, "Session and mixer"),
+        (Page::ClipEditor, "Clip editor"),
+        (Page::Transport, "Transport"),
+        (Page::DetailArea, "Detail area"),
+        (Page::Browser, "Browser"),
+        (Page::Appearance, "Appearance"),
+        (Page::Shortcuts, "Shortcuts"),
     ];
+
+    /// The page's name, as the list shows it.
+    pub fn name(self) -> &'static str {
+        Self::ALL.iter().find(|(page, _)| *page == self).map_or("", |(_, name)| name)
+    }
 }
 
 /// What the Settings page keeps between frames: the page shown, and the action whose keys are
@@ -191,6 +204,29 @@ pub struct PageState {
     pub theme_shown: Option<String>,
     /// The audio devices were listed since the Audio page was opened.
     pub audio_listed: Option<bool>,
+    /// What is typed in the search field: while it has text, the settings that match it are shown
+    /// in place of a page.
+    pub search: String,
+    /// The page and search the scroll position belongs to: another one opens at its top.
+    pub scrolled: Option<(Page, String)>,
+    /// The control with the keyboard focus when it was last scrolled into view.
+    pub focused: Option<Id>,
+}
+
+impl PageState {
+    /// The words searched for, in lower case; none when the page is shown.
+    fn words(&self) -> Vec<String> {
+        self.search.split_whitespace().map(str::to_lowercase).collect()
+    }
+
+    /// The audio devices or the MIDI ports may be shown: their figures are read again while so.
+    pub fn shows_devices(&self) -> bool {
+        let words = self.words();
+        if words.is_empty() {
+            return matches!(self.page, Page::Audio | Page::Midi);
+        }
+        entries().iter().any(|e| matches!(e.page, Page::Audio | Page::Midi) && e.matches(&words))
+    }
 }
 
 /// What the user did on the page this frame.
@@ -224,9 +260,196 @@ pub struct Sources<'a> {
     pub tag_limit: usize,
 }
 
+/// A setting the window shows: an entry of the table in `settings_rows.rs`.
+#[derive(Clone, Copy)]
+pub struct Entry {
+    pub page: Page,
+    /// The heading it is under on its page.
+    pub section: &'static str,
+    /// Its name and note, as its row shows them; searched with the section and the page.
+    pub name: &'static str,
+    pub note: &'static str,
+    /// The keys it is saved under in `settings.json` (`keymap.json` for keys); none when it is
+    /// read only or saved elsewhere.
+    pub keys: &'static [&'static str],
+    pub draw: Draw,
+    /// Whether it is shown with these settings (most are always).
+    pub shown: fn(&Settings) -> bool,
+}
+
+/// How an entry draws itself.
+#[derive(Clone, Copy)]
+pub enum Draw {
+    /// One row: what the function draws on the right, the name and note on the left.
+    Row(fn(&mut Cx<'_>, Rect)),
+    /// Several rows or a list from the height given, moving it past what was drawn.
+    Block(fn(&mut Cx<'_>, &mut f32)),
+}
+
+fn always(_: &Settings) -> bool {
+    true
+}
+
+/// A setting of one row.
+pub(crate) const fn row(
+    page: Page,
+    section: &'static str,
+    name: &'static str,
+    note: &'static str,
+    keys: &'static [&'static str],
+    draw: fn(&mut Cx<'_>, Rect),
+) -> Entry {
+    Entry { page, section, name, note, keys, draw: Draw::Row(draw), shown: always }
+}
+
+/// A setting drawn as several rows or a list.
+pub(crate) const fn block(
+    page: Page,
+    section: &'static str,
+    name: &'static str,
+    note: &'static str,
+    keys: &'static [&'static str],
+    draw: fn(&mut Cx<'_>, &mut f32),
+) -> Entry {
+    Entry { page, section, name, note, keys, draw: Draw::Block(draw), shown: always }
+}
+
+impl Entry {
+    /// Shown only when `shown` says so.
+    pub(crate) const fn when(self, shown: fn(&Settings) -> bool) -> Self {
+        Self { shown, ..self }
+    }
+
+    /// Every word is in its name, note, section or page.
+    fn matches(&self, words: &[String]) -> bool {
+        let text = format!("{} {} {} {}", self.name, self.note, self.section, self.page.name()).to_lowercase();
+        words.iter().all(|word| text.contains(word.as_str()))
+    }
+}
+
+/// Every setting the window shows, in the order it shows them.
+pub fn entries() -> &'static [Entry] {
+    crate::settings_rows::ROWS
+}
+
+/// What an entry draws with: the page, the settings and what else it shows, and what the user
+/// asked for this frame.
+pub struct Cx<'a> {
+    pub ui: &'a mut Ui,
+    pub painter: &'a egui::Painter,
+    /// The page's width, its top at the top of what scrolls; its bottom where the window's space
+    /// ends when it is scrolled to the top.
+    pub page: Rect,
+    pub settings: &'a mut Settings,
+    pub about: &'a About,
+    pub plugins: &'a mut PluginsView,
+    pub themes: &'a ThemesView,
+    pub keymap: &'a mut Keymap,
+    pub tag_limit: usize,
+    pub state: &'a mut PageState,
+    pub outcome: &'a mut Outcome,
+    /// The entry being drawn: its name names its controls.
+    name: &'static str,
+    /// A note in place of the entry's own, this frame.
+    note: Option<String>,
+    /// Where the name and note go when the control leaves less room for them.
+    label: Option<Rect>,
+}
+
+impl Cx<'_> {
+    /// Shows `note` under the name in place of the entry's own note.
+    pub fn note(&mut self, note: impl Into<String>) {
+        self.note = Some(note.into());
+    }
+
+    /// A segmented control on the right of `row` for the setting `field` gives: a click sets
+    /// it and saves.
+    pub fn choose<T: Copy + PartialEq>(
+        &mut self,
+        row: Rect,
+        options: &[(&str, T)],
+        field: impl FnOnce(&mut Settings) -> &mut T,
+    ) {
+        let value = field(self.settings);
+        let rect = control_rect(row, options.len());
+        if let Some(picked) = segmented(self.ui, self.painter, rect, self.name, options, *value) {
+            *value = picked;
+            self.outcome.changed = true;
+        }
+    }
+
+    /// On and Off for the setting `field` gives.
+    pub fn on_off(&mut self, row: Rect, field: impl FnOnce(&mut Settings) -> &mut bool) {
+        self.choose(row, &[("On", true), ("Off", false)], field);
+    }
+
+    /// A dropdown on the right of `row` for the setting `field` gives.
+    pub fn dropdown<T: Clone + PartialEq>(
+        &mut self,
+        row: Rect,
+        options: &[(String, T)],
+        field: impl FnOnce(&mut Settings) -> &mut T,
+    ) {
+        let value = field(self.settings);
+        if let Some(picked) = choice_dropdown(self.ui, self.painter, row, self.name, options, value) {
+            *value = picked;
+            self.outcome.changed = true;
+        }
+    }
+
+    /// A path typed into a field on the right of `row`, `hint` shown while it is empty, ending
+    /// in a Browse… button that asks the app for the system's dialog.
+    pub fn folder(&mut self, row: Rect, hint: &str, pick: PickField, field: impl FnOnce(&mut Settings) -> &mut String) {
+        let name = self.name;
+        // The note is cut where the field starts.
+        self.label =
+            Some(Rect::from_min_size(row.min, Vec2::new(row.width() - FOLDER_FIELD - 8.0 + LABEL_WIDTH, row.height())));
+        let browse = Rect::from_min_size(
+            Pos2::new(row.right() - BROWSE_WIDTH, row.top() + 1.0),
+            Vec2::new(BROWSE_WIDTH, SEGMENT),
+        );
+        if crate::project_dialog::button(self.ui, self.painter, browse, "Browse…", &format!("Browse for {name}")) {
+            self.outcome.pick = Some(pick);
+        }
+        let rect = Rect::from_min_size(
+            Pos2::new(row.right() - FOLDER_FIELD, row.top()),
+            Vec2::new(FOLDER_FIELD - BROWSE_WIDTH - 4.0, SEGMENT + 2.0),
+        );
+        let value = field(self.settings);
+        let edit = self
+            .ui
+            .put(rect, egui::TextEdit::singleline(value).hint_text(hint).font(theme::ui_font(theme::TEXT_SMALL)));
+        edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name));
+        if edit.changed() {
+            self.outcome.changed = true;
+        }
+    }
+
+    /// The most colour tags the browser may have, kept by the library rather than the settings.
+    pub fn tag_limit(&mut self, row: Rect, options: &[(&str, usize)]) {
+        let rect = control_rect(row, options.len());
+        if let Some(limit) = segmented(self.ui, self.painter, rect, self.name, options, self.tag_limit) {
+            self.outcome.tag_limit = Some(limit);
+        }
+    }
+
+    /// Three buttons, none of them chosen: smaller, back to 100 %, larger.
+    pub fn zoom(&mut self, row: Rect) {
+        let actual = format!("{} %", self.settings.zoom);
+        let options = [("-", Some(-1)), (actual.as_str(), Some(0)), ("+", Some(1))];
+        match segmented(self.ui, self.painter, control_rect(row, 3), self.name, &options, None) {
+            Some(Some(0)) if self.settings.zoom != crate::settings::ZOOM => {
+                self.settings.zoom = crate::settings::ZOOM;
+                self.outcome.changed = true;
+            }
+            Some(Some(steps)) if steps != 0 => self.outcome.changed |= self.settings.step_zoom(steps),
+            _ => {}
+        }
+    }
+}
+
 /// Draws the page into the space left in `ui`.
 pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &mut PageState) -> Outcome {
-    let Sources { about, plugins, themes, keymap, tag_limit } = sources;
     let mut outcome = Outcome::default();
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
@@ -263,535 +486,236 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
         theme::ui_font(theme::TEXT),
         theme::text_primary(),
     );
-    // Escape closes the page, unless it is cancelling a key being set.
-    if response.clicked() || (state.capture.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
-        outcome.close = true;
-    }
     let top = title.bottom() + 16.0;
 
-    // The pages down the left, the one shown beside them.
-    let sidebar = Rect::from_min_max(Pos2::new(whole.left(), top), Pos2::new(whole.left() + SIDEBAR, whole.bottom()));
-    if let Some(picked) = page_list(ui, &painter, sidebar, state.page) {
+    // The search field over the list of pages: Escape in it empties it.
+    let field = Rect::from_min_size(Pos2::new(whole.left(), top), Vec2::new(SIDEBAR, SEARCH_FIELD));
+    let edit = ui.put(
+        field,
+        egui::TextEdit::singleline(&mut state.search)
+            .hint_text("Search settings")
+            .font(theme::ui_font(theme::TEXT_SMALL)),
+    );
+    edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Search settings"));
+    let escaped = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+    if escaped {
+        state.search.clear();
+    }
+    let searching = !state.search.trim().is_empty();
+    // Escape closes the page, unless it is cancelling a key being set or a search.
+    if response.clicked() || (!escaped && state.capture.is_none() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+        outcome.close = true;
+    }
+
+    // The pages down the left, the one shown beside them; none is lit while searching.
+    let sidebar = Rect::from_min_max(
+        Pos2::new(whole.left(), field.bottom() + 8.0),
+        Pos2::new(whole.left() + SIDEBAR, whole.bottom()),
+    );
+    if let Some(picked) = page_list(ui, &painter, sidebar, (!searching).then_some(state.page)) {
         state.page = picked;
+        state.search.clear();
         state.capture = None;
         state.audio_listed = None;
         state.theme_shown = None;
     }
-    let page = Rect::from_min_max(Pos2::new(sidebar.right() + SIDEBAR_GAP, top), whole.max);
-    let bottom = area.bottom();
 
-    // A section title over a hairline; the first sits level with the top of the list.
-    let section = |y: &mut f32, name: &str| {
-        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SIDEBAR_ROW));
-        widgets::text_in(
-            &painter,
-            rect,
-            Align2::LEFT_CENTER,
-            name,
-            theme::ui_font(theme::TEXT_SMALL),
-            theme::text_hint(),
-        );
-        painter.hline(page.x_range(), rect.bottom() + 3.5, theme::hairline(theme::border()));
-        *y = rect.bottom() + 8.0;
-    };
-    let row = |y: &mut f32| {
-        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SETTING_ROW));
-        *y += SETTING_ROW;
-        rect
-    };
-    let mut y = top;
-    let on_off = [("On", true), ("Off", false)];
-
-    match state.page {
-        Page::General => {
-            section(&mut y, "Projects");
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "When opening a project",
-                "While another is open: ask, open it in a new tab, or replace it",
-            );
-            let options = [("Ask", OnOpen::Ask), ("New tab", OnOpen::NewTab), ("Replace", OnOpen::Replace)];
-            if let Some(choice) =
-                segmented(ui, &painter, control_rect(r, 3), "When opening a project", &options, settings.on_open)
-            {
-                settings.on_open = choice;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "At start",
-                "With no project given: the start panel, a new one, one from a template, or the last",
-            );
-            let options = [
-                ("Panel", AtStart::Panel),
-                ("New", AtStart::Blank),
-                ("Template", AtStart::Template),
-                ("Last", AtStart::Last),
-            ];
-            if let Some(choice) = segmented(ui, &painter, control_rect(r, 4), "At start", &options, settings.at_start) {
-                settings.at_start = choice;
-                outcome.changed = true;
-            }
-            let template_hint = String::from("A template's file name, or a path");
-            let starts_from_template = settings.at_start == AtStart::Template;
-            let mut folders = vec![
-                (
-                    "Projects folder",
-                    "Where a new project is saved first",
-                    &mut settings.projects_folder,
-                    &about.projects_default,
-                    PickField::ProjectsFolder,
-                ),
-                (
-                    "Templates folder",
-                    "Projects listed under New › From a template, and where Save as template puts one",
-                    &mut settings.templates_folder,
-                    &about.templates_default,
-                    PickField::TemplatesFolder,
-                ),
-            ];
-            if starts_from_template {
-                folders.push((
-                    "Start template",
-                    "The template At start makes a new project from",
-                    &mut settings.start_template,
-                    &template_hint,
-                    PickField::StartTemplate,
-                ));
-            }
-            for (name, note, value, default, pick) in folders {
-                let r = row(&mut y);
-                // The note is cut where the field starts.
-                let left =
-                    Rect::from_min_size(r.min, Vec2::new(r.width() - FOLDER_FIELD - 8.0 + LABEL_WIDTH, r.height()));
-                label(&painter, left, name, note);
-                let browse = Rect::from_min_size(
-                    Pos2::new(r.right() - BROWSE_WIDTH, r.top() + 1.0),
-                    Vec2::new(BROWSE_WIDTH, SEGMENT),
-                );
-                if crate::project_dialog::button(ui, &painter, browse, "Browse…", &format!("Browse for {name}")) {
-                    outcome.pick = Some(pick);
-                }
-                let field = Rect::from_min_size(
-                    Pos2::new(r.right() - FOLDER_FIELD, r.top()),
-                    Vec2::new(FOLDER_FIELD - BROWSE_WIDTH - 4.0, SEGMENT + 2.0),
-                );
-                let edit = ui.put(
-                    field,
-                    egui::TextEdit::singleline(value)
-                        .hint_text(default.as_str())
-                        .font(theme::ui_font(theme::TEXT_SMALL)),
-                );
-                edit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, name));
-                if edit.changed() {
-                    outcome.changed = true;
-                }
-            }
-            y += 8.0;
-            section(&mut y, "Backups");
-            let r = row(&mut y);
-            label(&painter, r, "Backups", "When a copy of each changed project is written to .backup beside it");
-            let options: Vec<(String, suhina_session::backup::Interval)> =
-                suhina_session::backup::Interval::ALL.iter().map(|i| (i.title(), *i)).collect();
-            if let Some(choice) = choice_dropdown(ui, &painter, r, "Backups", &options, &settings.backup) {
-                settings.backup = choice;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Clean up backups", "Keep the newest 20 backups of each project and delete older ones");
-            if let Some(on) =
-                segmented(ui, &painter, control_rect(r, 2), "Clean up backups", &on_off, settings.backup_clean_up)
-            {
-                settings.backup_clean_up = on;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Last backup", &about.last_backup);
-            y += 8.0;
-            section(&mut y, "Dropping files");
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Several files",
-                "Onto one track, or one track each; Ctrl while dropping does the other",
-            );
-            let options = [("One track", false), ("One each", true)];
-            if let Some(choice) =
-                segmented(ui, &painter, control_rect(r, 2), "Several files", &options, settings.drop_separate)
-            {
-                settings.drop_separate = choice;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Warp mode", "How a sample with a known tempo is stretched to the project's");
-            let options: Vec<(&str, crate::settings::WarpMode)> =
-                crate::settings::WarpMode::ALL.iter().map(|m| (m.title(), *m)).collect();
-            if let Some(choice) = segmented(ui, &painter, control_rect(r, 6), "Warp mode", &options, settings.warp_mode)
-            {
-                settings.warp_mode = choice;
-                outcome.changed = true;
-            }
-            y += 8.0;
-            section(&mut y, "Transport");
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Play from",
-                "Where Play starts: the play start marker, or the start of the clip selected in the Arrangement view",
-            );
-            let options = [("Marker", PlayFrom::Marker), ("Selected clip", PlayFrom::Clip)];
-            if let Some(choice) = segmented(ui, &painter, control_rect(r, 2), "Play from", &options, settings.play_from)
-            {
-                settings.play_from = choice;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Stop",
-                "Back to the play start marker, or stay where it stopped; stop again for the start",
-            );
-            let options = [("Marker", StopReturn::Marker), ("Stay", StopReturn::Here)];
-            if let Some(choice) = segmented(ui, &painter, control_rect(r, 2), "Stop", &options, settings.stop) {
-                settings.stop = choice;
-                outcome.changed = true;
-            }
-            y += 8.0;
-            section(&mut y, "Piano roll");
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Pulled to the top",
-                "What stays above the piano roll when its splitter is dragged all the way up",
-            );
-            let options = [("Edited track", PianoRollTop::Track), ("Whole window", PianoRollTop::Window)];
-            if let Some(choice) =
-                segmented(ui, &painter, control_rect(r, 2), "Pulled to the top", &options, settings.piano_roll_top)
-            {
-                settings.piano_roll_top = choice;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Piano roll grid",
-                "Its own grid value, or the one in the control bar, which otherwise sets the Arrangement view's only",
-            );
-            let options = [("Its own", false), ("Control bar", true)];
-            if let Some(choice) =
-                segmented(ui, &painter, control_rect(r, 2), "Piano roll grid", &options, settings.piano_grid_follows)
-            {
-                settings.piano_grid_follows = choice;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Toolbar size",
-                "The toolbar's box, its gaps and the icon strokes inside it, scaled together",
-            );
-            let options: Vec<(&str, ToolbarSize)> = ToolbarSize::ALL.iter().map(|s| (s.name(), *s)).collect();
-            if let Some(size) =
-                segmented(ui, &painter, control_rect(r, 3), "Toolbar size", &options, settings.toolbar_size)
-            {
-                settings.toolbar_size = size;
-                outcome.changed = true;
-            }
-            // The four mouse switches of the Mouse-first preset: their own rows, kept in the
-            // keymap rather than in the settings, so they are saved beside the keys.
-            for switch in MouseSwitch::ALL {
-                let r = row(&mut y);
-                label(&painter, r, switch.name(), "");
-                let options = [("Off", false), ("On", true)];
-                let current = keymap.mouse().get(switch);
-                if let Some(on) = segmented(ui, &painter, control_rect(r, 2), switch.name(), &options, current) {
-                    keymap.set_mouse(switch, on);
-                    outcome.keymap_changed = true;
-                }
-            }
-            let note = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), 14.0));
-            widgets::text_in(
-                &painter,
-                note,
-                Align2::LEFT_CENTER,
-                "Kept in keymap.json with the keys; turning one off leaves the preset's name",
-                theme::ui_font(theme::TEXT_SMALL),
-                theme::text_secondary(),
-            );
+    // The page shown, beside the list: it scrolls (wheel, scroll bar, a control given the focus)
+    // when it is taller than the room left under the title.
+    let viewport = Rect::from_min_max(
+        Pos2::new(whole.left() + SIDEBAR + SIDEBAR_GAP, top),
+        Pos2::new((whole.right() + SCROLL_GUTTER).min(area.right()), area.bottom().max(top)),
+    );
+    let width = whole.right() - viewport.left();
+    let shown = (state.page, state.search.trim().to_string());
+    let to_top = state.scrolled.as_ref() != Some(&shown);
+    state.scrolled = Some(shown);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(viewport), |ui| {
+        let mut scroll = egui::ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]);
+        if to_top {
+            scroll = scroll.vertical_scroll_offset(0.0);
         }
-        Page::Interface => {
-            section(&mut y, "Interface");
-            let r = row(&mut y);
-            label(&painter, r, "Animations", "Short fades and slides when things change");
-            if let Some(on) = segmented(ui, &painter, control_rect(r, 2), "Animations", &on_off, settings.animations) {
-                settings.animations = on;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Zoom", "The size of the whole window; Ctrl and + or -, Ctrl and 0 for 100 %");
-            let actual = format!("{} %", settings.zoom);
-            // Three buttons, none of them chosen: smaller, back to 100 %, larger.
-            let options = [("-", Some(-1)), (actual.as_str(), Some(0)), ("+", Some(1))];
-            match segmented(ui, &painter, control_rect(r, 3), "Zoom", &options, None) {
-                Some(Some(0)) if settings.zoom != crate::settings::ZOOM => {
-                    settings.zoom = crate::settings::ZOOM;
-                    outcome.changed = true;
-                }
-                Some(Some(steps)) if steps != 0 => outcome.changed |= settings.step_zoom(steps),
-                _ => {}
-            }
-        }
-        Page::Browser => {
-            section(&mut y, "Browser");
-            let r = row(&mut y);
-            label(&painter, r, "Side", "Which side of the window the browser is on");
-            let options = [("Left", Side::Left), ("Right", Side::Right)];
-            if let Some(side) =
-                segmented(ui, &painter, control_rect(r, 2), "Browser side", &options, settings.browser_side)
-            {
-                settings.browser_side = side;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Auto-play", "Selecting a sample or MIDI file previews it");
-            if let Some(on) =
-                segmented(ui, &painter, control_rect(r, 2), "Auto-play", &on_off, settings.preview_autoplay)
-            {
-                settings.preview_autoplay = on;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Preview volume", "How loud previews play, after the main channel");
-            let options = [("-18 dB", -18), ("-12 dB", -12), ("-6 dB", -6), ("0 dB", 0)];
-            if let Some(db) =
-                segmented(ui, &painter, control_rect(r, 4), "Preview volume", &options, settings.preview_volume)
-            {
-                settings.preview_volume = db;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Map layout", "The sample map as a free cloud or snapped to a grid");
-            let options = [("Cloud", false), ("Grid", true)];
-            if let Some(grid) = segmented(ui, &painter, control_rect(r, 2), "Map layout", &options, settings.map_grid) {
-                settings.map_grid = grid;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Map preview on hover", "Pointing at a sample on the map previews it");
-            if let Some(on) =
-                segmented(ui, &painter, control_rect(r, 2), "Map preview on hover", &on_off, settings.map_hover_preview)
-            {
-                settings.map_hover_preview = on;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Map: longest sample", "Longer samples are left off the map");
-            let options = [("5 s", 5u32), ("10 s", 10), ("30 s", 30), ("60 s", 60)];
-            if let Some(seconds) =
-                segmented(ui, &painter, control_rect(r, 4), "Map longest sample", &options, settings.map_max_seconds)
-            {
-                settings.map_max_seconds = seconds;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Tag limit", "The most colour tags there may be");
-            let options = [("64", 64usize), ("128", 128), ("256", 256), ("1024", 1024)];
-            if let Some(limit) = segmented(ui, &painter, control_rect(r, 4), "Tag limit", &options, tag_limit) {
-                outcome.tag_limit = Some(limit);
-            }
-        }
-        Page::Theme => {
-            section(&mut y, "Theme");
-            outcome.themes = theme_page(ui, &painter, page, y, bottom, themes, state);
-        }
-        Page::Arrangement => {
-            section(&mut y, "Arrangement");
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Waveform scale",
-                "Linear, or decibels so quiet parts show; clips, previews and the map",
-            );
-            let options = [("Linear", false), ("dB", true)];
-            if let Some(db) =
-                segmented(ui, &painter, control_rect(r, 2), "Waveform scale", &options, settings.waveform_db)
-            {
-                settings.waveform_db = db;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Track headers", "Which side of the timeline they are on");
-            let options = [("Left", Side::Left), ("Right", Side::Right)];
-            if let Some(side) =
-                segmented(ui, &painter, control_rect(r, 2), "Track headers", &options, settings.track_headers)
-            {
-                settings.track_headers = side;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Allow sample stacking",
-                "Audio clips moved over others all play, instead of replacing them",
-            );
-            if let Some(on) =
-                segmented(ui, &painter, control_rect(r, 2), "Allow sample stacking", &on_off, settings.sample_stacking)
-            {
-                settings.sample_stacking = on;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Allow MIDI stacking",
-                "MIDI clips moved over others all play, instead of replacing them",
-            );
-            if let Some(on) =
-                segmented(ui, &painter, control_rect(r, 2), "Allow MIDI stacking", &on_off, settings.midi_stacking)
-            {
-                settings.midi_stacking = on;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(
-                &painter,
-                r,
-                "Mixer controls",
-                "A track's volume and pan as a field, or as a knob: the wheel over either changes it",
-            );
-            let options = [("Field", MixerControls::Field), ("Knob", MixerControls::Knob)];
-            if let Some(controls) =
-                segmented(ui, &painter, control_rect(r, 2), "Mixer controls", &options, settings.mixer_controls)
-            {
-                settings.mixer_controls = controls;
-                outcome.changed = true;
-            }
-        }
-        Page::DetailArea => {
-            section(&mut y, "Detail area");
-            let r = row(&mut y);
-            label(&painter, r, "Device chain", "In a row under the view, or stacked in a column beside it");
-            let options = [("Row", DeviceLayout::Row), ("Stack", DeviceLayout::Stack)];
-            if let Some(layout) =
-                segmented(ui, &painter, control_rect(r, 2), "Device chain", &options, settings.device_layout)
-            {
-                settings.device_layout = layout;
-                outcome.changed = true;
-            }
-            let r = row(&mut y);
-            label(&painter, r, "Select on launch", "Launching a clip in the Session view shows it here");
-            if let Some(on) =
-                segmented(ui, &painter, control_rect(r, 2), "Select on launch", &on_off, settings.select_on_launch)
-            {
-                settings.select_on_launch = on;
-                outcome.changed = true;
-            }
-        }
-        Page::Graphics => {
-            section(&mut y, "Graphics");
-            let r = row(&mut y);
-            let note = match about.graphics_now {
-                Some(now) if now != settings.graphics => "Applies the next time Suhina starts",
-                _ => "How the window is drawn; OpenGL can resize more smoothly on some systems",
-            };
-            label(&painter, r, "Renderer", note);
-            let options = [("GPU", Graphics::Gpu), ("OpenGL", Graphics::OpenGl)];
-            if let Some(graphics) = segmented(ui, &painter, control_rect(r, 2), "Renderer", &options, settings.graphics)
-            {
-                settings.graphics = graphics;
-                outcome.changed = true;
-            }
-        }
-        Page::Audio => {
-            if state.audio_listed != Some(true) {
-                outcome.audio_refresh = true;
-                state.audio_listed = Some(true);
-            }
-            let (picked, refresh) = audio_page(ui, &painter, page, &mut y, settings, about);
-            outcome.audio_refresh |= refresh;
-            y += 8.0;
-            outcome.midi_input = midi_section(ui, &painter, page, &mut y, about);
-            if let Some(choice) = picked {
-                settings.set_output_choice(&choice);
-                outcome.audio_output = Some(choice);
-                outcome.changed = true;
-            }
-        }
-        Page::Shortcuts => {
-            outcome.keymap_changed = shortcuts_page(ui, &painter, page, y, bottom, keymap, state);
-        }
-        Page::Plugins => {
-            section(&mut y, "Plug-ins");
-            let r = row(&mut y);
-            let note = if about.editors_embeddable {
-                "In a window above Suhina, or inside the device panel as part of the chain"
-            } else {
-                "Editors need Windows or an X server (DISPLAY); they do not open on this system yet"
-            };
-            label(&painter, r, "Editors", note);
-            let options = [("Window", EditorPlacement::Window), ("Device view", EditorPlacement::DeviceView)];
-            if let Some(placement) =
-                segmented(ui, &painter, control_rect(r, 2), "Editors", &options, settings.plugin_editors)
-            {
-                settings.plugin_editors = placement;
-                outcome.changed = true;
-            }
-            y += PAD;
-            outcome.plugins = plugin_section(ui, &painter, page, &mut y, bottom, plugins);
-        }
-    }
+        scroll.show(ui, |ui| {
+            let page = Rect::from_min_size(ui.max_rect().min, Vec2::new(width, viewport.height()));
+            let end = page_body(ui, settings, sources, state, &mut outcome, page);
+            ui.allocate_rect(Rect::from_min_max(page.min, Pos2::new(page.right(), end + 2.0 * PAD)), Sense::hover());
+            keep_focus_in_view(ui, state);
+        });
+    });
     outcome
 }
 
-/// The list of pages: Interface's own pages indented under it, the page shown filled. Returns
-/// the page clicked, if it is not the one shown.
-fn page_list(ui: &Ui, painter: &egui::Painter, rect: Rect, shown: Page) -> Option<Page> {
+/// A control that takes the keyboard focus (Tab) is scrolled into view.
+fn keep_focus_in_view(ui: &Ui, state: &mut PageState) {
+    let focused = ui.memory(|m| m.focused());
+    if focused == state.focused {
+        return;
+    }
+    state.focused = focused;
+    if let Some(response) = focused.and_then(|id| ui.ctx().read_response(id))
+        && ui.min_rect().intersects(response.rect)
+    {
+        ui.scroll_to_rect(response.rect, None);
+    }
+}
+
+/// Draws the page shown, or the settings that match the search, into `page`, its top at the
+/// top of what scrolls; returns where it ends.
+fn page_body(
+    ui: &mut Ui,
+    settings: &mut Settings,
+    sources: Sources<'_>,
+    state: &mut PageState,
+    outcome: &mut Outcome,
+    page: Rect,
+) -> f32 {
+    let Sources { about, plugins, themes, keymap, tag_limit } = sources;
+    let painter = ui.painter().clone();
+    let words = state.words();
+    let shown = state.page;
+    let mut cx = Cx {
+        ui,
+        painter: &painter,
+        page,
+        settings,
+        about,
+        plugins,
+        themes,
+        keymap,
+        tag_limit,
+        state,
+        outcome,
+        name: "",
+        note: None,
+        label: None,
+    };
+    let mut y = page.top();
+    let mut heading: Option<(Page, &str)> = None;
+    for entry in entries() {
+        let listed = if words.is_empty() { entry.page == shown } else { entry.matches(&words) };
+        if !listed || !(entry.shown)(cx.settings) {
+            continue;
+        }
+        // A section title over a hairline where the section changes; the first sits level with
+        // the top of the list, and a search names the page as well.
+        if heading != Some((entry.page, entry.section)) {
+            if heading.is_some() {
+                y += 8.0;
+            }
+            let title = if words.is_empty() {
+                entry.section.to_string()
+            } else {
+                format!("{} › {}", entry.page.name(), entry.section)
+            };
+            section_title(&painter, page, &mut y, &title);
+            heading = Some((entry.page, entry.section));
+        }
+        cx.name = entry.name;
+        cx.note = None;
+        cx.label = None;
+        match entry.draw {
+            Draw::Row(draw) => {
+                let r = setting_row(page, &mut y);
+                draw(&mut cx, r);
+                let note = cx.note.take();
+                label(&painter, cx.label.take().unwrap_or(r), entry.name, note.as_deref().unwrap_or(entry.note));
+            }
+            Draw::Block(draw) => draw(&mut cx, &mut y),
+        }
+    }
+    if heading.is_none() && !words.is_empty() {
+        let r = setting_row(page, &mut y);
+        label(&painter, r, "No setting matches", "Try another word, or pick a page on the left");
+    }
+    y
+}
+
+/// The list of pages, `shown` filled. Returns the page clicked, if it is not the one shown.
+fn page_list(ui: &Ui, painter: &egui::Painter, rect: Rect, shown: Option<Page>) -> Option<Page> {
     let mut picked = None;
-    for (index, (page, name, sub)) in Page::ALL.into_iter().enumerate() {
+    for (index, (page, name)) in Page::ALL.into_iter().enumerate() {
         let row = Rect::from_min_size(
             Pos2::new(rect.left(), rect.top() + index as f32 * SIDEBAR_ROW),
             Vec2::new(rect.width(), SIDEBAR_ROW),
         );
         let response =
             widgets::button_area(ui, row, Id::new(("settings-page", index)), format!("Settings page: {name}"));
-        if response.clicked() && page != shown {
+        if response.clicked() && Some(page) != shown {
             picked = Some(page);
         }
-        let selected = motion::toward(ui.ctx(), response.id.with("selected"), page == shown, motion::VALUE);
+        let selected = motion::toward(ui.ctx(), response.id.with("selected"), Some(page) == shown, motion::VALUE);
         let idle = motion::mix(theme::window_background(), theme::panel_hover(), widgets::hover(ui, &response));
         painter.rect_filled(row, 0.0, motion::mix(idle, theme::control_background(), selected));
-        let indent = if sub { SUB_INDENT } else { 0.0 };
-        let text = Rect::from_min_max(Pos2::new(row.left() + PAD + indent, row.top()), row.max);
+        let text = Rect::from_min_max(Pos2::new(row.left() + PAD, row.top()), row.max);
         let color = motion::mix(theme::text_secondary(), theme::text_primary(), selected);
         widgets::text_in(painter, text, Align2::LEFT_CENTER, name, theme::ui_font(theme::TEXT), color);
     }
     picked
 }
 
-/// Interface › Theme: the themes to pick from, what can be done with them, and the colours of the
+/// Appearance › Theme: the themes, the theme in use and its colours.
+pub(crate) fn theme_block(cx: &mut Cx<'_>, y: &mut f32) {
+    let bottom = cx.page.bottom();
+    cx.outcome.themes = theme_page(cx.ui, cx.painter, cx.page, y, bottom, cx.themes, cx.state);
+}
+
+/// Shortcuts › Keys: every action's keys and the preset.
+pub(crate) fn shortcuts_block(cx: &mut Cx<'_>, y: &mut f32) {
+    let bottom = cx.page.bottom();
+    cx.outcome.keymap_changed |= shortcuts_page(cx.ui, cx.painter, cx.page, y, bottom, cx.keymap, cx.state);
+}
+
+/// Plug-ins › Library: folders, scanning and what was found.
+pub(crate) fn plugin_library(cx: &mut Cx<'_>, y: &mut f32) {
+    let bottom = cx.page.bottom();
+    cx.outcome.plugins = plugin_section(cx.ui, cx.painter, cx.page, y, bottom, cx.plugins);
+}
+
+/// Clip editor › Workflow: the workflow settings (the Mouse-first switches among them), their own
+/// rows, kept in the keymap rather than in the settings, so they are saved beside the keys.
+pub(crate) fn mouse_switches(cx: &mut Cx<'_>, y: &mut f32) {
+    for setting in Setting::ALL {
+        let r = setting_row(cx.page, y);
+        label(cx.painter, r, setting.name(), setting.note());
+        let options: Vec<(&str, usize)> = setting.short_choices().iter().enumerate().map(|(i, c)| (*c, i)).collect();
+        let current = cx.keymap.workflow().get(setting);
+        let rect = control_rect(r, options.len());
+        if let Some(index) = segmented(cx.ui, cx.painter, rect, setting.name(), &options, current) {
+            cx.keymap.set_workflow(setting, index);
+            cx.outcome.keymap_changed = true;
+        }
+    }
+    let note = Rect::from_min_size(Pos2::new(cx.page.left(), *y), Vec2::new(cx.page.width(), 14.0));
+    widgets::text_in(
+        cx.painter,
+        note,
+        Align2::LEFT_CENTER,
+        "Kept in keymap.json with the keys; changing one makes the workflow Custom",
+        theme::ui_font(theme::TEXT_SMALL),
+        theme::text_secondary(),
+    );
+    *y = note.bottom();
+}
+
+/// MIDI › MIDI inputs: each port with On and Off.
+pub(crate) fn midi_inputs(cx: &mut Cx<'_>, y: &mut f32) {
+    if let Some(port) = midi_section(cx.ui, cx.painter, cx.page, y, cx.about) {
+        cx.outcome.midi_input = Some(port);
+    }
+}
+
+/// Appearance › Theme: the themes to pick from, what can be done with them, and the colours of the
 /// one in use. Returns what the user asked for.
 fn theme_page(
     ui: &mut Ui,
     painter: &egui::Painter,
     page: Rect,
-    mut y: f32,
+    at: &mut f32,
     bottom: f32,
     themes: &ThemesView,
     state: &mut PageState,
 ) -> Option<ThemeRequest> {
+    let mut y = *at;
     let mut request = None;
     let small = theme::ui_font(theme::TEXT_SMALL);
 
@@ -879,7 +803,9 @@ fn theme_page(
     widgets::text_in(painter, r, Align2::LEFT_CENTER, "Colours", small.clone(), theme::text_hint());
     painter.hline(page.x_range(), r.bottom() + 2.5, theme::hairline(theme::border()));
     y = r.bottom() + 6.0;
-    let list = Rect::from_min_max(Pos2::new(page.left(), y), Pos2::new(page.right(), (bottom - 12.0).max(y + 60.0)));
+    let list =
+        Rect::from_min_max(Pos2::new(page.left(), y), Pos2::new(page.right(), (bottom - 12.0).max(y + LIST_LEAST)));
+    *at = list.bottom();
     let colors = themes.colors;
     let mut edited = colors;
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
@@ -934,7 +860,7 @@ fn shortcuts_page(
     ui: &mut Ui,
     painter: &egui::Painter,
     page: Rect,
-    y: f32,
+    at: &mut f32,
     bottom: f32,
     keymap: &mut Keymap,
     state: &mut PageState,
@@ -973,7 +899,7 @@ fn shortcuts_page(
         }
     }
 
-    let head = Rect::from_min_size(Pos2::new(page.left(), y), Vec2::new(page.width(), SETTING_ROW));
+    let head = Rect::from_min_size(Pos2::new(page.left(), *at), Vec2::new(page.width(), SETTING_ROW));
     label(painter, head, "Shortcuts", "Change, then press the keys; Escape cancels. Kept in keymap.json.");
     let reset = Rect::from_min_max(
         Pos2::new(head.right() - 80.0, head.top() + 1.0),
@@ -989,9 +915,9 @@ fn shortcuts_page(
         changed = true;
     }
 
-    // The preset: three sets of keys, one for drawing notes first, one for selecting first and
-    // one for working with the mouse. A choice sets the keys and the switches it names; single
-    // keys can still be changed below.
+    // The workflow mode: three presets, one for drawing notes first, one for selecting first and
+    // one for working with the mouse, and Custom. A preset sets the keys and the workflow settings
+    // it names; single keys can still be changed below.
     let mut top = head.bottom() + 4.0;
     let preset_row = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 24.0));
     let preset_label = Rect::from_min_size(preset_row.min, Vec2::new(LABEL_WIDTH, 20.0));
@@ -1007,9 +933,9 @@ fn shortcuts_page(
     // 64 px a part, as the measurements give every segmented control in Settings.
     let control = Rect::from_min_size(
         Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()),
-        Vec2::new(64.0 * Preset::ALL.len() as f32, SEGMENT),
+        Vec2::new(64.0 * Preset::MODES.len() as f32, SEGMENT),
     );
-    let options: Vec<(&str, Preset)> = Preset::ALL.iter().map(|p| ((*p).name(), *p)).collect();
+    let options: Vec<(&str, Preset)> = Preset::MODES.iter().map(|p| ((*p).name(), *p)).collect();
     if let Some(picked) = preset_segmented(ui, painter, control, &options, current) {
         keymap.set_preset(picked);
         state.capture = None;
@@ -1028,8 +954,11 @@ fn shortcuts_page(
         top += 16.0;
     }
 
-    let list =
-        Rect::from_min_max(Pos2::new(page.left(), top + 4.0), Pos2::new(page.right(), (bottom - 12.0).max(top + 60.0)));
+    let list = Rect::from_min_max(
+        Pos2::new(page.left(), top + 4.0),
+        Pos2::new(page.right(), (bottom - 12.0).max(top + 4.0 + LIST_LEAST)),
+    );
+    *at = list.bottom();
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             let mut group = "";
@@ -1171,8 +1100,11 @@ fn plugin_section(
     }
 
     // What was found, in the space left.
-    let list =
-        Rect::from_min_max(Pos2::new(page.left(), *y + 4.0), Pos2::new(page.right(), (bottom - 12.0).max(*y + 40.0)));
+    let list = Rect::from_min_max(
+        Pos2::new(page.left(), *y + 4.0),
+        Pos2::new(page.right(), (bottom - 12.0).max(*y + 4.0 + LIST_LEAST)),
+    );
+    *y = list.bottom();
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for [name, vendor, format, version] in &plugins.found {
@@ -1193,49 +1125,71 @@ fn plugin_section(
     request
 }
 
-/// Settings › Audio: host, device, sample rate and buffer size as dropdowns of what the driver
-/// allows, exclusive mode, the cue's output pair and volume, and what plays now with its
-/// latency and underruns. Returns a new choice, and whether the devices should be listed again.
-fn audio_page(
-    ui: &mut Ui,
+/// The audio output chosen, with the host and device it names among those listed.
+struct Chosen<'a> {
+    choice: suhina_session::OutputChoice,
+    default_host: Option<&'a suhina_session::audio::HostInfo>,
+    host: Option<&'a suhina_session::audio::HostInfo>,
+    device: Option<&'a suhina_session::audio::DeviceInfo>,
+}
+
+fn chosen<'a>(settings: &Settings, about: &'a About) -> Chosen<'a> {
+    let choice = settings.output_choice();
+    let default_host = about.audio_hosts.iter().find(|h| h.default).or(about.audio_hosts.first());
+    let host = match &choice.host {
+        Some(name) => about.audio_hosts.iter().find(|h| h.name.eq_ignore_ascii_case(name)),
+        None => default_host,
+    };
+    let device = host.and_then(|h| match &choice.device {
+        Some(name) => h.devices.iter().find(|d| d.name.eq_ignore_ascii_case(name)),
+        None => h.devices.iter().find(|d| d.default).or(h.devices.first()),
+    });
+    Chosen { choice, default_host, host, device }
+}
+
+/// An output chosen anew is kept in the settings, and the app plays on it.
+fn use_output(cx: &mut Cx<'_>, picked: Option<suhina_session::OutputChoice>) {
+    if let Some(choice) = picked {
+        cx.settings.set_output_choice(&choice);
+        cx.outcome.audio_output = Some(choice);
+        cx.outcome.changed = true;
+    }
+}
+
+/// Audio › Output: host, device, sample rate and buffer size as dropdowns of what the driver
+/// allows, exclusive mode and the input device. The devices are listed when it first shows.
+pub(crate) fn audio_output(cx: &mut Cx<'_>, y: &mut f32) {
+    if cx.state.audio_listed != Some(true) {
+        cx.outcome.audio_refresh = true;
+        cx.state.audio_listed = Some(true);
+    }
+    let picked = output_rows(cx.ui, cx.painter, cx.page, y, cx.settings, cx.about);
+    use_output(cx, picked);
+}
+
+/// Audio › Cue: the cue's output pair and volume.
+pub(crate) fn audio_cue(cx: &mut Cx<'_>, y: &mut f32) {
+    let picked = cue_rows(cx.ui, cx.painter, cx.page, y, cx.settings, cx.about);
+    use_output(cx, picked);
+}
+
+/// Audio › Now: what plays now with its latency and underruns, and List devices again.
+pub(crate) fn audio_now(cx: &mut Cx<'_>, y: &mut f32) {
+    cx.outcome.audio_refresh |= now_rows(cx.ui, cx.painter, cx.page, y, cx.settings, cx.about);
+}
+
+/// The rows of Audio › Output; returns a new choice.
+fn output_rows(
+    ui: &Ui,
     painter: &egui::Painter,
     page: Rect,
     y: &mut f32,
     settings: &Settings,
     about: &About,
-) -> (Option<suhina_session::OutputChoice>, bool) {
-    use suhina_session::audio::{DeviceInfo, HostInfo};
-    let section = |y: &mut f32, name: &str| {
-        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SIDEBAR_ROW));
-        widgets::text_in(
-            painter,
-            rect,
-            Align2::LEFT_CENTER,
-            name,
-            theme::ui_font(theme::TEXT_SMALL),
-            theme::text_hint(),
-        );
-        painter.hline(page.x_range(), rect.bottom() + 3.5, theme::hairline(theme::border()));
-        *y = rect.bottom() + 8.0;
-    };
-    let row = |y: &mut f32| {
-        let rect = Rect::from_min_size(Pos2::new(page.left(), *y), Vec2::new(page.width(), SETTING_ROW));
-        *y += SETTING_ROW;
-        rect
-    };
-    let choice = settings.output_choice();
+) -> Option<suhina_session::OutputChoice> {
+    let Chosen { choice, default_host, host, device } = chosen(settings, about);
+    let row = |y: &mut f32| setting_row(page, y);
     let mut picked: Option<suhina_session::OutputChoice> = None;
-    let default_host = about.audio_hosts.iter().find(|h| h.default).or(about.audio_hosts.first());
-    let host: Option<&HostInfo> = match &choice.host {
-        Some(name) => about.audio_hosts.iter().find(|h| h.name.eq_ignore_ascii_case(name)),
-        None => default_host,
-    };
-    let device: Option<&DeviceInfo> = host.and_then(|h| match &choice.device {
-        Some(name) => h.devices.iter().find(|d| d.name.eq_ignore_ascii_case(name)),
-        None => h.devices.iter().find(|d| d.default).or(h.devices.first()),
-    });
-
-    section(y, "Output");
     // Host.
     let r = row(y);
     label(painter, r, "Driver", "WASAPI is Windows' own; ASIO talks to the interface's driver directly");
@@ -1358,8 +1312,21 @@ fn audio_page(
         picked = choice.with_params(&serde_json::json!({ "input": input.as_text() })).ok();
     }
 
-    *y += 8.0;
-    section(y, "Cue");
+    picked
+}
+
+/// The rows of Audio › Cue; returns a new choice.
+fn cue_rows(
+    ui: &Ui,
+    painter: &egui::Painter,
+    page: Rect,
+    y: &mut f32,
+    settings: &Settings,
+    about: &About,
+) -> Option<suhina_session::OutputChoice> {
+    let Chosen { choice, device, .. } = chosen(settings, about);
+    let row = |y: &mut f32| setting_row(page, y);
+    let mut picked = None;
     // The cue's output pair: the device's pairs after the main output's.
     let r = row(y);
     let channels = device.map_or(2, |d| d.channels);
@@ -1394,8 +1361,13 @@ fn audio_page(
         picked = choice.with_cue_volume(&serde_json::json!({ "db": db })).ok();
     }
 
-    *y += 8.0;
-    section(y, "Now");
+    picked
+}
+
+/// The rows of Audio › Now; returns whether List devices again was clicked.
+fn now_rows(ui: &Ui, painter: &egui::Painter, page: Rect, y: &mut f32, settings: &Settings, about: &About) -> bool {
+    let choice = settings.output_choice();
+    let row = |y: &mut f32| setting_row(page, y);
     let r = row(y);
     let (output, latency) = match &about.audio_live {
         Some(info) => (
@@ -1453,7 +1425,7 @@ fn audio_page(
         None => "-".to_string(),
     };
     label(painter, r, "Input now", &input);
-    (picked, response.clicked())
+    response.clicked()
 }
 
 /// A segmented control for the keymap preset: the sets of keys, with the chosen one lit.
@@ -1495,10 +1467,9 @@ fn now_playing(info: &suhina_session::OutputInfo, choice: &suhina_session::Outpu
     }
 }
 
-/// Settings › Audio › MIDI inputs: each port with On and Off. What the ports that are on play
+/// MIDI › MIDI inputs: each port with On and Off. What the ports that are on play
 /// goes to the armed tracks. Returns a port turned on or off.
 fn midi_section(ui: &Ui, painter: &egui::Painter, page: Rect, y: &mut f32, about: &About) -> Option<(String, bool)> {
-    section_title(painter, page, y, "MIDI inputs");
     let mut picked = None;
     let ports = match &about.midi_inputs {
         Ok(ports) if ports.is_empty() => {

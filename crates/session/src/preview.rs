@@ -94,12 +94,7 @@ pub(crate) fn stop(session: &mut Session, _: &Value) -> Result<Value, CommandErr
 /// I/O there. Transport kind: the project and the undo history are untouched.
 pub(crate) fn note_on(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let track = track_at(&session.project, params, "track")?;
-    let key = params
-        .get("key")
-        .and_then(Value::as_u64)
-        .and_then(|k| u8::try_from(k).ok())
-        .filter(|k| *k <= 127)
-        .ok_or("key must be a whole number from 0 to 127")?;
+    let keys = held_keys(params)?;
     let midi = match params.get("velocity") {
         None | Some(Value::Null) => DEFAULT_VELOCITY,
         Some(v) => v.as_f64().filter(|v| (1.0..=127.0).contains(v)).ok_or("velocity must be 1 to 127")?,
@@ -110,11 +105,48 @@ pub(crate) fn note_on(session: &mut Session, params: &Value) -> Result<Value, Co
     let rate = player.sample_rate();
     let controller = player.controller_mut();
     let fallback = controller.preview_instrument();
-    // A preview note of no length: the engine holds it until it is let go.
-    let notes =
-        suhina_engine::preview_notes([(0.0, 0.0, key, (midi / 127.0) as f32)], bpm, rate, Some(track), fallback);
+    // Preview notes of no length: the engine holds them until they are let go.
+    let velocity = (midi / 127.0) as f32;
+    let notes = suhina_engine::preview_notes(
+        keys.iter().map(|key| (0.0, 0.0, *key, velocity)),
+        bpm,
+        rate,
+        Some(track),
+        fallback,
+    );
     controller.preview_note_on(notes, gain).map_err(CommandError)?;
-    Ok(json!({ "track": track.0, "key": key, "velocity": midi }))
+    match keys.as_slice() {
+        [key] if params.get("keys").is_none_or(Value::is_null) => {
+            Ok(json!({ "track": track.0, "key": key, "velocity": midi }))
+        }
+        _ => Ok(json!({ "track": track.0, "keys": keys, "velocity": midi })),
+    }
+}
+
+/// The keys `preview.noteOn` plays: `key`, or the list `keys` (1 to 128 keys, each 0 to 127 and
+/// counted once), one of them.
+fn held_keys(params: &Value) -> Result<Vec<u8>, CommandError> {
+    let one = |v: &Value| -> Option<u8> { v.as_u64().and_then(|k| u8::try_from(k).ok()).filter(|k| *k <= 127) };
+    let key = params.get("key").filter(|v| !v.is_null());
+    let keys = params.get("keys").filter(|v| !v.is_null());
+    match (key, keys) {
+        (Some(_), Some(_)) => Err("give key or keys, not both".into()),
+        (None, None) => Err("key must be a whole number from 0 to 127 (or give keys, a list of them)".into()),
+        (Some(key), None) => Ok(vec![one(key).ok_or("key must be a whole number from 0 to 127")?]),
+        (None, Some(keys)) => {
+            let list = keys.as_array().ok_or("keys must be a list of keys, each 0 to 127")?;
+            if list.is_empty() || list.len() > 128 {
+                return Err(format!("keys must hold 1 to 128 keys, got {}", list.len()).into());
+            }
+            let mut out = list
+                .iter()
+                .map(|k| one(k).ok_or("each of keys must be a whole number from 0 to 127"))
+                .collect::<Result<Vec<u8>, _>>()?;
+            out.sort_unstable();
+            out.dedup();
+            Ok(out)
+        }
+    }
 }
 
 /// `preview.noteOff`: releases the key `key` on `track`, or every held preview note when `key`

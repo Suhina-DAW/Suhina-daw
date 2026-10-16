@@ -1545,6 +1545,12 @@ fn footer_view(
                 state.relist();
                 ui.close();
             }
+            // The palette track colours take, then any colour.
+            let current = theme::parse_hex(&tag.color).map(crate::grid::to_rgb);
+            if let Some(picked) = crate::colour_picker::swatch_row(ui, current) {
+                let hex = theme::hex(crate::colour_picker::color32(picked));
+                run(projects, "library.setTag", json!({ "name": tag.name, "color": hex }), out);
+            }
             let mut color = tag_color(&tag.color);
             if egui::color_picker::color_edit_button_srgba(ui, &mut color, egui::color_picker::Alpha::Opaque).changed()
             {

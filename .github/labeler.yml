@@ -1,0 +1,45 @@
+# The labels .github/workflows/pr-labels.yml adds to a pull request (actions/labeler). It only
+# adds them: a label taken off by hand stays off until the files or the branch name match again.
+
+# The kind of change, from the branch name (AGENTS.md › Tasks › Branch names).
+enhancement:
+  - head-branch: ['^feature/']
+bug:
+  - head-branch: ['^fix/']
+chore:
+  - head-branch: ['^chore/']
+# Documentation: a docs/ branch, or a pull request that changes nothing but documents. Almost
+# every change updates a document too, so a Markdown file alone does not make it documentation.
+documentation:
+  - head-branch: ['^docs/']
+  - changed-files:
+      - any-glob-to-all-files: ['**/*.md', 'docs/**', 'assets/**/*.svg']
+
+# The area, from the files changed.
+engine:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/engine/**', 'crates/stretch/**', 'crates/dsp/**', 'crates/realtime/**']
+ui:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/ui/**', 'apps/suhina/**', 'docs/design/**']
+formats:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/als/**', 'crates/flp/**', 'crates/project-file/**', 'crates/media/**']
+browser:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/library/**', 'crates/soundmap/**']
+audio-io:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/output/**', 'crates/midi/**']
+plug-ins:
+  - changed-files:
+      - any-glob-to-any-file: ['crates/plugins/**', 'crates/plugin-host/**', 'crates/ipc/**']
+devices:
+  - changed-files:
+      - any-glob-to-any-file: ['devices/**', 'crates/device-api/**', 'crates/device-registry/**', 'crates/device-sdk/**']
+presets:
+  - changed-files:
+      - any-glob-to-any-file: ['presets/**']
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ['**/tests/**']

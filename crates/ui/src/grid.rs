@@ -86,6 +86,8 @@ pub struct Column {
     /// whether it is: the session knows, not the project, so [`Grid::build`] leaves it false.
     pub armable: bool,
     pub armed: bool,
+    /// The scene whose slot records a take now (`docs/spec/recording.md`); set by the app.
+    pub recording: Option<usize>,
     /// What the track hears while armed.
     pub midi_input: suhina_engine::model::MidiInput,
     /// The track plays notes, or audio: which of its inputs it has.
@@ -99,10 +101,23 @@ pub struct Column {
     pub depth: usize,
     /// The group the track is directly in.
     pub parent: Option<TrackId>,
+    /// The group track this track plays into; `None` is the main output (`track.setOutput`).
+    pub output: Option<TrackId>,
     /// -1 is full left, 1 full right.
     pub pan: f64,
     /// One per return track, in their order, for a track or group column; empty for a return.
     pub sends: Vec<SendKnob>,
+    /// The track's devices and plug-ins in chain order, for the channel strip's list.
+    pub devices: Vec<StripDevice>,
+}
+
+/// A device in a channel strip's list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StripDevice {
+    pub name: String,
+    pub enabled: bool,
+    /// A plug-in, run outside Suhina; otherwise a built-in effect or instrument.
+    pub plugin: bool,
 }
 
 /// A track's send to one return track, as the mixer strip shows it.
@@ -252,6 +267,7 @@ impl Grid {
                 cue: channel.is_some_and(|c| c.cue),
                 armable: kind == ColumnKind::Track && (track.content.notes || track.content.audio),
                 armed: false,
+                recording: None,
                 midi_input: track.midi_input.clone(),
                 plays_notes: kind == ColumnKind::Track && track.content.notes,
                 plays_audio: kind == ColumnKind::Track && track.content.audio,
@@ -260,6 +276,10 @@ impl Grid {
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
                 parent: track.parent,
+                output: channel
+                    .and_then(|c| c.output)
+                    .and_then(|id| project.tracks.iter().find(|t| t.channel == Some(id)))
+                    .map(|t| t.id),
                 pan: channel.map_or(0.0, |c| c.pan),
                 sends: match (kind, channel) {
                     (ColumnKind::Return, _) | (_, None) => Vec::new(),
@@ -276,6 +296,21 @@ impl Grid {
                         })
                         .collect(),
                 },
+                devices: channel.map_or_else(Vec::new, |c| {
+                    c.devices
+                        .iter()
+                        .map(|d| StripDevice {
+                            name: d.name.clone(),
+                            enabled: d.enabled,
+                            plugin: matches!(
+                                d.kind,
+                                suhina_engine::model::DeviceKind::Clap { .. }
+                                    | suhina_engine::model::DeviceKind::Vst3 { .. }
+                                    | suhina_engine::model::DeviceKind::Vst2 { .. }
+                            ),
+                        })
+                        .collect()
+                }),
             };
             if kind == ColumnKind::Return { returns.push(column) } else { columns.push(column) }
         }

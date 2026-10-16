@@ -261,8 +261,16 @@ mod tests {
         // 15.6 ms late, so the median lay at several milliseconds. A single wait can still be
         // late when the test machine is busy (the other tests run at the same time), so the
         // worst case only has the bound the link's own test has.
-        assert!(median < Duration::from_millis(1), "median {median:?}, all {late:?}");
-        assert!(worst < Duration::from_millis(40), "worst {worst:?}, all {late:?}");
+        //
+        // Elsewhere (macOS) the wait yields until its deadline, and a yield on a busy shared
+        // runner can lose the core for tens of milliseconds, so how late it ends measures the
+        // runner's scheduler (#522): there only "never early" above and a loose bound hold.
+        if cfg!(any(target_os = "linux", windows)) {
+            assert!(median < Duration::from_millis(1), "median {median:?}, all {late:?}");
+            assert!(worst < Duration::from_millis(40), "worst {worst:?}, all {late:?}");
+        } else {
+            assert!(worst < Duration::from_millis(500), "worst {worst:?}, all {late:?}");
+        }
     }
 
     /// A ring wakes a sleeping wait long before its deadline.

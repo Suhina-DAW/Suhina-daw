@@ -1,0 +1,55 @@
+# CodeRabbit's review settings for this repository (https://docs.coderabbit.ai). The rules it
+# reviews against are the ones in AGENTS.md; this file only points it at them and keeps it quiet
+# on generated files. It comments; it never approves or blocks a merge.
+language: en-US
+early_access: false
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  # A status on the pull request's head beside CI: pending while the review runs, green when it is
+  # done. Never red (a review that cannot run, e.g. at the free tier's limit, still passes) and not
+  # a required check: the required checks and the maintainer decide the merge.
+  commit_status: true
+  fail_commit_status: false
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  # Generated on main after every merge, or by tools: not reviewed.
+  path_filters:
+    - "!docs/INDEX.md"
+    - "!docs/commands.md"
+    - "!docs/research/*.png"
+    - "!Cargo.lock"
+    - "!third_party/**"
+  path_instructions:
+    - path: "**/*.rs"
+      instructions: |
+        Review against AGENTS.md › Golden rules. Flag in non-test code: unwrap(), expect(),
+        panic!, unreachable!, todo!, unimplemented!; numbers from input used without get() or
+        checked_* arithmetic; allocations sized by input without a cap. Flag `unsafe` outside
+        crates/ipc and crates/plugin-host, and any `unsafe` block there without a `// SAFETY:`
+        comment. Code reachable from the audio callback must not allocate, free, lock, block,
+        log or do I/O. Every source file starts with the GPL-3.0-or-later licence header.
+        User-visible behaviour is a command with tests. Product names of other DAWs appear only
+        in format crates (crates/als, crates/flp) and their tests.
+    - path: "crates/{engine,dsp,stretch,ipc,plugins,realtime}/**"
+      instructions: |
+        Real-time code: look closely for allocation, locking, logging, I/O or unbounded waits on
+        the audio thread, and for anything that could let a plug-in stall the engine past its
+        block deadline (ADR 0006).
+    - path: "docs/**/*.md"
+      instructions: |
+        Documents follow the front matter format in scripts/docs.py. Do not ask for the
+        last_verified date or the marked parts of docs/research/parity-live-12.md to be updated:
+        main writes them after the merge. Other DAWs are named only in docs/spec, docs/decisions,
+        docs/design/brief.md and docs/research.
+    - path: "**/tests/**"
+      instructions: |
+        Tests may unwrap. A timing check must not depend on how busy a shared CI runner is;
+        never suggest skipping or disabling a test.
+chat:
+  auto_reply: true

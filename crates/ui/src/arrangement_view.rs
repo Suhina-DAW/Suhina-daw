@@ -13,6 +13,7 @@ use suhina_engine::Quantization;
 use suhina_engine::model::{FadeCurve, FadeShape, Project, TrackId};
 
 use crate::automation_lanes::{self as automation, LanesState};
+use crate::colour_picker;
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::ColumnKind;
 use crate::menus::{self, TrackMenu};
@@ -48,6 +49,8 @@ const ON_TOGGLE: f32 = 30.0;
 const SOLO: f32 = 18.0;
 /// A group's fold triangle at the start of its header row.
 const FOLD: f32 = 12.0;
+/// The track colour's band down a header's left edge.
+const COLOUR_BAND: f32 = 6.0;
 /// The volume field on a return or main row.
 const FIXED_FIELD: f32 = 90.0;
 /// Points per beat: the default and the zoom range.
@@ -249,6 +252,9 @@ pub struct ArrangementViewState {
     /// Moved clips stack on others instead of replacing them: audio clips, MIDI clips.
     pub stack_audio: bool,
     pub stack_midi: bool,
+    /// A double-click on an empty spot of a lane does nothing (Settings › Arrangement ›
+    /// Double-click makes a clip is off); by default it makes an empty MIDI clip.
+    pub double_click_does_nothing: bool,
     pub header_width: f32,
     heights: HashMap<TrackId, f32>,
     /// The selected clips, in the order they were picked, and the one clicked last: a Shift-click
@@ -272,7 +278,7 @@ pub struct ArrangementViewState {
     /// Where the volume, pan and gain fields were drawn last frame: the wheel over one changes its
     /// value instead of scrolling the view, which has to know before they draw themselves again.
     value_areas: Vec<Rect>,
-    /// Volume and pan as knobs instead of fields (Settings › Interface › Arrangement).
+    /// Volume and pan as knobs instead of fields (Settings › Session and mixer).
     pub knobs: bool,
     /// The track the user last worked on: the header they clicked, or the track of the clip they
     /// selected. A folded group shows that track while it is one of its own.
@@ -294,6 +300,9 @@ pub struct ArrangementViewState {
     /// opens a clip editor closed by hand again (`docs/spec/ui-clip-editor.md` › Least height
     /// and closing).
     pub clip_clicked: bool,
+    /// A track header was double-clicked this frame: the window shows that track's devices
+    /// (`docs/spec/ui-clip-editor.md` › Where it opens).
+    pub open_devices: Option<TrackId>,
     /// Automation lanes under the tracks: which are shown, selected points, a drag.
     pub automation: LanesState,
     /// A marker being dragged: its index and where the pointer is, in beats before snapping.
@@ -316,6 +325,7 @@ impl Default for ArrangementViewState {
             headers_left: false,
             stack_audio: false,
             stack_midi: false,
+            double_click_does_nothing: false,
             header_width: HEADER_COLUMN,
             heights: HashMap::new(),
             selected: Vec::new(),
@@ -339,6 +349,7 @@ impl Default for ArrangementViewState {
             meters: Meters::default(),
             focus: None,
             clip_clicked: false,
+            open_devices: None,
             automation: LanesState::default(),
             marker_drag: None,
             marker_menu_beat: 0.0,
@@ -1162,6 +1173,7 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
             state.clear_selected_clip();
         }
         if lane.notes
+            && !state.double_click_does_nothing
             && body.double_clicked()
             && let Some(pointer) = body.interact_pointer_pos()
         {
@@ -1293,7 +1305,11 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         let y = fixed.bottom() - ROW;
         let header = Rect::from_x_y_ranges(headers, egui::Rangef::new(y, y + ROW));
         fixed_painter.rect_filled(header, 0.0, theme::panel_background());
-        let inner = header.shrink2(Vec2::new(PAD, 2.0));
+        // Lined up with the track names, which start after their colour band.
+        let inner = Rect::from_min_max(
+            Pos2::new(header.left() + COLOUR_BAND + PAD, header.top() + 2.0),
+            header.max - Vec2::new(PAD, 2.0),
+        );
         let font = theme::ui_font(theme::TEXT);
         widgets::text_in(&fixed_painter, inner, Align2::LEFT_CENTER, "Main", font, theme::text_primary());
         let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
@@ -2286,7 +2302,9 @@ fn fixed_row(
     actions: &mut Vec<Action>,
 ) {
     painter.rect_filled(rect, 0.0, theme::panel_background());
-    let inner = rect.shrink2(Vec2::new(PAD, 2.0));
+    let id = Id::new(("arrangement-header", lane.track.0));
+    let band = colour_band(ui, painter, rect, clip, lane, id, actions);
+    let inner = Rect::from_min_max(Pos2::new(band.right() + PAD, rect.top() + 2.0), rect.max - Vec2::new(PAD, 2.0));
     let field = Rect::from_min_max(Pos2::new(inner.right() - FIXED_FIELD, inner.top()), inner.max);
     let level = state.meters.track(lane.track);
     let at = lying_meter(field.left() - PAD, inner.center().y);
@@ -2294,8 +2312,26 @@ fn fixed_row(
     let name = Rect::from_min_max(inner.min, Pos2::new(at.left() - PAD, inner.bottom()));
     let color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
     widgets::text_in(painter, name, Align2::LEFT_CENTER, &lane.name, theme::ui_font(theme::TEXT), color);
-    let id = Id::new(("arrangement-header", lane.track.0));
     value_control(ui, painter, field, clip, lane, Control::Volume, true, id, state, actions);
+}
+
+/// A header's colour band: the track's colour down its left edge, the full height of the header
+/// (dimmed while the track is off). A click opens the palette; gives the band's rectangle.
+fn colour_band(
+    ui: &Ui,
+    painter: &egui::Painter,
+    rect: Rect,
+    clip: Rect,
+    lane: &Lane,
+    id: Id,
+    actions: &mut Vec<Action>,
+) -> Rect {
+    let band = Rect::from_min_size(rect.min, Vec2::new(COLOUR_BAND, rect.height()));
+    painter.rect_filled(band, 0.0, colour_picker::fill(lane.color, lane.mute));
+    if band.intersects(clip) {
+        colour_picker::area(ui, band.intersect(clip), id.with("colour"), lane.track, &lane.name, lane.color, actions);
+    }
+    band
 }
 
 /// Where a header stands among the drawn lanes: how many lanes are inside it (a group's fold
@@ -2339,6 +2375,10 @@ fn track_header(
         let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
         state.pick_track(lane.track, shift, command, order.tracks);
     }
+    // A double-click shows the track's devices in the detail area.
+    if body.double_clicked() {
+        state.open_devices = Some(lane.track);
+    }
     if body.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(lane.track);
     }
@@ -2357,6 +2397,7 @@ fn track_header(
         let menu = TrackMenu {
             track: lane.track,
             name: &lane.name,
+            colour: lane.color,
             is_group: lane.kind == ColumnKind::Group,
             selection: &selection,
             into: &into,
@@ -2368,10 +2409,12 @@ fn track_header(
     });
     let selected = state.selected_tracks.contains(&lane.track) || state.focus == Some(lane.track);
     painter.rect_filled(rect, 0.0, if selected { theme::control_background() } else { theme::panel_background() });
+    // The track's colour runs down the header's left edge; a click there opens the palette.
+    let band = colour_band(ui, painter, rect, clip, lane, id, actions);
     // The meter stands at the right edge; the rows keep clear of it.
     let meter_x = rect.right() - PAD - meter::WIDTH;
     let inner = Rect::from_min_max(
-        Pos2::new(rect.left() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),
+        Pos2::new(band.right() + PAD + lane.depth as f32 * 8.0, rect.top() + HEADER_PAD_Y),
         Pos2::new(meter_x - PAD, rect.bottom() - HEADER_PAD_Y),
     );
     let meter_bottom =
@@ -2383,7 +2426,7 @@ fn track_header(
     let level = state.meters.track(lane.track);
     meter::show(ui, painter, at.intersect(clip), &lane.name, meter::Source::Track(lane.track), &level, actions);
 
-    // Row 1: a group's fold triangle, track on, colour, name. Mixer controls act on the whole
+    // Row 1: a group's fold triangle, track on, solo, cue, arm, name. Mixer controls act on the whole
     // selection while this track is part of one.
     let controlled: Vec<u32> = state.controlled_tracks(lane.track).iter().map(|t| t.0).collect();
     let fold = (lane.kind == ColumnKind::Group && order.children > 0)
@@ -2424,10 +2467,6 @@ fn track_header(
     // A track that can be armed has its arm button after cue, as wide.
     let arm =
         lane.armable.then(|| Rect::from_min_size(Pos2::new(cue.right() + 2.0, row.top()), Vec2::new(SOLO, HEADER_ROW)));
-    let square =
-        Rect::from_min_size(Pos2::new(arm.unwrap_or(cue).right() + PAD, row.center().y - 3.0), Vec2::splat(6.0));
-    let color = if lane.mute { rgb(lane.color).gamma_multiply(0.55) } else { rgb(lane.color) };
-    painter.rect_filled(square, 0.0, color);
     // The automation button at the end of the row shows and hides the track's lanes.
     let lanes_button = Rect::from_min_size(Pos2::new(row.right() - SOLO, row.top()), Vec2::new(SOLO, HEADER_ROW));
     if lane.kind != ColumnKind::Return && lanes_button.intersects(clip) {
@@ -2442,7 +2481,7 @@ fn track_header(
         );
     }
     let name = Rect::from_min_max(
-        Pos2::new(square.right() + PAD, row.top()),
+        Pos2::new(arm.unwrap_or(cue).right() + PAD, row.top()),
         Pos2::new(lanes_button.left() - 4.0, row.bottom()),
     );
     let name_color = if lane.mute { theme::text_hint() } else { theme::text_primary() };
@@ -2622,7 +2661,7 @@ fn value_control(
     }
 }
 
-/// A volume as a small knob with its value beside it, for Settings › Interface › Arrangement ›
+/// A volume as a small knob with its value beside it, for Settings › Session and mixer ›
 /// Mixer controls: Knob.
 fn volume_knob(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
     let size = rect.height().min(theme::KNOB);

@@ -16,6 +16,7 @@ mod buses_tests;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
+mod count_in;
 mod cpu;
 mod cue;
 #[cfg(test)]
@@ -49,6 +50,9 @@ mod plugin_tests;
 mod preview;
 #[cfg(test)]
 mod preview_tests;
+mod record;
+#[cfg(test)]
+mod record_tests;
 mod sends;
 #[cfg(test)]
 mod sends_tests;
@@ -77,7 +81,10 @@ pub use launcher::{
     ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, PlayingMeter, Quantization, Queued,
     SceneShift,
 };
-pub use live::{LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, port_id};
+pub use live::{
+    LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, StampClock, live_now,
+    port_id,
+};
 pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
@@ -86,6 +93,7 @@ pub use plugin::{
 };
 pub use plugin_params::{MAX_BLOCK_PARAMS, ParamEvent, RAMP_STEP, param_id};
 pub use preview::{PreviewMonitor, PreviewNote, PreviewNotes, preview_notes};
+pub use record::{RECORD_CHUNK, RECORD_CHUNKS, RECORD_NOTES, RecordReceiver, RecordedAudio, RecordedNote};
 use stretch::StretchVoice;
 pub use suhina_device_api::NoteEvent as DeviceEvent;
 use suhina_device_api::ProcessContext;
@@ -293,6 +301,10 @@ pub struct Renderer {
     live: live::Live,
     /// The audio input device's frames, for the tracks that hear it (ADR 0017).
     input: input::Input,
+    /// What the armed tracks play, handed out while recording (`docs/spec/recording.md`).
+    recorder: record::Recorder,
+    /// The count-in before recording starts the transport, while it counts.
+    count_in: Option<count_in::CountIn>,
     /// The audio thread's CPU load, published to the controller's `CpuMonitor`.
     cpu: cpu::CpuMeter,
     /// The level meters, published to the controller's `MeterMonitor`.
@@ -352,8 +364,10 @@ impl Renderer {
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
             cue: cue::Cue::new(),
-            live: live::Live::new(),
+            live: live::Live::new(sample_rate),
             input: input::Input::new(),
+            recorder: record::Recorder::new(),
+            count_in: None,
             cpu: cpu::CpuMeter::new(),
             meters,
             follow_loop: true,
@@ -462,6 +476,30 @@ impl Renderer {
         self.live.any_armed()
     }
 
+    /// Where the render thread is on the live clock ([`live_now`]): it renders the next block
+    /// at `now`. Notes stamped with a time are played `delay` frames after it, at the frame
+    /// where that falls (#269): a delay as long as the render thread's longest wait between two
+    /// blocks and one block more leaves every note a frame in the block after it, so notes keep
+    /// the spacing they were played with. Call it before every [`Renderer::process`]; without
+    /// it, every note plays at the first frame of the next block. Never allocates.
+    pub fn set_live_clock(&mut self, now: u64, delay: u32) {
+        self.live.set_clock(now, delay, self.position);
+    }
+
+    /// The output's latency (from the engine to the speaker, measured) and the input device's,
+    /// in frames: a recorded note or sound is placed at the beat that was heard when it was
+    /// played (`docs/spec/recording.md` › Lined up with what was heard). Call it before every
+    /// [`Renderer::process`] while a device plays; offline both are 0. Never allocates.
+    pub fn set_record_latency(&mut self, output: u32, input: u32) {
+        self.recorder.set_latency(output, input);
+    }
+
+    /// The renderer frame each live note was played at, in order.
+    #[cfg(test)]
+    pub(crate) fn live_played(&self) -> Vec<u64> {
+        self.live.played.iter().map(|(at, _)| *at).collect()
+    }
+
     pub fn stretch_underruns(&self) -> u64 {
         self.underruns_before + self.graph.ahead.underruns()
     }
@@ -510,6 +548,7 @@ impl Renderer {
             self.process_block(rest, cue_rest);
         }
         self.publish_position();
+        self.publish_count_in();
         if let Some(started) = measured {
             self.cpu.measured(started, Instant::now());
         }
@@ -523,8 +562,11 @@ impl Renderer {
         while !out.is_empty() {
             self.wrap_loop();
             self.drain_commands();
+            // A count-in that has counted its beats starts the transport on this frame.
+            self.end_count_in();
             let frames = (out.len() / 2).min(MAX_BLOCK);
             let frames = self.frames_to_loop_end().map_or(frames, |to_end| frames.min(to_end.max(1)));
+            let frames = self.frames_to_count_in_end().map_or(frames, |to_end| frames.min(to_end.max(1)));
             let (chunk, rest) = std::mem::take(&mut out).split_at_mut(frames * 2);
             let (cue_chunk, cue_after) = split_cue(cue, chunk.len());
             self.process_chunk(chunk, cue_chunk);
@@ -559,16 +601,39 @@ impl Renderer {
         self.preview.begin(&self.graph.chains);
         self.preview.receive(&mut self.graph.chains);
         self.preview.begin(&self.graph.chains);
-        // Live notes after the commands, so a track armed in this block hears them.
-        self.live.receive(&mut self.graph.chains, self.position);
         // This block's audio input, and which tracks hear it: In always, Auto while armed.
         self.input.read(frames);
+        // Where this block is, for what is recorded in it: the beats of its first frame.
+        let beats_per_frame = self.graph.launcher.tempo_bpm() / 60.0 / f64::from(self.sample_rate);
+        let arrangement_beat = crate::tempo::beat_at(&self.graph.tempo, self.time());
+        self.recorder.begin(
+            self.running,
+            self.position,
+            self.graph.launcher.beat(),
+            arrangement_beat,
+            beats_per_frame,
+            self.live.delay(),
+            self.input.waiting(),
+        );
+        // Live notes after the commands, so a track armed in this block hears them.
+        self.live.receive(&mut self.graph.chains, &mut self.recorder, self.position);
         for (route, heard) in self.graph.inputs.iter().zip(self.graph.inputs_heard.iter_mut()) {
             *heard = match route.monitor {
                 suhina_model::Monitor::In => true,
                 suhina_model::Monitor::Auto => self.live.is_armed(route.track),
                 suhina_model::Monitor::Off => false,
             };
+        }
+        // An armed track's input is recorded as it comes in, whatever its monitoring.
+        if self.recorder.takes_audio() {
+            for route in self.graph.inputs.iter().filter(|r| self.live.is_armed(r.track)) {
+                let channels = if route.left == route.right { 1 } else { 2 };
+                let (left, right) = (route.left, route.right);
+                let input = &self.input;
+                self.recorder.audio(route.track, channels, 0, frames, |frame, channel| {
+                    input.sample(frame, if channel == 0 { left } else { right })
+                });
+            }
         }
         self.receive_params();
         // A rewind moves along even while the transport is stopped, so the stretched clips are
@@ -598,9 +663,11 @@ impl Renderer {
                 chain.release_due(frame, self.position);
             }
             self.preview.frame(&mut self.graph.chains, frame, self.position);
+            self.live.frame(&mut self.graph.chains, &mut self.recorder, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
             let launcher = &self.graph.launcher;
-            let click = self.metronome.frame(self.running, launcher.beat(), |index| launcher.starts_bar(index));
+            let click = self.metronome.frame(self.running, launcher.beat(), |index| launcher.starts_bar(index))
+                + self.count_in_frame();
             let (launched_left, launched_right) = self.launcher_frame();
             let time = self.time();
             while self.running
@@ -1351,6 +1418,7 @@ mod tests {
                 length: 4.0,
                 lanes,
                 extensions: Extensions::default(),
+                scale: None,
             }],
             arrangement: Arrangement {
                 lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips }],

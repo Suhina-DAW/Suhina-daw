@@ -487,7 +487,7 @@ fn a_click_on_the_ruler_moves_the_play_start_marker_on_the_grid() {
     // With Stop set to stay, the marker moves to where it stopped.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: General").click();
+    harness.get_by_label("Settings page: Transport").click();
     harness.run();
     harness.get_by_label("Stop: Stay").click();
     harness.run();
@@ -692,7 +692,7 @@ fn play_starts_from_the_selected_clip_with_shift_space_or_the_setting() {
     // With Play from set to the selected clip, Space and the Play button start there too.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: General").click();
+    harness.get_by_label("Settings page: Transport").click();
     harness.run();
     harness.get_by_label("Play from: Selected clip").click();
     harness.run();
@@ -768,7 +768,7 @@ fn a_saved_zoom_is_used_from_the_start_and_settings_can_change_it() {
     assert!((harness.ctx.zoom_factor() - 1.5).abs() < 1e-6);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: Interface").click();
+    harness.get_by_label("Settings page: Appearance").click();
     harness.run();
     harness.get_by_label("Zoom: -").click();
     harness.run();
@@ -785,7 +785,7 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
     assert!(harness.state().settings_open());
-    harness.get_by_label("Settings page: Interface").click();
+    harness.get_by_label("Settings page: Appearance").click();
     harness.run();
     harness.get_by_label("Animations: Off").click();
     harness.run();
@@ -814,7 +814,7 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
     harness.state_mut().set_themes(&ctx, vec![night], Some("themes".into()));
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: Theme").click();
+    harness.get_by_label("Settings page: Appearance").click();
     harness.run();
     assert!(harness.query_by_label("Theme: Suhina Dark").is_some());
     harness.get_by_label("Theme: Night").click();
@@ -1110,7 +1110,7 @@ fn settings_audio_lists_the_midi_inputs_and_one_turned_off_is_saved() {
     let mut harness = window(app);
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: Audio").click();
+    harness.get_by_label("Settings page: MIDI").click();
     for _ in 0..3 {
         harness.step();
     }
@@ -1590,6 +1590,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     let clip = Clip {
         content: ContentId(300),
@@ -1914,7 +1915,7 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
     let mut harness = window(demo_app());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: General").click();
+    harness.get_by_label("Settings page: Clip editor").click();
     harness.run();
     // The piano roll's row shows the size in use, Large by default.
     assert!(harness.query_by_label("Toolbar size: Large").is_some(), "the row reads its value");
@@ -1929,19 +1930,47 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
         Some(suhina_ui::settings::ToolbarSize::Larger)
     );
 
-    // The four mouse switches write to the keymap, which is handed out to be saved.
-    assert!(harness.query_by_label("Right click deletes a note: On").is_some(), "each switch is an Off/On row");
+    // The workflow settings write to the keymap, which is handed out to be saved. They are the
+    // page's last rows: the wheel scrolls them into view.
+    for _ in 0..20 {
+        harness.hover_at(egui::pos2(SIZE.0 / 2.0, SIZE.1 / 2.0));
+        harness.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -120.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run();
+    }
+    assert!(
+        harness.query_by_label("Right click on a note: Every tool").is_some(),
+        "each setting is a row of its short choices"
+    );
     assert!(!harness.state().keymap().mouse().right_deletes, "off until it is turned on");
-    harness.get_by_label("Right click deletes a note: On").click();
+    // Under the window's edge until the page is scrolled to it.
+    harness.get_by_label("Right click on a note: Every tool").scroll_to_me();
+    harness.run();
+    harness.get_by_label("Right click on a note: Every tool").click();
     harness.run();
     assert!(harness.state().keymap().mouse().right_deletes);
     assert!(harness.state_mut().take_changed_keymap().is_some(), "the keymap is saved with it");
-    assert_eq!(harness.state().keymap().preset(), suhina_ui::keymap::Preset::SelectFirst, "the name stays");
-    // And back off again.
-    harness.get_by_label("Right click deletes a note: Off").click();
+    assert_eq!(harness.state().keymap().preset(), suhina_ui::keymap::Preset::Custom, "the mode is Custom");
+    // And back again.
+    harness.get_by_label("Right click on a note: Nothing").click();
     harness.run();
     assert!(!harness.state().keymap().mouse().right_deletes);
-    // A preset chosen on the Shortcuts page turns all four on.
+    // Every setting has its row.
+    for row in [
+        "Click on empty grid: Draws",
+        "Shift+right drag: Splits",
+        "Alt+right button: Plays",
+        "Duplicate key: Ctrl+B",
+        "Double-click on empty grid: Nothing",
+        "Double-click on a note: Nothing",
+    ] {
+        assert!(harness.query_by_label(row).is_some(), "{row}");
+    }
+    // A preset chosen on the Shortcuts page turns all four mouse switches on.
     harness.get_by_label("Settings page: Shortcuts").click();
     harness.run();
     harness.get_by_label("Preset: Mouse-first").click();
@@ -1951,9 +1980,10 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
         harness.state_mut().take_changed_keymap().map(|k| k.mouse()),
         Some(suhina_ui::keymap::MouseSettings::ALL_ON)
     );
-    harness.get_by_label("Settings page: General").click();
+    assert!(harness.query_by_label("Preset: Custom").is_some(), "Custom is one of the modes there too");
+    harness.get_by_label("Settings page: Clip editor").click();
     harness.run();
-    assert!(harness.query_by_label("Right click deletes a note: On").is_some());
+    assert!(harness.query_by_label("Right click on a note: Every tool").is_some());
     harness.get_by_label("Close settings").click();
     harness.run();
 }
@@ -2188,7 +2218,7 @@ fn render_the_session_window() {
     harness.run();
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     harness.run();
-    harness.get_by_label("Settings page: Theme").click();
+    harness.get_by_label("Settings page: Appearance").click();
     harness.run();
     harness.remove_cursor();
     harness.run();

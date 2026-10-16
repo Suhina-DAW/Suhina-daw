@@ -15,6 +15,7 @@ covers:
   - crates/engine/src/loop_tests.rs
   - apps/suhina-cli/src/play.rs
   - crates/ui/src/menus.rs
+  - crates/ui/src/colour_picker.rs
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
@@ -128,6 +129,11 @@ bar long, starting at the grid line before the pointer (with Alt, exactly at the
 selects it; it stacks when the MIDI stacking setting is on. A double-click on a clip is the
 clip's own. In the Session view a double-click on an empty slot makes one there
 ([Session view](ui-session-view.md) › Clip slots).
+
+Both double-clicks follow one setting, Settings › Arrangement › **Double-click makes a clip** (On by
+default, saved as `double_click_clip`). Off, a double-click on an empty spot of a lane, or on an
+empty slot, does nothing: no clip, and the selection stays as the first click left it.
+`clip.create` sent any other way (the command line, MCP) is not affected.
 
 ## Copy, cut and paste
 
@@ -524,6 +530,18 @@ from its lower half), and a right-click opens the track's menu: name, colour, gr
 level up, right after the group it leaves), delete. A group's header starts with a triangle that
 folds its tracks away (Folded groups). The Session view's column headers have the same menu.
 
+A header's left edge is a 6 px band of the track's colour, the header's full height (dimmed while
+the track is off); return rows have one too. A click on the band opens the colour palette under
+it, the same swatches as the menu's; a swatch sets the colour (`track.setColor`, one undo step).
+A press on the band that drags still resizes the header column where the band meets its inner
+edge ([Session view](ui-session-view.md) › Track colour).
+
+A **double-click on a header** (on its name or its background, not on one of its controls) also
+shows the track's devices in the detail area, opening the detail area if it was hidden; a clip
+selected on that track stays selected, with the detail area's switch on **Devices**, and a clip
+selected on another track is no longer selected ([clip editor](ui-clip-editor.md) › Where it
+opens). It is window state, not a command.
+
 ### Groups inside groups
 
 Groups nest: a group track can hold tracks and other groups, at most 16 levels deep
@@ -542,7 +560,7 @@ half, and below the header of an open group is into that group, first. Within th
 drop is a `track.move`; into another group, or out to the top level, it is a `track.setGroup`.
 After a folded group is after everything inside it.
 
-While the piano roll is pulled to the top with **Edited track** (Settings › General › Piano roll),
+While the piano roll is pulled to the top with **Edited track** (Settings › Clip editor › Piano roll),
 the view shows only its ruler, loop brace and marker rows and the edited track's lane, whole and
 lit (the view is as tall as those rows and the lane, so the lane's notes show as they do
 elsewhere), with no return tracks and no main track, and is not scrolled; its scroll position is back when the view is whole again
@@ -576,7 +594,7 @@ the value with `continue`, so the drag is one undo step.
 one step (1 dB, or 0.02 of pan), Shift makes it ten times finer, and the view stays where it is.
 The same holds for a clip's gain field and for the Session mixer's values.
 
-**Mixer controls** (Settings › Interface › Arrangement) chooses how a track's volume and pan are
+**Mixer controls** (Settings › Session and mixer) chooses how a track's volume and pan are
 drawn: **Field** (default), the bar and the centre bar this view has always had, or **Knob**, a
 small knob with its value beside it, as the Session mixer's pan knob. Either way the control is
 dragged and rolled over the same.

@@ -268,6 +268,8 @@ pub struct Settings {
     /// Launching a clip in the Session view selects it, so the detail area shows it
     /// (`docs/spec/ui-session-view.md` › Launching and selecting).
     pub select_on_launch: bool,
+    /// The Session mixer's height, the detail area's layout and double-clicks that make clips.
+    pub view: crate::view_settings::ViewSettings,
     /// What stays above the piano roll pulled to the top.
     pub piano_roll_top: PianoRollTop,
     /// How large the piano roll's toolbar is drawn.
@@ -275,7 +277,7 @@ pub struct Settings {
     /// The control bar's grid value sets the piano roll's too; otherwise the piano roll keeps
     /// its own.
     pub piano_grid_follows: bool,
-    /// A track's volume and pan as a field or as a knob (Settings › Interface › Arrangement).
+    /// A track's volume and pan as a field or as a knob (Settings › Session and mixer).
     pub mixer_controls: MixerControls,
     /// Where plug-in editors open.
     pub plugin_editors: EditorPlacement,
@@ -354,6 +356,7 @@ impl Default for Settings {
             play_from: PlayFrom::Marker,
             device_layout: DeviceLayout::Row,
             select_on_launch: true,
+            view: crate::view_settings::ViewSettings::default(),
             piano_roll_top: PianoRollTop::Track,
             toolbar_size: ToolbarSize::Large,
             piano_grid_follows: false,
@@ -531,7 +534,8 @@ impl Settings {
                 MixerControls::Knob => "knob",
             },
             piano_toolbar = self.toolbar_size.param(),
-        ) + &self.midi_inputs_off.iter().map(|port| format!("midi_input_off = {port}\n")).collect::<String>()
+        ) + &self.view.to_text()
+            + &self.midi_inputs_off.iter().map(|port| format!("midi_input_off = {port}\n")).collect::<String>()
     }
 
     /// Reads a settings file. Unknown keys and values are skipped with a warning and leave the
@@ -549,6 +553,9 @@ impl Settings {
                 continue;
             };
             let (key, value) = (key.trim(), value.trim());
+            if settings.view.parse(key, value) {
+                continue;
+            }
             match (key, value) {
                 ("animations", "on" | "off") => settings.animations = value == "on",
                 ("sample_stacking", "on" | "off") => settings.sample_stacking = value == "on",
@@ -690,6 +697,117 @@ pub fn is_theme_id(id: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A settings file as Suhina wrote it before the Settings window was regrouped
+    /// (`docs/spec/ui-settings.md`): moving a setting to another page never changes its key.
+    const BEFORE_THE_REGROUPING: &str = "# Suhina settings; changed from Options > Settings.
+animations = off
+track_headers = left
+renderer = glow
+sample_stacking = on
+midi_stacking = on
+open_projects = tab
+at_start = template
+start_template = Beats
+stop = here
+play_from = clip
+device_chain = stack
+mixer_controls = knob
+select_on_launch = off
+plugin_editors = device
+theme = night
+projects_folder = /music/projects
+templates_folder = /music/templates
+browser = off
+browser_side = left
+browser_width = 320
+preview_autoplay = off
+preview_volume = -12
+drop_files = separate
+warp_mode = tonal
+map_layout = grid
+map_hover_preview = off
+map_max_seconds = 30
+map_dot_size = 150
+map_window = on
+map_window_rect = 10, 20, 640, 480
+audio_host = ASIO
+audio_device = Interface
+audio_sample_rate = 96000
+audio_buffer = 256
+audio_exclusive = on
+audio_cue_pair = 2
+audio_cue_volume = -6
+audio_input = Line In
+zoom = 120
+waveform_scale = db
+piano_roll_top = window
+piano_roll_grid = control_bar
+piano_roll_toolbar = larger
+backup = 1m
+backup_clean_up = off
+midi_input_off = Keys
+";
+
+    #[test]
+    fn a_settings_file_from_before_the_regrouping_loads_with_the_same_values() {
+        let (settings, warnings) = Settings::from_text(BEFORE_THE_REGROUPING);
+        assert_eq!(warnings, Vec::<String>::new());
+        // A setting added later keeps its default here.
+        #[allow(clippy::needless_update)]
+        let expected = Settings {
+            animations: false,
+            track_headers: Side::Left,
+            graphics: Graphics::OpenGl,
+            sample_stacking: true,
+            midi_stacking: true,
+            on_open: OnOpen::NewTab,
+            at_start: AtStart::Template,
+            start_template: "Beats".into(),
+            stop: StopReturn::Here,
+            play_from: PlayFrom::Clip,
+            device_layout: DeviceLayout::Stack,
+            mixer_controls: MixerControls::Knob,
+            select_on_launch: false,
+            plugin_editors: EditorPlacement::DeviceView,
+            theme: "night".into(),
+            projects_folder: "/music/projects".into(),
+            templates_folder: "/music/templates".into(),
+            browser_open: false,
+            browser_side: Side::Left,
+            browser_width: 320,
+            preview_autoplay: false,
+            preview_volume: -12,
+            drop_separate: true,
+            warp_mode: WarpMode::Tonal,
+            map_grid: true,
+            map_hover_preview: false,
+            map_max_seconds: 30,
+            map_dot_size: 150,
+            map_window: true,
+            map_window_rect: Some([10, 20, 640, 480]),
+            audio_host: "ASIO".into(),
+            audio_device: "Interface".into(),
+            audio_sample_rate: 96_000,
+            audio_buffer: 256,
+            audio_exclusive: true,
+            audio_cue_pair: 2,
+            audio_cue_volume: -6,
+            audio_input: "Line In".into(),
+            zoom: 120,
+            waveform_db: true,
+            piano_roll_top: PianoRollTop::Window,
+            piano_grid_follows: true,
+            toolbar_size: ToolbarSize::Larger,
+            backup: suhina_session::backup::Interval::Minutes(1),
+            backup_clean_up: false,
+            midi_inputs_off: vec!["Keys".into()],
+            ..Settings::default()
+        };
+        assert_eq!(settings, expected);
+        // Written again, it reads back the same.
+        assert_eq!(Settings::from_text(&settings.to_text()).0, expected);
+    }
+
     #[test]
     fn settings_survive_a_round_trip() {
         let settings = Settings {
@@ -705,6 +823,7 @@ mod tests {
             play_from: PlayFrom::Clip,
             device_layout: DeviceLayout::Stack,
             select_on_launch: false,
+            view: crate::view_settings::ViewSettings::default(),
             piano_roll_top: PianoRollTop::Window,
             toolbar_size: ToolbarSize::Larger,
             piano_grid_follows: true,

@@ -51,12 +51,13 @@ impl Timed {
     }
 }
 
-/// Waits until `at`, yielding rather than sleeping: a short sleep ends on the system timer's
-/// tick on some systems (up to 15.6 ms late on Windows), much later than the engine's 50 µs
-/// look at a plug-in. A link's doorbell waits this way too near its deadline.
+/// Waits until `at`, spinning rather than sleeping or yielding: a short sleep ends on the
+/// system timer's tick on some systems (up to 15.6 ms late on Windows), and on a busy shared
+/// runner a yield can hand the core away for a whole scheduler slice (10 to 30 ms seen on the
+/// macOS and Windows runners), both much later than the engine's 50 µs look at a plug-in.
 fn sleep_until(at: Instant) {
     while Instant::now() < at {
-        std::thread::yield_now();
+        std::hint::spin_loop();
     }
 }
 
@@ -157,6 +158,20 @@ fn find(log: &[Hand], name: &str) -> Hand {
 /// as its own plug-in answers takes the block about one slow plug-in long.
 #[test]
 fn a_chain_goes_on_as_soon_as_its_own_plug_in_answers() {
+    // A shared runner can take the core away from the test for longer than a slow plug-in, which
+    // no engine can make up for: the best of three tries counts. In stages no try could pass.
+    let mut tries = Vec::new();
+    for _ in 0..3 {
+        match one_block_with_slow_plug_ins_at_different_places() {
+            Ok(()) => return,
+            Err(why) => tries.push(why),
+        }
+    }
+    panic!("no try went on as its own plug-in answered: {tries:#?}");
+}
+
+/// One block of [`a_chain_goes_on_as_soon_as_its_own_plug_in_answers`]; why it failed.
+fn one_block_with_slow_plug_ins_at_different_places() -> Result<(), String> {
     let p = tracks(vec![vec![plug(), plug(), plug()], vec![plug(), plug(), plug()]]);
     let log = Arc::default();
     let stands = vec![
@@ -171,13 +186,20 @@ fn a_chain_goes_on_as_soon_as_its_own_plug_in_answers() {
     let (out, longest) = play(&mut renderer, 1);
     let log = log.lock().unwrap().clone();
     assert_eq!(log.len(), 6, "every plug-in had the block: {log:?}");
-    // The second chain's slow plug-in had its block before the first chain's slow one answered.
-    assert!(find(&log, "b3").sent < find(&log, "a1").due, "{log:?}");
-    // And the first chain went on as soon as its slow plug-in answered, not after the other's.
-    assert!(find(&log, "a2").sent < find(&log, "b3").due, "{log:?}");
-    assert!(longest < SLOW * 2 - QUICK * 4, "the block took {longest:?}, as long as two slow plug-ins");
     assert_eq!(renderer.graph.chains.iter_mut().map(|c| c.missed()).sum::<u64>(), 0);
     assert!(peak(&out) > 0.0);
+    // The second chain's slow plug-in had its block before the first chain's slow one answered.
+    if find(&log, "b3").sent >= find(&log, "a1").due {
+        return Err(format!("b3 went out after a1 answered: {log:?}"));
+    }
+    // And the first chain went on as soon as its slow plug-in answered, not after the other's.
+    if find(&log, "a2").sent >= find(&log, "b3").due {
+        return Err(format!("a2 went out after b3 answered: {log:?}"));
+    }
+    if longest >= SLOW * 2 - QUICK * 4 {
+        return Err(format!("the block took {longest:?}, as long as two slow plug-ins"));
+    }
+    Ok(())
 }
 
 /// A chain whose plug-in hangs misses that block at the deadline; the other chains, whose

@@ -273,8 +273,9 @@ every change that adds, changes or removes something a user can do (the same cha
 *How to check it* section) updates the coverage of the chapters it moves in
 [`scripts/parity/score.py`](scripts/parity/score.py), and
 [`scripts/parity/devices.json`](scripts/parity/devices.json) for a built-in effect or instrument,
-runs `python scripts/parity/update_report.py`, and commits what it writes into
-[`docs/research/parity-live-12.md`](docs/research/parity-live-12.md). A pull request that moves no
+and nothing else: the numbers in [`docs/research/parity-live-12.md`](docs/research/parity-live-12.md)
+(its marked parts, the command count among them) are regenerated on `main` after the merge, so a
+pull request leaves them alone, even when it adds a command. A pull request that moves no
 coverage writes `Parity: no change` and the reason in its description ("Parity: no change, a
 refactor"). When a pull request changes `crates/`, `devices/` or `apps/` and does neither, the
 [Parity notice](.github/workflows/parity-notice.yml) check warns; it does not fail.
@@ -290,7 +291,7 @@ that no longer exists:
 | What is read from a format, or behaviour described in a spec | the spec in `docs/spec/` |
 | MCP tools, or how agents use commands | [`docs/mcp.md`](docs/mcp.md) (the command list, [`docs/commands.md`](docs/commands.md), is generated) |
 | What works for users | [`ROADMAP.md`](ROADMAP.md) › What works now, and [`README.md`](README.md) if it shows it |
-| What the parity measurement says (a milestone that lands, a feature that appears or is dropped) | the coverage of the chapters it changes in `scripts/parity/score.py`, then `python scripts/parity/update_report.py` for the marked parts of [`docs/research/parity-live-12.md`](docs/research/parity-live-12.md); its prose is edited in that file like any other document |
+| What the parity measurement says (a milestone that lands, a feature that appears or is dropped) | the coverage of the chapters it changes in `scripts/parity/score.py`; the marked parts of [`docs/research/parity-live-12.md`](docs/research/parity-live-12.md) are regenerated on `main`, and its prose is edited in that file like any other document |
 | A rule in this file | this file, and [`CONTRIBUTING.md`](CONTRIBUTING.md) if it repeats it |
 
 A limit or a planned part that a change resolves is removed from the docs in the same change.
@@ -301,24 +302,38 @@ extending someone else's sentence. Leave generated files out of the change:
 [`docs/INDEX.md`](docs/INDEX.md) (from the documents' front matter) and
 [`docs/commands.md`](docs/commands.md) (from the command registry) are regenerated on `main` after
 every merge by [`.github/workflows/docs-generated.yml`](.github/workflows/docs-generated.yml), and
-a pull request that edits one of them fails CI rather than losing the edit silently.
+a pull request that edits one of them fails CI rather than losing the edit silently. The same
+workflow writes three more things a pull request leaves alone, so that two pull requests never
+conflict on them:
 
-The parity report, its figures and the scripts that produce them are the exception, and are
-described in the report itself: the **report** is an ordinary document that a pull request edits
-freely, except for the parts between its `parity:begin` and `parity:end` markers, which
-`scripts/parity/update_report.py` writes from `scripts/parity/score.py` and
-`scripts/parity/devices.json` (CI fails when they are out of date); the **figures** are rendered on
-`main` like the other generated files.
+- the parts of [`docs/research/parity-live-12.md`](docs/research/parity-live-12.md) between its
+  `parity:begin` and `parity:end` markers, which `scripts/parity/update_report.py` writes from
+  `scripts/parity/score.py`, `scripts/parity/devices.json` and the command registry. The rest of
+  the report is an ordinary document that a pull request edits freely. CI checks only that the
+  inputs render (`update_report.py --check-inputs`), so marked parts that are stale, or that a pull
+  request regenerated anyway, never fail it;
+- its two figures, rendered from the same numbers;
+- `last_verified` in a document's front matter: after the merge, `python scripts/docs.py stamp`
+  moves it up to the day of the document's last change on `main`.
+
+When a merge of `main` into a branch conflicts inside the marked parts, take `main`'s side there
+(`git checkout --theirs` on the file when the branch changed nothing else in it); the workflow
+writes them again after the merge either way.
 
 ```sh
 python scripts/docs.py impact   # documents that cover code you changed but you have not updated
                                 # (a notice only, for files three or more documents cover)
 python scripts/docs.py check    # what CI runs: front matter, covered paths, links and #anchors
 python scripts/docs.py index    # prints the index with your documents in it; writes nothing
+python scripts/parity/update_report.py --check-inputs   # what CI runs for the parity report
 ```
 
 Every file under `docs/` starts with front matter (format in `scripts/docs.py`): `description`,
 `read_when`, `type` (system, decision, spec, howto, plan), `status`, `last_verified` and
-`covers`, the code paths it describes. Set `last_verified` to the day you checked the text
-against the code; CI warns when it is over 90 days old. A new document lists in `covers` the code
+`covers`, the code paths it describes. A pull request that changes a document has checked it, and
+`main` stamps `last_verified` with the day of the merge (above), so leave the line as it is. Set it
+by hand only when you checked a document against the code without changing anything else in it, or
+for a new document. A commit that changes documents without checking them (a rename across all of
+them) carries a `Last-verified: keep` line in its message. CI warns when the date is over 90 days
+old. A new document lists in `covers` the code
 it describes, so `impact` can point the next change to it.

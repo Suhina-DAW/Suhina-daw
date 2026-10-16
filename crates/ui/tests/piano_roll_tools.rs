@@ -375,12 +375,14 @@ fn a_new_note_takes_the_length_of_the_note_last_clicked() {
 }
 
 #[test]
-fn settings_general_has_both_piano_roll_settings_and_they_change_the_settings() {
+fn settings_clip_editor_has_both_piano_roll_settings_and_they_change_the_settings() {
     let mut renderer = engine();
     let mut h = piano_app(&mut renderer, Settings::default());
     h.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
     h.run();
     assert!(h.state().settings_open());
+    h.get_by_label("Settings page: Clip editor").click();
+    h.run();
     // Both rows fit on the page, inside the window.
     for name in ["Pulled to the top: Whole window", "Piano roll grid: Control bar"] {
         let rect = h.get_by_label(name).rect();

@@ -439,10 +439,12 @@ impl Projects {
     /// Returns what the user should hear about. It also lets the playing engine catch up with
     /// a drag that outran it ([`Session::catch_up_player`]).
     pub fn poll_plugins(&mut self) -> Vec<String> {
+        let mut notices = Vec::new();
         if let Some(session) = self.active.and_then(|id| self.get_mut(id)) {
             session.catch_up_player();
+            notices.extend(session.poll_recording());
         }
-        let mut notices = self.check_output();
+        notices.extend(self.check_output());
         notices.extend(self.sync_active_plugins());
         notices.extend(self.poll_midi());
         notices

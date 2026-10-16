@@ -19,7 +19,7 @@ const MIN_PART: f64 = 1e-6;
 /// The sample rate a consolidated audio clip is rendered at when its sources do not say.
 const DEFAULT_RATE: u32 = 48_000;
 /// Files with the same name tried before giving up on finding a free one.
-const MAX_NAME_TRIES: u32 = 1000;
+pub(crate) const MAX_NAME_TRIES: u32 = 1000;
 /// The folder next to the project file that consolidated audio is written to.
 pub(crate) const CONSOLIDATED_FOLDER: &str = "Consolidated";
 
@@ -121,6 +121,8 @@ pub(crate) fn consolidate(session: &mut Session, params: &Value) -> Result<Value
         }
     }
     let name = clips.first().and_then(|c| p.content(c.content)).map(|c| c.name.clone()).unwrap_or_default();
+    // A MIDI clip keeps the scale of the first clip, as it keeps its name (ADR 0001 › clip scales).
+    let scale = if notes { clips.first().and_then(|c| p.content(c.content)).and_then(|c| c.scale) } else { None };
     let data = match (notes, audio) {
         (true, true) => return Err("the range holds both MIDI and audio clips".into()),
         (false, false) => return Err("the clips in the range play nothing".into()),
@@ -139,6 +141,7 @@ pub(crate) fn consolidate(session: &mut Session, params: &Value) -> Result<Value
         length: end - start,
         lanes: vec![ContentLane { target: None, data }],
         extensions: Default::default(),
+        scale,
     });
     let clip = Clip {
         content: id,
@@ -302,7 +305,7 @@ fn track_name(p: &Project, track: TrackId) -> String {
 }
 
 /// A track name made safe as part of a file name on every system.
-fn sanitized(name: &str) -> String {
+pub(crate) fn sanitized(name: &str) -> String {
     let clean: String =
         name.chars().map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '_' }).collect();
     let clean = clean.trim();

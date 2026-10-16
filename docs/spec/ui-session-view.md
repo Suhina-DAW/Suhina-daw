@@ -3,9 +3,14 @@ description: Functional spec of the main window and the Session view: regions, c
 read_when: Session view, main window layout, clip slot behaviour, scene launch, launch keys, mapping mode, Map button, Ctrl+M, mixer section, browser structure
 type: spec
 status: draft
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/ui/src/session_view.rs
+  - crates/ui/src/mixer_strip.rs
+  - crates/ui/src/view_settings.rs
+  - crates/ui/tests/mixer_strip.rs
+  - crates/ui/src/colour_picker.rs
+  - crates/ui/tests/track_colour.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/slot_launch.rs
   - crates/ui/src/launch_keys.rs
@@ -37,9 +42,12 @@ From top to bottom:
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
      start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or
-     from the selected Arrangement clip as Settings › General › Play from says, and stop
-     returns to it or stays, as Settings › General › Stop says
+     from the selected Arrangement clip as Settings › Transport › Play from says, and stop
+     returns to it or stays, as Settings › Transport › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
+   - **Suhina:** record, right of stop, records the armed tracks into the arrangement, and a
+     Count-in menu right of the launch quantisation; an armed track's empty slots show a record
+     button ([recording](recording.md) › In the window)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
       reports it as `cpu`; the rest is not). Left of the CPU load, the program's own RAM
@@ -61,7 +69,11 @@ From top to bottom:
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
-   the selected clip's editor. **Suhina:** a splitter above it sets its height; under the
+   the selected clip's editor. **Suhina:** Settings › Detail area › **Detail area layout** puts it
+   **Beside the browser** (the default: it starts right of the browser, which runs down to the
+   status bar) or **Full width** (it spans the whole window, under the browser too, which ends
+   above it); with the device chain stacked in a column beside the view the layout does not
+   apply. A splitter above it sets its height; under the
    Arrangement view, while the piano roll shows a clip, the splitter pulls it all the way up
    ([clip editor](ui-clip-editor.md) › Pulled to the top).
 5. **Info view** in the bottom left corner: help text for whatever is under the pointer.
@@ -79,13 +91,18 @@ create a new scene or track.
 
 ### Track header
 
-Track name over a strip in the track colour (Live colours the name itself). Clicking selects the
+**Suhina:** the whole header is the track colour, with the name in a text colour that reads on
+it, so tracks are told apart at a glance; the channel strip under the column carries the same
+colour (Mixer › the channel strip), and the Arrangement headers have it as a band down their edge
+(Track colour below). Clicking selects the
 track; dragging moves it (after the header of an open group is into that group, and over another
 group's column it joins that group, [arrangement editing](arrangement-editing.md) › Groups inside
 groups); right-clicking opens its menu (rename, colour, group, ungroup, move into group, move out
 of group, delete). A track inside groups has its name stepped in 4 px per level; a group's name
 follows a fold arrow, and a folded group hides the columns of the tracks inside it.
-Double-clicking to rename is planned.
+Double-clicking selects the track and shows its devices in the detail area, opening the detail
+area if it was hidden ([clip editor](ui-clip-editor.md) › Where it opens); renaming stays in the
+menu.
 Dropping a device or file from the browser on the empty area right of the last track creates a
 new track; the area also has **+ MIDI track** and **+ Audio track** buttons ([browser](browser.md) ›
 Files). A file dropped on a slot or below the stop row becomes a clip in that slot (scenes are
@@ -117,7 +134,7 @@ Shift-click and Ctrl-click add clips to the selection **(not built)**.
 **Suhina:** the launch control is the slot's mark and the padding around it (the first 18 px);
 the name selects. Selecting a clip selects its track too, and selecting a track by its header ends
 the clip's selection. The selected slot is drawn like a selected arrangement clip. The setting is
-Settings › Interface › Detail area › **Select on launch** (On by default, saved as
+Settings › Session and mixer › **Select on launch** (On by default, saved as
 `select_on_launch`). Enter is the action `selection.launch`; the arrows are `selection.up`,
 `selection.down`, `selection.left` and `selection.right` (all rebindable,
 [shortcuts](../shortcuts.md)); left and right move to the next track with clip slots (groups and
@@ -131,7 +148,9 @@ with its launch settings under it: **Launch mode** (Trigger, Gate, Toggle, Repea
 quantisation** (Global, None, 8 bars … 1/32) and **Legato**, each an undoable edit.
 
 Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
-empty MIDI clip there, one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
+empty MIDI clip there (**Suhina:** while Settings › Arrangement › **Double-click makes a clip** is On,
+the default; Off, the double-click does nothing, and the Arrangement's lanes follow the same
+setting), one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
 [arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects it, so the
 detail area shows it; a first click on a slot with a stop button still stops the track. Audio
 tracks, groups and returns do nothing on a double-click. Editing its notes waits for the piano
@@ -229,8 +248,9 @@ scene can change it.
 
 One knob per return track (A, B, …). Return tracks show pre/post toggles on the main column.
 
-**Built:** the send knobs sit in the mixer strip's knob row beside the pan knob, after the
-strip's meter, as many as fit (two in a track column; none in a return column); the pre/post
+**Built:** the send knobs sit in a row of their own in the channel strip, above the pan knob,
+as many as fit (four in a track column; none in a return column), once the mixer is tall enough
+for them (Mixer › the channel strip); the pre/post
 choice is in each knob's right-click menu rather than on the main column, and a dot under the
 knob marks a send before the fader. Behaviour and commands: [sends and returns](sends-and-returns.md).
 
@@ -251,6 +271,62 @@ disarms the others, Ctrl adds (`track.setArm`, `exclusive`; [ADR 0017](../decisi
 A track that plays audio is armed to hear its audio input (`track.setAudioInput`, monitoring Auto). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
+
+**Suhina: the channel strip.** Our own design. Each track, group and return column ends in a
+vertical channel strip under its slots, and the strip shows more the taller the mixer is:
+
+- **Resizing.** The line between the slots and the mixer is dragged up or down (the pointer shows
+  a vertical resize); a double-click on it gives the default height back. The least height keeps
+  the toggles and a compact volume; the mixer grows up to just under the stop buttons under the
+  last scene (the slots stay in view), and always at least to its default height, so a project
+  with many scenes still gets the whole strip while its slots scroll. The height is kept in
+  Settings (`session_mixer_height`) and is the same for every project.
+- **Always shown**, at every height: the track on button (showing the track number, or the
+  return's letter), solo, cue, arm (on tracks that play notes or audio), and a volume control. At
+  the least height the volume is a compact value across the strip, dragged up or down.
+- **As it grows**, it adds in this order: a vertical **volume fader** with the track's level meter
+  beside it and its dB value over it (the fader replaces the compact value); the **pan** knob
+  with its value; the **send** knobs; the track's **name** at the top; under it the track's
+  **output**; and at the tallest heights a scrollable list of the track's **devices and
+  plug-ins**. Shrinking drops them in the reverse
+  order. Height the strip has beyond what its parts need goes to the fader, and once the device
+  list shows, to the list after the fader is tall enough. A strip without sends (a return, or no
+  returns in the project) gives that row to the fader.
+- **The fader** is dragged up or down (Shift for finer), and the wheel over it moves it a dB at
+  a time; every frame of a drag is heard, and the drag is one undo step (`track.setVolume` with
+  `tracks` and `continue`). A double-click sets it back to 0 dB, as the Arrangement headers do.
+- **The output** reads "→ Main" or "→" and the group the track plays into. A click opens a menu
+  of Main and the project's group tracks (a group does not list itself); picking one routes the
+  track there (`track.setOutput`, one undo step). A route that would make a loop is refused with a
+  message and changes nothing. The Arrangement view's track headers have the same dropdown.
+  Choosing an input and monitoring here is planned with the I/O section.
+- **The device list.** One row per device in chain order, its name dimmed while it is off; the
+  wheel scrolls it when it holds more than fits. A click selects the track and shows its devices
+  in the detail area, opening the detail area if it was hidden; the clicked row stays lit.
+- **A double-click on the strip** itself (its background or its name, not a fader, knob,
+  button or device row) does the same for the whole track: it selects the track and shows its
+  devices in the detail area, opening the detail area if it was hidden. A single click there does
+  nothing, as before.
+- The main column shows the main output's meter where a track's meter stands.
+- **The colour band** down the strip's left edge, at every mixer height, is the track colour;
+  its name row is filled with it too. A click on the band opens the colour palette (Track
+  colour).
+
+### Track colour
+
+**Suhina:** a track's colour shows over an area large enough to tell tracks apart: the Session
+column's header and the strip's name row are filled with it, the strip has a band down its left edge,
+and an Arrangement header a band down its left edge, the header's full height. A muted track's
+colour is dimmed. Text drawn on the colour is the light or the dark text colour of the theme,
+whichever stands out more from it.
+
+The colour is picked from one palette, the theme's eight track colours, wherever a colour is
+offered: a click on a track's colour band (the strip's in the Session view, the header's in the
+Arrangement) opens it as a popup, the track's right-click menu has it as before, and a colour
+tag's right-click menu in the browser has it before the free colour choice. Picking a swatch runs
+`track.setColor` with that colour, one undo step, and closes the popup; picking the colour the
+track already has runs nothing. A colour of any value (from an imported project, or set with
+`track.setColor` from the CLI or MCP) shows as it is; the palette marks none of its swatches then.
 
 ## Detail area: a selected clip
 
@@ -284,7 +360,7 @@ time or a chance is planned, as for every value field.
 
 The pan and the volume are dragged up or down, and the wheel over either changes it a step at a
 time (1 dB, or 0.02 of pan; Shift is finer) instead of scrolling the view. With Settings ›
-Interface › Arrangement › **Mixer controls** on Knob, the volume is drawn as a knob beside the pan
+Session and mixer › **Mixer controls** on Knob, the volume is drawn as a knob beside the pan
 knob, and its value stays beside them
 ([arrangement editing](arrangement-editing.md) › Volume, pan, mute and solo).
 

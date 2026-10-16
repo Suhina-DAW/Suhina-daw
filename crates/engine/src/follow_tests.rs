@@ -13,26 +13,16 @@ const SR: u32 = 48_000;
 const BEAT: usize = SR as usize / 2;
 
 fn note(time: f64, key: u8) -> Note {
-    Note { time, duration: 0.25, key, velocity: 1.0, release_velocity: 0.5, channel: 0, muted: false }
+    Note::new(time, 0.25, key, 1.0)
 }
 
 /// A slot clip of `length` beats playing `notes`, looping or once, with `follow`.
 fn slot(content: u32, length: f64, looping: bool, follow: FollowAction) -> Slot {
     Slot {
         clip: Some(Clip {
-            content: ContentId(content),
-            start: 0.0,
-            length,
-            offset: 0.0,
             loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
             follow_action: follow,
-            extensions: Extensions::default(),
-            launch: Default::default(),
+            ..Clip::new(ContentId(content), 0.0, length)
         }),
         has_stop: true,
     }
@@ -42,31 +32,11 @@ fn slot(content: u32, length: f64, looping: bool, follow: FollowAction) -> Slot 
 fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "T".into(),
-            color: None,
             content: ContentKinds { notes: true, audio: true },
             channel: Some(ChannelId(1)),
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
+            ..Track::new(TrackId(1), "T")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: Vec::new(),
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel::new(ChannelId(1), "C")],
         contents: notes
             .into_iter()
             .zip(1..)
@@ -76,6 +46,7 @@ fn project(notes: Vec<Vec<Note>>, slots: Vec<Slot>) -> Project {
                 length: 4.0,
                 lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
                 extensions: Extensions::default(),
+                scale: None,
             })
             .collect(),
         launcher: Launcher {

@@ -16,11 +16,14 @@
   DSP and engine code is tested by rendering offline and comparing against golden files.
 - **Documentation:** a change that alters how something works updates the documents that
   describe it in the same pull request (architecture, ADRs, specs, ROADMAP); `AGENTS.md` ›
-  *Before you finish a task* lists which document covers what.
+  *Before you finish a task* lists which document covers what. Leave out what `main` writes after
+  the merge: `docs/INDEX.md`, `docs/commands.md`, the parity report's marked parts and figures, and
+  the `last_verified` line of a document you change (it is stamped with the day of the merge).
 - **Parity measurement:** a pull request that adds, changes or removes something a user can do
   updates its coverage in `scripts/parity/score.py` (and `scripts/parity/devices.json` for a
-  built-in effect or instrument), runs `python scripts/parity/update_report.py` and commits the
-  result, in the same pull request. One that moves no coverage writes `Parity: no change` and the
+  built-in effect or instrument) in the same pull request, and leaves the numbers in
+  `docs/research/parity-live-12.md` alone: they are regenerated on `main` after the merge. One
+  that moves no coverage writes `Parity: no change` and the
   reason in its description. CI warns, without failing, when a change to `crates/`, `devices/` or
   `apps/` does neither. `AGENTS.md` › *Before you finish a task* has the rule.
 - **Style:** `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`. Comments explain *why*.
@@ -39,6 +42,17 @@
   (`engine`, `ui`, `formats`, `browser`, `audio-io`, `plug-ins`, `devices`, `presets`, `tests`),
   plus `windows`, `macos` or `linux` when it concerns one platform. The forms set the type, and
   `.github/workflows/issue-labels.yml` adds area and platform labels from the form's answers.
+- **Pull request labels:** `.github/workflows/pr-labels.yml` adds them as `.github/labeler.yml` maps
+  them: the kind from the branch name (`feature/` `enhancement`, `fix/` `bug`, `docs/`
+  `documentation`, `chore/` `chore`; also `documentation` when every file changed is a document)
+  and the areas from the paths changed. It only adds labels; add a platform label by hand.
+- **CodeRabbit:** reviews every pull request that is not a draft against AGENTS.md
+  (`.coderabbit.yaml`) and shows a **CodeRabbit** check beside CI. Its comments are suggestions, not requirements: answer or resolve
+  them, and leave DSP and real-time behaviour to the tests and renders. The check is never red and
+  never required. Comment `@coderabbitai review` to run it again.
+- **Pull request description:** use the sections of `.github/pull_request_template.md`, all of them;
+  one line is enough where nothing applies. `.github/workflows/pr-description.yml` warns about a
+  missing section (`scripts/pr_description.py`); it never fails.
 
 ## Dependencies
 

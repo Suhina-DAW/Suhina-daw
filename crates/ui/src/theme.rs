@@ -107,13 +107,13 @@ palette! {
     track_color_4, "track.4", 0xA497CC,
         "The fourth default track colour; also instruments and presets in the browser";
     track_color_5, "track.5", 0x8FA87A,
-        "A colour a track's menu offers";
+        "A colour the track colour palette offers";
     track_color_6, "track.6", 0xC27C8E,
-        "A colour a track's menu offers";
+        "A colour the track colour palette offers";
     track_color_7, "track.7", 0x7F8FB0,
-        "A colour a track's menu offers";
+        "A colour the track colour palette offers";
     track_color_8, "track.8", 0xB9B2A6,
-        "A colour a track's menu offers";
+        "A colour the track colour palette offers";
     kind_kick, "kind.kick", 0xD06E5E,
         "Sample-map points of the kind kick";
     kind_snare, "kind.snare", 0x73AAC0,
@@ -315,9 +315,9 @@ colour written out; copy it, give it a name and change the colours.\n\
 \n\
 ## Installing it\n\
 \n\
-Save it as `<id>.json` in Suhina's `themes` folder (Settings › Interface › Theme › Open folder\n\
+Save it as `<id>.json` in Suhina's `themes` folder (Settings › Appearance › Theme › Open folder\n\
 shows it), or drop the file on Suhina's window. The file name without `.json` is the theme's\n\
-id: letters, digits and `-`, for example `night-blue.json`. Pick it in Settings › Interface ›\n\
+id: letters, digits and `-`, for example `night-blue.json`. Pick it in Settings › Appearance ›\n\
 Theme. While it is in use, every save of the file shows within a second.\n\
 \n\
 ## Making a good theme\n\
@@ -360,6 +360,27 @@ pub fn parse_hex(text: &str) -> Option<Color32> {
     u32::from_str_radix(digits, 16).ok().map(rgb)
 }
 
+/// Text drawn on `fill`: `text.primary` or `window.background`, whichever stands out more from
+/// it, so a name stays readable on any track colour of any theme.
+pub fn text_on(fill: Color32) -> Color32 {
+    let (light, dark) = (text_primary(), window_background());
+    if contrast(fill, light) >= contrast(fill, dark) { light } else { dark }
+}
+
+/// The contrast ratio of two colours, 1 … 21 (WCAG 2's relative luminance).
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+fn luminance(color: Color32) -> f32 {
+    let linear = |v: u8| {
+        let s = f32::from(v) / 255.0;
+        if s <= 0.040_45 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+}
+
 /// Grid rows, headers, fields.
 pub const ROW: f32 = 20.0;
 /// A row of the browser's lists and tree.
@@ -370,8 +391,6 @@ pub const STATUS_BAR: f32 = 20.0;
 pub const TRACK_COLUMN: f32 = 116.0;
 pub const RETURN_COLUMN: f32 = 84.0;
 pub const SCENE_COLUMN: f32 = 96.0;
-/// The mixer section under the Session grid.
-pub const MIXER: f32 = 72.0;
 pub const KNOB: f32 = 22.0;
 pub const TOGGLE: f32 = 18.0;
 /// Padding inside cells and strips.
@@ -603,6 +622,17 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), tokens.len());
+    }
+
+    #[test]
+    fn text_on_a_colour_is_the_text_token_that_stands_out_more() {
+        // The default track colours are light: names on them are dark.
+        for fill in [Palette::DARK.track_color_1, Palette::DARK.track_color_8] {
+            assert_eq!(text_on(fill), window_background(), "{fill:?}");
+            assert!(contrast(fill, text_on(fill)) >= 4.5, "{fill:?}");
+        }
+        assert_eq!(text_on(rgb(0x202020)), text_primary());
+        assert!((contrast(rgb(0x000000), rgb(0xFFFFFF)) - 21.0).abs() < 0.01);
     }
 
     #[test]

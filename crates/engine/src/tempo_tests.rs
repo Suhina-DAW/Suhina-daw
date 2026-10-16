@@ -26,21 +26,7 @@ fn ramp(beat: f64, bpm: f64) -> TempoPoint {
 }
 
 fn clip(start: f64, length: f64) -> Clip {
-    Clip {
-        content: ContentId(1),
-        start,
-        length,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-    }
+    Clip::new(ContentId(1), start, length)
 }
 
 /// One track whose clip of `length` beats at beat 0 plays `lane`, on the arrangement and in its
@@ -49,37 +35,18 @@ fn project(lane: LaneData, length: f64) -> Project {
     let audio = matches!(lane, LaneData::Audio(_));
     Project {
         tracks: vec![Track {
-            id: TrackId(1),
-            name: "T".into(),
-            color: None,
             content: ContentKinds { notes: !audio, audio },
             channel: Some(ChannelId(1)),
-            parent: None,
-            extensions: Extensions::default(),
-            audio_input: Default::default(),
-            midi_input: Default::default(),
+            ..Track::new(TrackId(1), "T")
         }],
-        channels: vec![Channel {
-            id: ChannelId(1),
-            name: "C".into(),
-            role: ChannelRole::Regular,
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            cue: false,
-            output: None,
-            sends: Vec::new(),
-            devices: Vec::new(),
-            extensions: Extensions::default(),
-            automation: Vec::new(),
-        }],
+        channels: vec![Channel::new(ChannelId(1), "C")],
         contents: vec![ClipContent {
             id: ContentId(1),
             name: "c".into(),
             length,
             lanes: vec![ContentLane { target: None, data: lane }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane { name: "l".into(), track: Some(TrackId(1)), clips: vec![clip(0.0, length)] }],
@@ -102,19 +69,7 @@ fn project(lane: LaneData, length: f64) -> Project {
 
 /// A short note on every beat from 0 to `beats - 1`.
 fn beat_notes(beats: u32) -> LaneData {
-    LaneData::Notes(
-        (0..beats)
-            .map(|b| Note {
-                time: f64::from(b),
-                duration: 0.1,
-                key: 69,
-                velocity: 1.0,
-                release_velocity: 0.5,
-                channel: 0,
-                muted: false,
-            })
-            .collect(),
-    )
+    LaneData::Notes((0..beats).map(|b| Note::new(f64::from(b), 0.1, 69, 1.0)).collect())
 }
 
 /// Frames where sound rises above `threshold` after at least `gap` frames at or below it.
@@ -194,17 +149,13 @@ fn click_track() -> (AudioRegion, AudioPool) {
         })
         .collect();
     let region = AudioRegion {
-        file: "clicks.wav".into(),
-        absolute_file: None,
         sample_rate: Some(SR),
         channels: Some(1),
         duration_seconds: Some(8.0),
         warped: true,
         stretch: StretchMode::Repitch,
         warp_markers: vec![WarpMarker { time: 0.0, audio_time: 0.0 }, WarpMarker { time: 16.0, audio_time: 8.0 }],
-        gain: 1.0,
-        transpose: 0.0,
-        stream: None,
+        ..AudioRegion::new("clicks.wav")
     };
     let mut pool = AudioPool::new();
     pool.files.insert("clicks.wav".into(), Arc::new(AudioData { sample_rate: SR, channels: 1, samples }));

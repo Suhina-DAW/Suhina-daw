@@ -111,6 +111,12 @@ pub(crate) struct Chain {
     waiting: Option<usize>,
     /// When the waiting slot's block went out, for an offline render's patience.
     sent_at: Option<Instant>,
+    /// The plug-in slot that is waited for to finish a block it was late with before this
+    /// block goes to it (#506); `waiting` names it too while it is.
+    behind: Option<usize>,
+    /// The plug-in slot that has been waited for that way in this block: it gets the block now,
+    /// or has it refused once the deadline is over, without being waited for again.
+    caught_up: Option<usize>,
     /// The plug-ins that follow the waiting one in its joint block.
     joined: Joined,
     /// Per key, the renderer frame its note ends at, or `NOT_HELD`.
@@ -277,6 +283,8 @@ impl Chain {
             stage: 0,
             waiting: None,
             sent_at: None,
+            behind: None,
+            caught_up: None,
             joined: Joined::default(),
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
@@ -314,6 +322,8 @@ impl Chain {
             stage: 0,
             waiting: None,
             sent_at: None,
+            behind: None,
+            caught_up: None,
             joined: Joined::default(),
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
@@ -353,6 +363,8 @@ impl Chain {
         self.stage = 0;
         self.waiting = None;
         self.sent_at = None;
+        self.behind = None;
+        self.caught_up = None;
         self.deadline = deadline;
     }
 
@@ -403,6 +415,8 @@ impl Chain {
             device_lanes,
             joined,
             sent_at,
+            behind,
+            caught_up,
             ..
         } = self;
         let from = (*done).min(to);
@@ -444,7 +458,14 @@ impl Chain {
                     std::mem::swap(pending, midi_scratch);
                     *stage += 1;
                 }
-                Slot::Plugin(_) => {
+                Slot::Plugin(plugin) => {
+                    // A plug-in still at a block it was late with is waited for like an answer,
+                    // until this block's deadline, while the other chains go on (#506).
+                    if deadline.is_some() && *caught_up != Some(*stage) && !plugin.ready(Instant::now()) {
+                        *behind = Some(*stage);
+                        *waiting = Some(*stage);
+                        return true;
+                    }
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));
@@ -485,14 +506,17 @@ impl Chain {
     /// answered, or the time it is given is over (the block's deadline; offline,
     /// [`OFFLINE_TIMEOUT`] after it went out), and `collect` counts the miss. Waits for the
     /// answer at most until `until` (a time already past only looks). True when no block is
-    /// out. Never allocates.
+    /// out. For a plug-in that is waited for to finish a block it was late with, whether it has
+    /// (or the deadline is over), so [`Chain::advance`] sends it this block. Never allocates.
     pub(crate) fn answered(&mut self, until: Instant) -> bool {
         let Some(index) = self.waiting else { return true };
         let Some(limit) = self.limit() else { return true };
         if Instant::now() >= limit {
             return true;
         }
+        let behind = self.behind == Some(index);
         match self.slots.get_mut(index) {
+            Some(Slot::Plugin(plugin)) if behind => plugin.ready(until.min(limit)) || Instant::now() >= limit,
             Some(Slot::Plugin(plugin)) => plugin.poll(until.min(limit)) || Instant::now() >= limit,
             _ => true,
         }
@@ -508,6 +532,13 @@ impl Chain {
     /// (a miss when it is not answered in its time, [`Chain::answered`]).
     pub(crate) fn collect(&mut self, frames: usize) {
         let Some(index) = self.waiting.take() else { return };
+        // Nothing went out: the plug-in has finished its late block (or the deadline is over),
+        // and `advance` hands it this block now (or counts it refused).
+        if self.behind == Some(index) {
+            self.behind = None;
+            self.caught_up = Some(index);
+            return;
+        }
         let limit = self.limit();
         self.sent_at = None;
         let to = frames.min(MAX_BLOCK);
@@ -672,7 +703,15 @@ impl Chain {
                     std::mem::swap(pending, midi_scratch);
                     index += 1;
                 }
-                Slot::Plugin(_) => {
+                Slot::Plugin(plugin) => {
+                    // A plug-in still at a block it was late with gets this one as soon as it is
+                    // done, within the deadline (#506). A span with nothing left to run (a chain
+                    // `advance` has finished) sends nothing, so nothing is waited for.
+                    if let Some(deadline) = *deadline
+                        && from < to
+                    {
+                        plugin.ready(deadline);
+                    }
                     let last = (to - from).saturating_sub(1);
                     span_events.clear();
                     span_events.extend(pending.iter().map(|&(at, event)| (at.saturating_sub(from).min(last), event)));

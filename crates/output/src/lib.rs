@@ -94,6 +94,9 @@ pub struct Progress {
     latency_us: AtomicU64,
     /// The render thread keeps the shallower queue of live playing (a track is armed).
     live: AtomicBool,
+    /// The input device's own latency, measured in its callback, in frames: from the last frame
+    /// of a buffer being captured to the buffer reaching the ring.
+    input_latency: AtomicUsize,
     /// Frames the engine renders per block, set when the render thread starts.
     block: AtomicUsize,
     /// The render thread, woken when the device has taken from the ring.
@@ -132,12 +135,22 @@ impl Progress {
         self.live.load(Ordering::Relaxed)
     }
 
-    /// The longest time from a key pressed on a MIDI controller to the speaker: the measured
-    /// latency and one block, which is how long the note may wait for the render thread to
-    /// begin its next block.
+    /// The time from a key pressed on a MIDI controller to the speaker: the measured latency,
+    /// and the fixed delay a stamped note is played after (#269), the longest the render thread
+    /// waits between blocks (a block, or a device buffer) and one block more.
     pub fn live_latency(&self, sample_rate: u32) -> Duration {
         let block = self.block.load(Ordering::Relaxed);
-        self.latency().saturating_add(Duration::from_secs_f64(block as f64 / f64::from(sample_rate.max(1))))
+        let delay = block.max(self.callback_frames()).saturating_add(block);
+        self.latency().saturating_add(Duration::from_secs_f64(delay as f64 / f64::from(sample_rate.max(1))))
+    }
+
+    /// The input device's own latency in frames, as last measured; 0 without one.
+    pub fn input_latency(&self) -> usize {
+        self.input_latency.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn set_input_latency(&self, frames: usize) {
+        self.input_latency.store(frames, Ordering::Relaxed);
     }
 
     pub(crate) fn fail(&self) {
@@ -665,6 +678,16 @@ fn render_ahead(
             continue;
         }
         let started = Instant::now();
+        // A stamped live note plays this long after it was played (#269): the longest the
+        // thread waits between blocks (a block, or a device buffer that takes several at once)
+        // and the block it lands in.
+        let delay = frames.max(progress.callback_frames()).saturating_add(frames);
+        renderer.set_live_clock(suhina_engine::live_now(), u32::try_from(delay).unwrap_or(u32::MAX));
+        // A take is lined up with what was heard (docs/spec/recording.md): the output's
+        // latency and the input device's, in frames.
+        let output = progress.latency().as_secs_f64() * f64::from(renderer.sample_rate());
+        let input = u32::try_from(progress.input_latency()).unwrap_or(u32::MAX);
+        renderer.set_record_latency(output.round().clamp(0.0, f64::from(u32::MAX)) as u32, input);
         renderer.process_with_cue(&mut block, &mut cue);
         // A device that takes faster than it plays, or a project too heavy to render in time,
         // keeps the thread from waiting: it rests rather than outlive its real-time limit.
@@ -859,7 +882,7 @@ pub fn open_chosen(
                 let mut renderer = Renderer::stopped_with_plugins(&project, &audio, output.sample_rate, plugins)
                     .map_err(|e| e.to_string())?;
                 // The input device, when one is chosen: a failure leaves the output playing.
-                let input = match input::open(&output.host, &choice.input, output.sample_rate) {
+                let input = match input::open(&output.host, &choice.input, output.sample_rate, Arc::clone(&progress)) {
                     Ok(Some((stream, ring))) => {
                         renderer.set_audio_input(ring, stream.channels, Arc::clone(&stream.underruns));
                         Some(stream)

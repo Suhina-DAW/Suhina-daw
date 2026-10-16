@@ -5,6 +5,7 @@ type: system
 status: current
 last_verified: 2026-10-16
 covers:
+  - crates/session/src/record_writer.rs
   - Cargo.toml
   - crates/*/Cargo.toml
   - devices/*/Cargo.toml
@@ -83,7 +84,7 @@ The engine runs them in chains on tracks, made through `device-registry`.
 | `automation` | The MCP server over the open projects, file roots for agents (every path a command reads is checked against the read root), the user's browser library, offline WAV rendering ([`mcp.md`](mcp.md)). | session, engine, media, library |
 | `output` | The audio device: lists the hosts and their output devices (`devices`: cpal's WASAPI, ASIO with the `asio` feature, ALSA, JACK, CoreAudio; sample rates and the buffer sizes the driver allows, and a driver is never asked for a size outside the range it declared: a range holding no size the engine renders in leaves the driver its own buffer size, with a notice) and plays a `Renderer` on the output an `OutputChoice` names, or the default one, falling back with a notice when it is gone. The engine renders ahead on a real-time render thread in blocks of the chosen buffer size (64 … 4096 frames, 1024 when none is chosen) into a lock-free ring the device's callback reads, two blocks ahead, or one while a track is armed (ADR 0017), four samples a frame: the main pair, written to outputs 1 and 2, and the cue, written to the cue pair the choice names when the device has it ([cue spec](spec/cue-output.md)). Where the device's own buffer is not Suhina's to set (WASAPI shared mode, which plays the period Windows gives the device) that size is the engine's block alone, and `audio.info` reports the device's measured buffer next to it. WASAPI exclusive mode goes through the `wasapi` crate (`exclusive`), since cpal opens WASAPI shared only. The input device chosen is opened beside it on the same host (`input`, ADR 0017). `open_chosen` gives a `Player` whose stream lives on its own thread; `DeviceOutput` is the session's `AudioSystem`. The only code that opens an audio device. | engine, session, realtime |
 | `midi` | MIDI controllers ([ADR 0017](decisions/0017-inputs-and-latency.md)): lists the system's MIDI input ports and opens them with `midir` (ALSA sequencer, WinMM, CoreMIDI); `parse` turns note on and off, the sustain pedal and all-notes-off on every channel into the engine's `LiveEvent`s, and the driver's callback hands them to the session's `LiveInput`. `Midi` is the session's `MidiSystem`. The only code that opens a MIDI device. | engine, session |
-| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window with the browser ([spec](spec/browser.md): `browser`, `browser_view`, and `drop` for dragging into the views), the Session and Arrangement views (the Arrangement's automation lanes in `automation_lanes`; `nesting` for groups inside groups: folding them and moving tracks between them), the detail area (device chain, clip properties, embedded plug-in editors, the piano roll in `piano_roll`), the sample map, the missing-files dialog and the Settings dialog, drawn with egui from the project and the `LauncherMonitor`; every change is a command. `memory-stats`
+| `ui` | The user interface ([ADR 0009](decisions/0009-ui-toolkit-and-look.md)): the main window with the browser ([spec](spec/browser.md): `browser`, `browser_view`, and `drop` for dragging into the views), the Session and Arrangement views (the Session view's channel strips in `mixer_strip`; the track colour palette and colour areas in `colour_picker`; the Arrangement's automation lanes in `automation_lanes`; `nesting` for groups inside groups: folding them and moving tracks between them), the detail area (device chain, clip properties, embedded plug-in editors, the piano roll in `piano_roll`), the sample map, the missing-files dialog and the Settings dialog, drawn with egui from the project and the `LauncherMonitor`; every change is a command. `memory-stats`
 reads the program's RAM for the control bar. Design tokens in `theme.rs`; the colours are the theme in use (`themes.rs` keeps the list). No windowing or GPU code, so tests drive it headless (egui_kittest). | engine, session, plugins, library, media, output, soundmap, device-api, device-registry, device-sdk |
 | `suhina-cli` | The command line: render, play, mcp (with `--audio`, the MIDI inputs too). | all of the above |
 | `suhina` | The desktop app: opens a project (argument, a dropped `.suhina`, `.locr` or `.als`, or the project dialog), makes new ones (blank or from a template), keeps the recent projects, decodes its audio into the session, plays it stopped through `output` and runs `ui` in an eframe window; starts the browser's library (`browser.json` and its indexes in the app-data folder) and records opened projects among its recent ones; folders dropped on the window join the browser, and samples and MIDI files dropped on it land like a drag from the browser; shows the system's file and folder dialogs (`rfd`) that the window's **Browse…** buttons ask for and hands back the path chosen, and forgets a recent project the start panel takes off the list; loads and saves the settings, keymap and theme files (a theme file saved elsewhere is read again; theme backups and the theme template are zips in `exports/`, and theme files or zips dropped on the window are added); opens the MIDI inputs the settings leave on. Starting, it reads the settings, keymap and themes, opens the window and shows the splash ([components](design/components.md#splash)); only once the splash is on screen does it start the library and the sample map and open the project asked for, so nothing slow runs before the window. | engine, session, media, library, plugins, output, midi, ui |
@@ -168,6 +169,7 @@ gesture id grouping both XY axes into one undo step. See [ADR 0021](decisions/00
 | Device watch | While the output plays in place of a chosen device that was not there (`OutputInfo::fallback`), `Projects::check_output` asks every 3 s whether it is back (`AudioSystem::chosen_present`); `output` looks on a short-lived `suhina-device-watch` thread (the chosen host's output devices, names only) and keeps the answer for the next ask, so the frame never waits for the device list. When it is back the output is opened on it again, as `audio.setOutput` does. | yes |
 | MIDI input | `midir`'s own thread per open port (the ALSA sequencer's, WinMM's or CoreMIDI's callback): parses each message and sends its note through the session's `LiveInput` (a mutex around the playing engine's live-note sender) into the engine's lock-free queue ([ADR 0017](decisions/0017-inputs-and-latency.md)). Ports are opened, closed and looked at again on the main thread. | yes, but never the audio thread's locks: it only pushes into the queue |
 | Audio input | The input device's callback (cpal's thread, on the output's host), when an input device is chosen: converts every channel, up to 64, to `f32` and writes whole frames into a lock-free ring that the render thread reads a block at a time ([ADR 0017](decisions/0017-inputs-and-latency.md)). | **no** (AGENTS.md rule 3) |
+| Recording | One thread per engine in `session` (`suhina-record`), started when a player is attached: empties the engine's recording rings as they fill (the notes the armed tracks play, their input in chunks), hands the notes to the session and writes each audio take into its WAV file in `Recorded/`, so neither the render thread nor the window waits for a disk ([spec](spec/recording.md)). It ends when its engine is gone and nothing is left to write. | yes |
 | Decode workers | Scoped threads in `media` while a project loads; in the window, a thread per drop (`suhina-drop`) that decodes its samples before `clip.addFiles` runs (ADR 0011). | yes |
 | Missing files and plug-in scans | In the window, `suhina-find-files` searches the index and folders for a project's missing files, and `suhina-plugin-scan` runs a plug-in scan, so the frame never waits. | yes |
 | Library | One thread in `library` (`suhina-library`): checks the browser's folders against their saved indexes, reads the ones that changed, and takes the file-system watcher's events (`notify`, its own threads) or polls (ADR 0012). Started by the desktop app and the MCP server only. | yes |
@@ -186,8 +188,10 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
   `Arc<AudioData>`, a MIDI preview's notes with its fallback instrument, stop), and what it let
   go of back, to be freed on the main thread (ADR 0011). Live notes from MIDI controllers come
   over a queue of their own, from the MIDI driver's thread rather than the main one; the main
-  thread arms tracks with a `LaunchCommand` (ADR 0017). The input device's frames come over a
-  ring from its own callback (`Renderer::set_audio_input`).
+  thread arms tracks with a `LaunchCommand` (ADR 0017). Live notes carry the time they were
+  played, and the render thread tells the renderer before each block when it renders it
+  (`Renderer::set_live_clock`), so each note lands a fixed delay after it was played. The input
+  device's frames come over a ring from its own callback (`Renderer::set_audio_input`).
 - **From the audio thread:** a `LauncherMonitor` of atomics (running, beat, tempo, what each
   column plays and has queued, the playhead and the play start marker, stretch underruns), read by the `launcher.state`
   command and by `Controller::update` to pick the frame a new graph takes over at; a
@@ -197,7 +201,10 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
   `launcher.state` reports too — the control bar draws the CPU load from it; and a
   `MeterMonitor` (each track's and the main output's peak and RMS level per side and clip
   indicator, measured every block by the `meters` module and stored as atomics; read by
-  `mixer.levels` and the window's meters, [spec](spec/level-meters.md)).
+  `mixer.levels` and the window's meters, [spec](spec/level-meters.md)). While recording, two
+  rings carry what the armed tracks play out (`Controller::take_recorder`), each piece stamped
+  with the beat that was heard when it was played; the recording thread empties them
+  ([spec](spec/recording.md)).
 
 ## Commands
 
@@ -291,8 +298,8 @@ renderer without a deadline.
   so far); a VST3 editor that follows automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the detail area (device chain, the rest of the clip editor) (M8). The browser's open
   questions are in its spec › Not decided yet.
-- **Inputs:** audio inputs, monitoring, MIDI and audio recording, and a shallower render queue
-  for live playing ([ADR 0017](decisions/0017-inputs-and-latency.md) › Planned, #263).
+- **Recording:** overdubbing into a clip that exists, punch in and out, and recording
+  automation ([spec](spec/recording.md) › Not yet).
 
 SDK parameter edits can expand conditional peer links into several parameter messages.
 The session stores and validates the complete command, records one undo gesture, then sends

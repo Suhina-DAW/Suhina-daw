@@ -117,6 +117,7 @@ fn project(length: f64, two: bool, devices: Vec<Device>) -> Project {
             length,
             lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {
@@ -410,7 +411,10 @@ fn a_plug_in_devices_editor_opens_and_closes_by_command() {
     until(&mut session, &mut renderer, "starting", |s| s["status"] == "running");
     let device = json!({ "track": 1, "device": 0 });
     let opened = session.execute("device.openEditor", &device);
-    if cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())) {
+    if cfg!(windows)
+        || cfg!(target_os = "macos")
+        || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()))
+    {
         let opened = opened.unwrap();
         assert_eq!((opened["width"].clone(), opened["height"].clone()), (json!(300), json!(200)));
         assert_eq!(session.execute("device.plugin", &device).unwrap()["editor_open"], true);
@@ -525,13 +529,23 @@ fn an_editor_embeds_in_the_engines_window_when_the_setting_says_so() {
     let device = json!({ "track": 1, "device": 0 });
     assert_eq!(session.execute("device.openEditor", &device).unwrap()["editor_open"], "opening");
     until(&mut session, &mut renderer, "opening the editor", |s| s["editor_open"] == true);
-    let report = session.plugin_report(TrackId(1), 0).unwrap();
-    assert_eq!(report.editor_embedded, Some((300, 200)));
-    assert!(soon(PATIENT, || parent.editor_children() == 1), "no editor child in the engine's window");
-    // The window says where the panel shows it, every frame; a placement is sent once.
-    let shown = Placement { x: 8, y: 40, clip_x: 0, clip_y: 40, clip_width: 400, clip_height: 260 };
-    session.place_editors(&[(TrackId(1), 0, shown)]);
-    session.sync_plugins();
+    if common::embeds_editors_here() {
+        let report = session.plugin_report(TrackId(1), 0).unwrap();
+        assert_eq!(report.editor_embedded, Some((300, 200)));
+        assert!(soon(PATIENT, || parent.editor_children() == 1), "no editor child in the engine's window");
+        // The window says where the panel shows it, every frame; a placement is sent once.
+        let shown = Placement { x: 8, y: 40, clip_x: 0, clip_y: 40, clip_width: 400, clip_height: 260 };
+        session.place_editors(&[(TrackId(1), 0, shown)]);
+        session.sync_plugins();
+    } else {
+        // macOS: the host's process cannot attach its view to this window's, so the rack fell
+        // back to a window of the editor's own: open, but never embedded.
+        let report = session.plugin_report(TrackId(1), 0).unwrap();
+        assert!(
+            report.editor_open && report.editor_embedded.is_none(),
+            "the editor did not fall back to a window of its own"
+        );
+    }
     // Embedding off: the editor closes and opens again in a window of its own.
     session.set_editor_embedding(false);
     assert!(
@@ -542,7 +556,15 @@ fn an_editor_embeds_in_the_engines_window_when_the_setting_says_so() {
         }),
         "the editor did not move to a window of its own"
     );
-    session.execute("device.closeEditor", &device).unwrap();
+    // The reopened editor's control half comes back a moment after it reports open; the close
+    // command says "busy" until then, so it is retried while the returns are pumped.
+    assert!(
+        soon(PATIENT, || {
+            session.sync_plugins();
+            session.execute("device.closeEditor", &device).is_ok()
+        }),
+        "the editor did not close"
+    );
     until(&mut session, &mut renderer, "closing the editor", |s| s["editor_open"] == false);
 }
 

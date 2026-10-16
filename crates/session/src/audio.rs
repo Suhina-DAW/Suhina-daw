@@ -325,8 +325,8 @@ pub struct OutputInfo {
     pub latency_ms: f64,
     /// A track is armed, so the engine keeps less queued ahead of the device (ADR 0017).
     pub live: bool,
-    /// The longest time from a key pressed on a MIDI controller to the speaker, in ms: the
-    /// measured latency and one engine block (ADR 0017).
+    /// The time from a key pressed on a MIDI controller to the speaker, in ms: the measured
+    /// latency and the fixed delay a stamped note plays after (ADR 0017, #269).
     pub live_latency_ms: f64,
     /// Device buffers the engine had not filled in time.
     pub underruns: u64,

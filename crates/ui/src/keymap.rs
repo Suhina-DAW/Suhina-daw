@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use egui::{Key, Modifiers};
 use serde_json::{Value, json};
 
+use crate::workflow::{Setting, Workflow};
+
 /// One key with its modifiers. `Ctrl` means Cmd on macOS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shortcut {
@@ -84,7 +86,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 56] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 62] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -144,6 +146,12 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 56] = [
     ("pianoRoll.tool5", "Choose the Slice tool", PIANO_ROLL),
     ("marker.addAtPlayhead", "Add an arrangement marker at the playhead", "Edit"),
     ("pianoRoll.tool6", "Choose the Mute tool", PIANO_ROLL),
+    ("pianoRoll.gridNarrow", "Make the piano roll's grid finer", PIANO_ROLL),
+    ("pianoRoll.gridWiden", "Make the piano roll's grid coarser", PIANO_ROLL),
+    ("pianoRoll.gridTriplet", "Turn the piano roll's triplet grid on or off", PIANO_ROLL),
+    ("pianoRoll.gridSnap", "Turn snapping to the piano roll's grid on or off", PIANO_ROLL),
+    ("pianoRoll.zoomSelection", "Zoom the piano roll to the selected notes, or the whole clip", PIANO_ROLL),
+    ("pianoRoll.zoomClip", "Zoom the piano roll to the whole clip", PIANO_ROLL),
     ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
@@ -175,11 +183,17 @@ fn overlap(a: &str, b: &str) -> bool {
     !((piano_roll_only(a) && not_in_piano_roll(b)) || (not_in_piano_roll(a) && piano_roll_only(b)))
 }
 
+/// The detail area's own actions, listed with the window's, and their default keys.
+const DETAIL_ACTIONS: [(&str, &str, &str); 1] =
+    [("view.devices", "Show the selected clip's track devices, or the clip again", "View")];
+const DETAIL_DEFAULTS: [(&str, &[&str]); 1] = [("view.devices", &["Ctrl+Shift+D"])];
+
 /// Every action a key can be bound to: the window's, then each command that needs no
 /// parameters.
 pub fn actions() -> Vec<Action> {
     let mut all: Vec<Action> = WINDOW_ACTIONS
         .iter()
+        .chain(&DETAIL_ACTIONS)
         .map(|(id, label, group)| Action { id: (*id).into(), label: (*label).into(), group })
         .collect();
     let session = suhina_session::commands().iter().map(|c| (c.id, c.label, c.params.iter().all(|p| !p.required)));
@@ -195,7 +209,7 @@ pub fn actions() -> Vec<Action> {
 }
 
 /// One of the four jobs the Mouse-first preset gives the mouse buttons, each a switch of its own
-/// (Settings › General › Piano roll, › Keymap presets in `docs/spec/ui-clip-editor.md`).
+/// (Settings › Clip editor › Workflow, › Keymap presets in `docs/spec/ui-clip-editor.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MouseSwitch {
     /// In the Select tool, a press on an empty spot of the grid draws a note there.
@@ -278,12 +292,13 @@ impl MouseSettings {
     }
 }
 
-/// The keys bound to each action, the four mouse switches, and the preset the user chose.
+/// The keys bound to each action, the piano roll's workflow settings (the four mouse switches
+/// among them), and the mode the user chose: a preset, or Custom.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Keymap {
     bindings: BTreeMap<String, Vec<Shortcut>>,
     preset: Preset,
-    mouse: MouseSettings,
+    workflow: Workflow,
 }
 
 /// A set of keys for a way of working, chosen in Settings › Shortcuts (› Keymap presets in
@@ -299,10 +314,16 @@ pub enum Preset {
     /// Working with the mouse: Select-first's keys with every mouse switch on, so the left button
     /// draws in the Select tool and the right button deletes, splits and plays.
     MouseFirst,
+    /// The workflow settings mixed one by one (› Workflow modes): what any setting changed by
+    /// hand turns the mode into.
+    Custom,
 }
 
 impl Preset {
+    /// The three presets, each a fixed set of keys and workflow settings.
     pub const ALL: [Self; 3] = [Self::SelectFirst, Self::DrawFirst, Self::MouseFirst];
+    /// The workflow modes the piano roll's toolbar offers: the three presets, then Custom.
+    pub const MODES: [Self; 4] = [Self::SelectFirst, Self::DrawFirst, Self::MouseFirst, Self::Custom];
 
     /// The name the menu and the keymap file use.
     pub fn name(self) -> &'static str {
@@ -310,12 +331,13 @@ impl Preset {
             Self::SelectFirst => "Select-first",
             Self::DrawFirst => "Draw-first",
             Self::MouseFirst => "Mouse-first",
+            Self::Custom => "Custom",
         }
     }
 
-    /// The preset `name` names; `None` when it is not one of them (an edited file, a rename).
+    /// The mode `name` names; `None` when it is not one of them (an edited file, a rename).
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.name().eq_ignore_ascii_case(name.trim()))
+        Self::MODES.into_iter().find(|p| p.name().eq_ignore_ascii_case(name.trim()))
     }
 
     /// What the preset says beyond the default keys, in its own words: the Settings row shows it.
@@ -324,6 +346,7 @@ impl Preset {
             Self::SelectFirst => "Duplicate is Ctrl+D; a right-click on a note does nothing",
             Self::DrawFirst => "Duplicate is Ctrl+B; in Draw and Paint a right-click on a note deletes it",
             Self::MouseFirst => "Every mouse switch is on; the left button draws in Select",
+            Self::Custom => "Each behaviour set on its own, in the toolbar's menu or Settings › General",
         }
     }
 
@@ -335,7 +358,7 @@ impl Preset {
     /// The key the preset gives the duplicate action, as the Shortcuts list shows it.
     pub fn duplicate_key(self) -> &'static str {
         match self {
-            Self::SelectFirst | Self::MouseFirst => "Ctrl+D",
+            Self::SelectFirst | Self::MouseFirst | Self::Custom => "Ctrl+D",
             Self::DrawFirst => "Ctrl+B",
         }
     }
@@ -344,12 +367,25 @@ impl Preset {
     pub fn mouse(self) -> MouseSettings {
         if self == Self::MouseFirst { MouseSettings::ALL_ON } else { MouseSettings::default() }
     }
+
+    /// The workflow settings the preset fills in; `None` for Custom, which keeps what it has.
+    pub fn workflow(self) -> Option<Workflow> {
+        match self {
+            Self::SelectFirst => Some(Workflow::SELECT_FIRST),
+            Self::DrawFirst => Some(Workflow::DRAW_FIRST),
+            Self::MouseFirst => Some(Workflow::MOUSE_FIRST),
+            Self::Custom => None,
+        }
+    }
 }
 
 /// The keymap file's entry for the preset.
 const PRESET_KEY: &str = "preset";
 
-const DEFAULTS: [(&str, &[&str]); 57] = [
+/// The duplicate key of Draw-first, and the browser's key otherwise.
+const CTRL_B: Shortcut = Shortcut::new(Modifiers::COMMAND, Key::B);
+
+const DEFAULTS: [(&str, &[&str]); 63] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -407,28 +443,36 @@ const DEFAULTS: [(&str, &[&str]); 57] = [
     ("pianoRoll.tool4", &["4"]),
     ("pianoRoll.tool5", &["5"]),
     ("pianoRoll.tool6", &["6"]),
+    ("pianoRoll.gridNarrow", &["Ctrl+1"]),
+    ("pianoRoll.gridWiden", &["Ctrl+2"]),
+    ("pianoRoll.gridTriplet", &["Ctrl+3"]),
+    ("pianoRoll.gridSnap", &["Ctrl+4"]),
+    ("pianoRoll.zoomSelection", &["Z"]),
+    ("pianoRoll.zoomClip", &["Shift+Z"]),
 ];
 
 impl Default for Keymap {
     fn default() -> Self {
-        Self { bindings: bindings_for(&DEFAULTS), preset: Preset::default(), mouse: MouseSettings::default() }
+        Self { bindings: bindings_for(&DEFAULTS), preset: Preset::default(), workflow: Workflow::default() }
     }
 }
 
-/// The keys of `defaults`, read from their text.
+/// The keys of `defaults` and of the detail area's actions, read from their text.
 fn bindings_for(defaults: &[(&str, &[&str])]) -> BTreeMap<String, Vec<Shortcut>> {
     defaults
         .iter()
+        .chain(&DETAIL_DEFAULTS)
         .map(|(id, keys)| ((*id).to_string(), keys.iter().filter_map(|k| Shortcut::parse(k)).collect()))
         .collect()
 }
 
 impl Keymap {
     /// Reads a keymap file over the defaults: an action listed there takes the keys listed
-    /// (an empty list unbinds it), `preset` names the set the keys came from and the four
-    /// `mouse*` entries are its mouse switches. Unknown actions, keys, presets and mouse entries
-    /// are skipped with a warning; an unknown preset leaves the default one, and a file without
-    /// the switches leaves every one of them off.
+    /// (an empty list unbinds it), `preset` names the mode, the four `mouse*` entries are the
+    /// mouse switches of earlier files and the `workflow*` entries the workflow settings. Unknown
+    /// actions, keys, presets and entries are skipped with a warning; an unknown preset leaves the
+    /// default one, and a setting the file leaves out is the preset's. A file whose settings are
+    /// not the ones its preset fills in is Custom.
     pub fn from_json(text: &str) -> (Self, Vec<String>) {
         let mut keymap = Self::default();
         let mut warnings = Vec::new();
@@ -445,19 +489,20 @@ impl Keymap {
                 )),
             }
         }
+        keymap.workflow = keymap.preset.workflow().unwrap_or_default();
         let known = actions();
-        for (id, keys) in map {
-            if id == PRESET_KEY {
+        for (id, keys) in &map {
+            if id == PRESET_KEY || Setting::is_json_key(id) {
                 continue;
             }
-            if let Some(switch) = MouseSwitch::from_json_key(&id) {
+            if let Some(switch) = MouseSwitch::from_json_key(id) {
                 match keys.as_bool() {
-                    Some(on) => keymap.mouse.set(switch, on),
+                    Some(on) => keymap.workflow.set_mouse(switch, on),
                     None => warnings.push(format!("keymap: {keys} for {id} is not true or false")),
                 }
                 continue;
             }
-            if !known.iter().any(|a| a.id == id) {
+            if !known.iter().any(|a| a.id == *id) {
                 if id.starts_with("mouse") {
                     warnings.push(format!("keymap: {id} is not a mouse switch"));
                 } else {
@@ -465,7 +510,7 @@ impl Keymap {
                 }
                 continue;
             }
-            let texts: Vec<&str> = match &keys {
+            let texts: Vec<&str> = match keys {
                 Value::String(one) => vec![one.as_str()],
                 Value::Array(list) => list.iter().filter_map(Value::as_str).collect(),
                 _ => {
@@ -480,7 +525,18 @@ impl Keymap {
                     None => warnings.push(format!("keymap: {text:?} for {id} is not a key")),
                 }
             }
-            keymap.bindings.insert(id, parsed);
+            keymap.bindings.insert(id.clone(), parsed);
+        }
+        keymap.workflow.read_json(&map, &mut warnings);
+        // The duplicate key is the one bound, whatever the file's setting says; a file that binds
+        // no key to it takes the setting's.
+        if map.contains_key("selection.duplicate") {
+            keymap.workflow.duplicate_ctrl_b = keymap.keys("selection.duplicate").contains(&CTRL_B);
+        } else {
+            keymap.bind_duplicate(keymap.workflow.duplicate_ctrl_b);
+        }
+        if keymap.preset.workflow().is_some_and(|w| w != keymap.workflow) {
+            keymap.preset = Preset::Custom;
         }
         (keymap, warnings)
     }
@@ -493,9 +549,11 @@ impl Keymap {
             .map(|(id, keys)| (id.clone(), json!(keys.iter().map(Shortcut::text).collect::<Vec<_>>())))
             .collect();
         map.insert(PRESET_KEY.to_string(), json!(self.preset.name()));
+        let mouse = self.mouse();
         for switch in MouseSwitch::ALL {
-            map.insert(switch.json_key().to_string(), json!(self.mouse.get(switch)));
+            map.insert(switch.json_key().to_string(), json!(mouse.get(switch)));
         }
+        self.workflow.write_json(&mut map);
         serde_json::to_string_pretty(&Value::Object(map)).unwrap_or_default()
     }
 
@@ -504,32 +562,66 @@ impl Keymap {
         self.preset
     }
 
-    /// The four mouse switches, as they are now: a switch changed by hand keeps the preset's name.
+    /// The four mouse switches, as the workflow settings set them now.
     pub fn mouse(&self) -> MouseSettings {
-        self.mouse
+        self.workflow.mouse()
     }
 
-    /// Turns one mouse switch on or off. The preset keeps its name and nothing else changes, so
-    /// the switches say what the mouse does and the preset says where they started.
+    /// Turns one mouse switch on or off; like any workflow setting changed by hand, it makes the
+    /// mode Custom.
     pub fn set_mouse(&mut self, switch: MouseSwitch, on: bool) {
-        self.mouse.set(switch, on);
+        self.workflow.set_mouse(switch, on);
+        self.preset = Preset::Custom;
     }
 
-    /// Puts the keys of `preset` back: every default, with the preset's own changes, and its four
-    /// mouse switches. Keys and switches changed by hand go back to the preset's; everything else
-    /// keeps what it has.
-    pub fn set_preset(&mut self, preset: Preset) {
-        let defaults = Self::default();
-        let mut bindings = defaults.bindings;
-        if preset == Preset::DrawFirst {
-            // Duplicate takes Ctrl+B; the browser keeps a key of its own, Ctrl+Shift+B.
-            let ctrl_shift = Modifiers::COMMAND.plus(Modifiers::SHIFT);
-            bindings.insert("view.browser".to_string(), vec![Shortcut::new(ctrl_shift, Key::B)]);
-            bindings.insert("selection.duplicate".to_string(), vec![Shortcut::new(Modifiers::COMMAND, Key::B)]);
+    /// The piano roll's workflow settings, as they are now.
+    pub fn workflow(&self) -> Workflow {
+        self.workflow
+    }
+
+    /// Chooses choice `index` of one workflow setting: the mode becomes Custom, and the
+    /// duplicate key's setting binds the key (› Workflow modes).
+    pub fn set_workflow(&mut self, setting: Setting, index: usize) {
+        let mut workflow = self.workflow;
+        workflow.set(setting, index);
+        if workflow == self.workflow {
+            return;
         }
-        self.bindings = bindings;
+        if setting == Setting::Duplicate {
+            self.bind_duplicate(workflow.duplicate_ctrl_b);
+        }
+        self.workflow = workflow;
+        self.preset = Preset::Custom;
+    }
+
+    /// Duplicate on Ctrl+B, the browser then on Ctrl+Shift+B; or both on their defaults.
+    fn bind_duplicate(&mut self, ctrl_b: bool) {
+        if ctrl_b {
+            let ctrl_shift = Modifiers::COMMAND.plus(Modifiers::SHIFT);
+            self.bindings.insert("view.browser".to_string(), vec![Shortcut::new(ctrl_shift, Key::B)]);
+            self.bindings.insert("selection.duplicate".to_string(), vec![CTRL_B]);
+        } else {
+            self.bindings.insert("view.browser".to_string(), vec![CTRL_B]);
+            self.bindings.insert("selection.duplicate".to_string(), vec![Shortcut::new(Modifiers::COMMAND, Key::D)]);
+        }
+    }
+
+    /// Puts the keys of `preset` back: every default, with the preset's own changes, and its
+    /// workflow settings. Keys and settings changed by hand go back to the preset's; everything
+    /// else keeps what it has. Custom changes nothing but the mode's name, so the settings stay
+    /// as they are to be changed one by one.
+    pub fn set_preset(&mut self, preset: Preset) {
+        let Some(workflow) = preset.workflow() else {
+            self.preset = Preset::Custom;
+            return;
+        };
+        self.bindings = Self::default().bindings;
+        // Draw-first: duplicate takes Ctrl+B; the browser keeps a key of its own, Ctrl+Shift+B.
+        if workflow.duplicate_ctrl_b {
+            self.bind_duplicate(true);
+        }
         self.preset = preset;
-        self.mouse = preset.mouse();
+        self.workflow = workflow;
     }
 
     pub fn keys(&self, action: &str) -> &[Shortcut] {
@@ -691,6 +783,35 @@ mod tests {
     }
 
     #[test]
+    fn the_grid_keys_are_ctrl_and_one_to_four_in_the_piano_roll() {
+        let known = actions();
+        for (id, key) in [
+            ("pianoRoll.gridNarrow", "Ctrl+1"),
+            ("pianoRoll.gridWiden", "Ctrl+2"),
+            ("pianoRoll.gridTriplet", "Ctrl+3"),
+            ("pianoRoll.gridSnap", "Ctrl+4"),
+        ] {
+            let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(action.group, PIANO_ROLL);
+            assert!(piano_roll_only(id), "{id} is read only while the piano roll has the keyboard");
+            assert_eq!(Keymap::default().label(id).as_deref(), Some(key), "{id}");
+        }
+        assert!(Keymap::default().conflicts().is_empty());
+    }
+
+    #[test]
+    fn z_and_shift_z_zoom_the_piano_roll() {
+        let known = actions();
+        for (id, key) in [("pianoRoll.zoomSelection", "Z"), ("pianoRoll.zoomClip", "Shift+Z")] {
+            let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(action.group, PIANO_ROLL);
+            assert!(piano_roll_only(id), "{id} is read only while the piano roll has the keyboard");
+            assert_eq!(Keymap::default().label(id).as_deref(), Some(key), "{id}");
+        }
+        assert!(Keymap::default().conflicts().is_empty());
+    }
+
+    #[test]
     fn the_sixth_tool_is_the_mute_tool_on_the_six_key() {
         let known = actions();
         let action =
@@ -778,11 +899,11 @@ mod tests {
     }
 
     #[test]
-    fn a_mouse_switch_changed_by_hand_keeps_the_presets_name_and_the_others() {
+    fn a_mouse_switch_changed_by_hand_makes_the_mode_custom_and_keeps_the_others() {
         let mut keymap = Keymap::default();
         keymap.set_preset(Preset::MouseFirst);
         keymap.set_mouse(MouseSwitch::RightDeletes, false);
-        assert_eq!(keymap.preset(), Preset::MouseFirst, "the preset's name stays");
+        assert_eq!(keymap.preset(), Preset::Custom, "a setting changed by hand is Custom");
         assert!(!keymap.mouse().right_deletes);
         for switch in MouseSwitch::ALL {
             if switch != MouseSwitch::RightDeletes {
@@ -791,11 +912,57 @@ mod tests {
         }
         // What was turned off by hand goes through the file as it is.
         let (again, warnings) = Keymap::from_json(&keymap.to_json());
-        assert_eq!((again.preset(), again.mouse().right_deletes, warnings.len()), (Preset::MouseFirst, false, 0));
+        assert_eq!((again.preset(), again.mouse().right_deletes, warnings.len()), (Preset::Custom, false, 0));
         assert!(again.mouse().left_draws, "the other three are still on");
         // Choosing Mouse-first again turns it back on.
         keymap.set_preset(Preset::MouseFirst);
         assert!(keymap.mouse().all_on());
+        assert_eq!(keymap.preset(), Preset::MouseFirst);
+    }
+
+    #[test]
+    fn an_earlier_file_with_a_switch_off_by_hand_opens_as_custom() {
+        // A file from before the workflow settings: Mouse-first's name with one switch off.
+        let text = r#"{ "preset": "Mouse-first", "mouseLeftDraws": true, "mouseRightDeletes": false,
+            "mouseShiftRightSplits": true, "mouseAltRightPlays": true }"#;
+        let (keymap, warnings) = Keymap::from_json(text);
+        assert_eq!((keymap.preset(), warnings.len()), (Preset::Custom, 0));
+        assert!(keymap.mouse().left_draws && !keymap.mouse().right_deletes);
+        // Draw-first's file of before: its switches all off, its right-click still deletes in
+        // Draw and Paint, and it stays Draw-first.
+        let mut draw_first = Keymap::default();
+        draw_first.set_preset(Preset::DrawFirst);
+        let mut map: serde_json::Map<String, Value> = serde_json::from_str(&draw_first.to_json()).unwrap();
+        map.retain(|k, _| !Setting::is_json_key(k));
+        let (old, warnings) = Keymap::from_json(&Value::Object(map).to_string());
+        assert_eq!((old.preset(), warnings.len()), (Preset::DrawFirst, 0));
+        assert!(old.workflow().right_click_deletes(true));
+    }
+
+    #[test]
+    fn a_workflow_setting_makes_the_mode_custom_and_custom_keeps_the_settings() {
+        let mut keymap = Keymap::default();
+        keymap.set_preset(Preset::DrawFirst);
+        keymap.set_workflow(Setting::DoubleClickNote, 1);
+        assert_eq!(keymap.preset(), Preset::Custom);
+        assert!(!keymap.workflow().double_click_deletes);
+        assert_eq!(keymap.label("selection.duplicate").as_deref(), Some("Ctrl+B"), "Draw-first's key stays");
+        // The duplicate setting binds the key, and gives the browser its own back.
+        keymap.set_workflow(Setting::Duplicate, 0);
+        assert_eq!(keymap.label("selection.duplicate").as_deref(), Some("Ctrl+D"));
+        assert_eq!(keymap.label("view.browser").as_deref(), Some("Ctrl+B"));
+        assert!(keymap.conflicts().is_empty());
+        // Choosing Custom changes no setting; a preset fills them all in again.
+        let before = keymap.workflow();
+        keymap.set_preset(Preset::Custom);
+        assert_eq!(keymap.workflow(), before);
+        let (again, warnings) = Keymap::from_json(&keymap.to_json());
+        assert_eq!((&again, warnings.len()), (&keymap, 0), "Custom and its settings go through the file");
+        keymap.set_preset(Preset::SelectFirst);
+        assert_eq!(keymap.workflow(), Workflow::SELECT_FIRST);
+        // A choice that is already set changes nothing, not even the mode.
+        keymap.set_workflow(Setting::EmptyClick, 0);
+        assert_eq!(keymap.preset(), Preset::SelectFirst);
     }
 
     #[test]
@@ -847,5 +1014,22 @@ mod tests {
         assert_eq!(Keymap::default().keys("selection.up"), Keymap::default().keys("pianoRoll.up"));
         assert!(!overlap("selection.up", "pianoRoll.up"));
         assert!(overlap("selection.up", "transport.play"));
+    }
+
+    #[test]
+    fn the_clip_devices_switch_has_its_own_key_under_every_preset() {
+        let action =
+            actions().into_iter().find(|a| a.id == "view.devices").unwrap_or_else(|| panic!("the switch is an action"));
+        assert_eq!(action.group, "View");
+        assert_eq!(Keymap::default().label("view.devices").as_deref(), Some("Ctrl+Shift+D"));
+        for preset in Preset::ALL {
+            let mut keymap = Keymap::default();
+            keymap.set_preset(preset);
+            assert_eq!(keymap.label("view.devices").as_deref(), Some("Ctrl+Shift+D"), "{preset:?}");
+            assert!(keymap.conflicts().is_empty(), "{preset:?}");
+        }
+        // Rebound and unbound like any other action, and read back from the file.
+        let (keymap, warnings) = Keymap::from_json(r#"{ "view.devices": [] }"#);
+        assert_eq!((keymap.keys("view.devices").len(), warnings.len()), (0, 0));
     }
 }

@@ -7,46 +7,12 @@ use suhina_session::{CommandKind, Session, commands};
 
 fn project() -> Project {
     let track = |id: u32, name: &str| Track {
-        id: TrackId(id),
-        name: name.into(),
-        color: None,
         content: ContentKinds { notes: true, audio: false },
         channel: Some(ChannelId(id)),
-        parent: None,
-        midi_input: Default::default(),
-        audio_input: Default::default(),
-        extensions: Extensions::default(),
+        ..Track::new(TrackId(id), name)
     };
-    let channel = |id: u32| Channel {
-        id: ChannelId(id),
-        name: format!("C{id}"),
-        role: ChannelRole::Regular,
-        volume: 1.0,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices: Vec::new(),
-        extensions: Extensions::default(),
-        automation: Vec::new(),
-    };
-    let clip = |start: f64| Clip {
-        content: ContentId(1),
-        start,
-        length: 4.0,
-        offset: 0.0,
-        loop_range: None,
-        enabled: true,
-        fade_in: 0.0,
-        fade_out: 0.0,
-        fade_in_curve: Default::default(),
-        fade_out_curve: Default::default(),
-        follow_action: Default::default(),
-        launch: Default::default(),
-        extensions: Extensions::default(),
-    };
+    let channel = |id: u32| Channel::new(ChannelId(id), format!("C{id}"));
+    let clip = |start: f64| Clip::new(ContentId(1), start, 4.0);
     Project {
         tracks: vec![track(1, "Bass"), track(2, "Lead")],
         channels: vec![channel(1), channel(2)],
@@ -54,19 +20,9 @@ fn project() -> Project {
             id: ContentId(1),
             name: "Riff".into(),
             length: 4.0,
-            lanes: vec![ContentLane {
-                target: None,
-                data: LaneData::Notes(vec![Note {
-                    time: 0.0,
-                    duration: 1.0,
-                    key: 36,
-                    velocity: 1.0,
-                    release_velocity: 0.5,
-                    channel: 0,
-                    muted: false,
-                }]),
-            }],
+            lanes: vec![ContentLane { target: None, data: LaneData::Notes(vec![Note::new(0.0, 1.0, 36, 1.0)]) }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         arrangement: Arrangement {
             lanes: vec![ArrangementLane {
@@ -724,23 +680,9 @@ fn audio_project() -> Project {
         id: ContentId(9),
         name: "Loop".into(),
         length: 4.0,
-        lanes: vec![ContentLane {
-            target: None,
-            data: LaneData::Audio(AudioRegion {
-                file: "loop.wav".into(),
-                absolute_file: None,
-                sample_rate: None,
-                channels: None,
-                duration_seconds: None,
-                warped: false,
-                stretch: StretchMode::default(),
-                warp_markers: Vec::new(),
-                gain: 1.0,
-                transpose: 0.0,
-                stream: None,
-            }),
-        }],
+        lanes: vec![ContentLane { target: None, data: LaneData::Audio(AudioRegion::new("loop.wav")) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     p.arrangement.lanes[0].clips[1].content = ContentId(9);
     p
@@ -1090,15 +1032,9 @@ fn bad_loop_edits_are_errors_and_change_nothing() {
 fn launcher_project() -> Project {
     let mut p = audio_project();
     p.tracks.push(Track {
-        id: TrackId(3),
-        name: "Drums".into(),
-        color: None,
         content: ContentKinds { notes: false, audio: true },
         channel: Some(ChannelId(3)),
-        parent: None,
-        extensions: Extensions::default(),
-        audio_input: Default::default(),
-        midi_input: Default::default(),
+        ..Track::new(TrackId(3), "Drums")
     });
     let mut channel = p.channels[0].clone();
     (channel.id, channel.name) = (ChannelId(3), "C3".into());

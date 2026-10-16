@@ -47,11 +47,11 @@ const QUANTIZATION: [&str; 14] = [
 ];
 /// The quantisation of a session before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
-/// The piano roll's own grid value before one is picked.
-const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
+/// How many recent projects File › Open recent lists.
+const RECENT_IN_MENU: usize = 10;
 /// The detail area's height in a row, by default, and the splitter between it and the view.
 const DETAIL_HEIGHT: f32 = 200.0;
 /// The least the view keeps above the detail area; pulled past it, the piano roll goes to the top.
@@ -215,6 +215,9 @@ pub struct App {
     /// Which keys run which action, and whether that changed and should be saved.
     keymap: Keymap,
     keymap_changed: bool,
+    /// The detail area's Clip / Devices switch: for a clip with an editor, the editor or its
+    /// track's devices (`docs/spec/ui-clip-editor.md` › Where it opens). Window state.
+    detail_showing: detail_view::Showing,
     /// The detail area is showing, and its height (in a row) or width (stacked).
     detail_open: bool,
     detail_height: f32,
@@ -228,7 +231,7 @@ pub struct App {
     editor_closed: bool,
     last_clip: Option<ClipRef>,
     /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
-    piano_grid: &'static str,
+    piano_grid: crate::piano_roll_grid::PianoGrid,
     detail_width: f32,
     page: PageState,
     settings: Settings,
@@ -248,6 +251,8 @@ pub struct App {
     project_lists: Lists,
     /// The dialog or the start panel opened and their lists should be read again, by the app.
     lists_wanted: bool,
+    /// The File menu showed last frame (File › Open recent reads its list as the menu opens).
+    file_menu_open: bool,
     /// The start panel, shown while no project is open.
     start: StartState,
     /// The start panel's lists were asked for since it last appeared.
@@ -330,13 +335,14 @@ impl App {
             scan: None,
             keymap: Keymap::default(),
             keymap_changed: false,
+            detail_showing: detail_view::Showing::Clip,
             detail_open: true,
             detail_height: DETAIL_HEIGHT,
             detail_max: false,
             detail_drag: None,
             editor_closed: false,
             last_clip: None,
-            piano_grid: DEFAULT_PIANO_GRID,
+            piano_grid: crate::piano_roll_grid::PianoGrid::default(),
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
@@ -349,6 +355,7 @@ impl App {
             project_dialog: None,
             project_lists: Lists::default(),
             lists_wanted: false,
+            file_menu_open: false,
             start: StartState::default(),
             start_lists: false,
             forget_request: None,
@@ -1303,6 +1310,7 @@ impl App {
                 s.player().and_then(suhina_session::Player::output_info).map_or(0, |i| i.input_channels);
             for column in &mut grid.columns {
                 column.armed = s.is_armed(column.track);
+                column.recording = s.recording_slot(column.track);
             }
             grid
         });
@@ -1357,8 +1365,13 @@ impl App {
             } else if missing_bar {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.missing.bar(ui, prompt));
             }
-            let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
-            let view_area = inner;
+            // With the detail area across the full width, the browser takes its side of what is
+            // left above it (Settings › Detail area › Detail area layout).
+            let full_width = grid.is_some()
+                && self.settings.view.detail_layout == crate::view_settings::DetailLayout::FullWidth
+                && self.settings.device_layout != DeviceLayout::Stack;
+            let inner = if self.settings.browser_open && !full_width { self.browser_panel(ui, inner) } else { inner };
+            let mut view_area = inner;
             self.detail_drop = None;
             // A clip selected (or clicked) while the editor was closed by hand opens it again.
             let shown_clip = self.shown_clip();
@@ -1370,13 +1383,19 @@ impl App {
             {
                 self.show_editor();
             }
+            // Selecting another clip, or clicking the selected one, shows its editor again.
+            if shown_clip.is_some() && (clicked || shown_clip != self.last_clip) {
+                self.detail_showing = detail_view::Showing::Clip;
+            }
             self.last_clip = shown_clip;
             let inner = if grid.is_some() && self.detail_open {
                 self.detail_area(ui, inner, &mut actions)
             } else {
                 self.place_editors(&[]);
-                // A hidden piano roll does not keep the keyboard, nor the view to one track.
+                // A hidden piano roll does not keep the keyboard, nor the view to one track, and
+                // a note its audition sounds goes off.
                 self.piano_roll.focused = false;
+                actions.extend(self.piano_roll.stop_audition());
                 self.arrangement.focus = None;
                 // In a row under the view, the splitter stays along the bottom, to drag it open.
                 if grid.is_some() && self.settings.device_layout != DeviceLayout::Stack {
@@ -1384,6 +1403,16 @@ impl App {
                 } else {
                     inner
                 }
+            };
+            let inner = if self.settings.browser_open && full_width {
+                let rest = self.browser_panel(ui, inner);
+                view_area = Rect::from_min_max(
+                    Pos2::new(rest.left(), view_area.top()),
+                    Pos2::new(rest.right(), view_area.bottom()),
+                );
+                rest
+            } else {
+                inner
             };
             // A drag from the browser, or files from the system: the views say what is under the
             // pointer.
@@ -1429,13 +1458,17 @@ impl App {
                         self.view.knobs = self.settings.mixer_controls == MixerControls::Knob;
                         // Both views fold the same groups: the Arrangement view keeps them.
                         self.view.folded = self.arrangement.folds.groups();
+                        self.view.mixer_height = self.settings.view.mixer_height as f32;
+                        self.view.double_click_does_nothing = !self.settings.view.double_click_clip;
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
                         self.arrangement.folds.set_groups(&self.view.folded);
+                        self.session_view_done();
                     }
                     (Some(_), View::Arrangement) => {
                         if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
                             self.arrangement.stack_audio = self.settings.sample_stacking;
                             self.arrangement.stack_midi = self.settings.midi_stacking;
+                            self.arrangement.double_click_does_nothing = !self.settings.view.double_click_clip;
                             self.arrangement.knobs = self.settings.mixer_controls == MixerControls::Knob;
                             let monitor = session.player().map(|p| p.monitor());
                             // A folded group's row shows the track being worked on, so the folds
@@ -1469,6 +1502,7 @@ impl App {
                                 .and_then(suhina_session::Player::output_info)
                                 .map_or(0, |i| i.input_channels);
                             arrangement_view::show(ui, &timeline, &mut self.arrangement, &mut actions);
+                            self.devices_asked();
                             self.timeline = Some((self.revision, self.arrangement.folds.clone(), timeline));
                             // The headers can be moved from the view itself; that is the setting too.
                             let side = if self.arrangement.headers_left { Side::Left } else { Side::Right };
@@ -1537,6 +1571,87 @@ impl App {
         }
     }
 
+    /// File › Open recent: the recent projects the project dialog lists, newest first, each opened
+    /// as File › Open… opens a file. The list is read again each time the File menu opens.
+    fn open_recent_menu(&mut self, ui: &mut Ui, was_open: bool) {
+        self.file_menu_open = true;
+        if !was_open {
+            self.lists_wanted = true;
+        }
+        let recent: Vec<PathBuf> = self.project_lists.recent.iter().take(RECENT_IN_MENU).cloned().collect();
+        ui.add_enabled_ui(!recent.is_empty(), |ui| {
+            ui.menu_button("Open recent", |ui| {
+                for path in recent {
+                    let name =
+                        path.file_stem().map_or_else(|| path.display().to_string(), |s| s.to_string_lossy().into());
+                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                        if path.is_file() {
+                            self.request_open(path);
+                        } else {
+                            self.status = Status::Error(format!("{} is no longer there", path.display()));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    /// What the Session view asked for this frame that the window keeps: the mixer's height,
+    /// saved in Settings, and the detail area opened from a strip's device list.
+    fn session_view_done(&mut self) {
+        let height = self.view.mixer_height.round() as u32;
+        if height != self.settings.view.mixer_height {
+            self.settings.view.mixer_height = height;
+            self.settings_changed = true;
+        }
+        if std::mem::take(&mut self.view.open_detail) {
+            self.show_editor();
+        }
+        self.devices_asked();
+    }
+
+    /// A double-click on a track (an Arrangement header, a Session column's name or channel
+    /// strip) selects it and shows its devices, opening the detail area; a clip selected on
+    /// another track is no longer selected (`docs/spec/ui-clip-editor.md` › Where it opens).
+    fn devices_asked(&mut self) {
+        if let Some(track) = self.arrangement.open_devices.take() {
+            if self.arrangement.selected_clip().is_some_and(|(t, _)| t != track) {
+                self.arrangement.clear_selected_clip();
+            }
+            if self.arrangement.selected_tracks.first() != Some(&track) {
+                self.arrangement.selected_tracks = vec![track];
+            }
+            self.show_devices();
+        }
+        if let Some(track) = self.view.open_devices.take() {
+            self.view.selected = Some(track);
+            if self.view.selected_slot.is_some_and(|(t, _)| t != track) {
+                self.view.selected_slot = None;
+            }
+            self.show_devices();
+        }
+    }
+
+    /// Shows the shown track's devices in the detail area, opening it when it is hidden.
+    fn show_devices(&mut self) {
+        self.detail_showing = detail_view::Showing::Devices;
+        self.show_editor();
+    }
+
+    /// The Clip / Devices switch's key and menu entry, for a clip with an editor: the other part,
+    /// or the devices when the detail area is hidden, which opens it.
+    fn toggle_devices(&mut self) {
+        if self.piano_clip(self.shown_clip()).is_none() {
+            return;
+        }
+        self.detail_showing = match self.detail_showing {
+            detail_view::Showing::Clip => detail_view::Showing::Devices,
+            _ if !self.detail_open => detail_view::Showing::Devices,
+            detail_view::Showing::Devices => detail_view::Showing::Clip,
+        };
+        self.show_editor();
+    }
+
     /// Lays out the detail area beside or under the view in `area`, draws it with its splitter,
     /// and returns what is left for the view.
     fn detail_area(&mut self, ui: &mut Ui, area: Rect, actions: &mut Vec<Action>) -> Rect {
@@ -1581,10 +1696,19 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let piano = self.piano_clip(clip);
+        let mut piano = self.piano_clip(clip);
+        // The notes of other clips the piano roll draws behind this one's (› Ghost notes).
+        if let (Some(piano), Some(clip), Some(session)) = (piano.as_mut(), clip, self.session()) {
+            piano.ghosts = crate::piano_roll_ghosts::ghosts(session.project(), clip, self.piano_roll.ghost_source);
+        }
         let least = self.least_detail_height();
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
+        // With the switch on Devices the track's devices take the editor's place, and nothing is
+        // pulled to the top (› Where it opens in `docs/spec/ui-clip-editor.md`).
+        let switch = piano.is_some().then_some(self.detail_showing);
+        let piano = piano.filter(|_| self.detail_showing == detail_view::Showing::Clip);
+        let (pullable, pulled) = (pullable && piano.is_some(), pulled && piano.is_some());
         let focus = match clip {
             Some(detail_view::ClipRef::Arrangement(track, _))
                 if pulled && self.settings.piano_roll_top == PianoRollTop::Track =>
@@ -1667,6 +1791,9 @@ impl App {
                 detail_view::bar_beats(session.project()),
             );
         }
+        if let detail_view::Detail::Clip(info, _) = &mut shown {
+            info.switch = switch;
+        }
         // A selected slot clip's follow action comes first, the rest of the detail beside or
         // under it.
         let follow = match (self.shown, self.view.selected_slot, self.session()) {
@@ -1689,14 +1816,13 @@ impl App {
             None => detail,
         };
         if piano.is_none() {
+            // A note the audition sounds goes off with the piano roll.
+            actions.extend(self.piano_roll.stop_audition());
             self.piano_roll.hide();
         }
         let mut places = Vec::new();
-        let options = piano_roll::Options {
-            right_click_deletes: self.keymap.preset().right_click_deletes(),
-            toolbar_size: self.settings.toolbar_size,
-            mouse: self.keymap.mouse(),
-        };
+        let options =
+            piano_roll::Options { toolbar_size: self.settings.toolbar_size, workflow: self.keymap.workflow() };
         // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
         // visible on the button.
         let keymap = self.keymap.clone();
@@ -1711,9 +1837,9 @@ impl App {
             }
         };
         let piano_roll = &mut self.piano_roll;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
+        let picked = ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
-                let mut rest = detail_view::show_clip_column(ui, info, stacked);
+                let (mut rest, picked) = detail_view::show_clip_column(ui, info, stacked);
                 // The MIDI tools column, between the clip's properties and the note grid. With the
                 // detail area stacked there is no room beside the notes, so it is not drawn there
                 // (the quantise settings and Ctrl+U still work: › Other note tools).
@@ -1725,22 +1851,33 @@ impl App {
                 }
                 let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
+                picked
             } else if stacked {
-                detail_view::show_stack(ui, &shown, actions, &mut places);
+                detail_view::show_stack(ui, &shown, actions, &mut places)
             } else {
-                detail_view::show_row(ui, &shown, actions, &mut places);
+                detail_view::show_row(ui, &shown, actions, &mut places)
             }
         });
+        if let Some(showing) = picked.inner {
+            self.detail_showing = showing;
+        }
         self.place_editors(&places);
         // The toolbar's × hides the editor.
         if std::mem::take(&mut self.piano_roll.hide_requested) {
             self.hide_editor();
         }
-        // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
-        // the piano roll follows it.
+        // A workflow mode or setting picked in the piano roll's toolbar: kept in the keymap.
+        if let Some(picked) = self.piano_roll.workflow_picked.take() {
+            picked.apply(&mut self.keymap);
+            self.keymap_changed = true;
+        }
+        // A grid value picked in the piano roll's grid menu or with its keys: its own, or the
+        // control bar's when the piano roll follows it.
         if let Some(picked) = self.piano_roll.grid_picked.take() {
             if self.settings.piano_grid_follows {
-                actions.push(Action::new("launcher.setQuantization", json!({ "value": picked })));
+                if let Some(value) = picked.control_bar_value() {
+                    actions.push(Action::new("launcher.setQuantization", json!({ "value": value })));
+                }
             } else {
                 self.piano_grid = picked;
             }
@@ -1777,7 +1914,9 @@ impl App {
     /// The least height of the detail area in a row: the piano roll's while it shows one, else
     /// 80 px.
     fn least_detail_height(&self) -> f32 {
-        let piano = self.settings.device_layout != DeviceLayout::Stack && self.piano_clip(self.shown_clip()).is_some();
+        let piano = self.settings.device_layout != DeviceLayout::Stack
+            && self.detail_showing == detail_view::Showing::Clip
+            && self.piano_clip(self.shown_clip()).is_some();
         if piano { piano_roll::LEAST_HEIGHT } else { 80.0 }
     }
 
@@ -1806,8 +1945,9 @@ impl App {
     /// The piano roll for the shown clip: an arrangement clip's, or the Session view's selected
     /// slot's clip.
     fn piano_clip(&self, clip: Option<detail_view::ClipRef>) -> Option<piano_roll::PianoClip> {
-        let grid = self.piano_grid_name();
-        let quantization = suhina_session::parse_quantization(grid).ok()?;
+        let follows = self.settings.piano_grid_follows;
+        let control_bar = self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()));
+        let quantization = suhina_session::parse_quantization(control_bar).ok()?;
         let mut piano = match clip? {
             detail_view::ClipRef::Arrangement(track, index) => {
                 piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?
@@ -1816,12 +1956,21 @@ impl App {
                 piano_roll::launcher_clip(self.session()?.project(), track, scene, quantization)?
             }
         };
-        piano.grid_name = grid;
+        if follows {
+            piano.grid_menu = crate::piano_roll_grid::PianoGrid::from_value(control_bar);
+        } else {
+            piano.grid_menu = self.piano_grid;
+            piano.grid = self.piano_grid.fixed_step(piano.bar_beats);
+        }
+        piano.grid_follows = follows;
         Some(piano)
     }
 
     /// The params that name the clip the piano roll shows in a `note.*` command, if it shows one.
     pub fn piano_roll_address(&self) -> Option<serde_json::Value> {
+        if self.detail_showing == detail_view::Showing::Devices {
+            return None;
+        }
         let clip = match self.shown {
             View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
             View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
@@ -1829,17 +1978,11 @@ impl App {
         self.piano_clip(clip).map(|c| c.address)
     }
 
-    /// The grid value the piano roll uses.
-    fn piano_grid_name(&self) -> &'static str {
-        if self.settings.piano_grid_follows {
-            self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()))
-        } else {
-            self.piano_grid
-        }
-    }
-
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
     fn piano_key(&mut self, action: &str) -> Option<Action> {
+        if self.detail_showing == detail_view::Showing::Devices {
+            return None;
+        }
         let clip = match self.shown {
             View::Session => self
                 .view
@@ -2218,7 +2361,7 @@ impl App {
         };
         let tag_limit = self.projects.file_library_mut().tag_limit();
         self.about.audio_live = self.session().and_then(Session::player).and_then(suhina_session::Player::output_info);
-        if self.page.page == settings_view::Page::Audio {
+        if self.page.shows_devices() {
             // The latency and underruns change while it plays, and controllers come and go.
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
             if self.midi_listed.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(2)) {
@@ -2282,6 +2425,8 @@ impl App {
         let keymap = self.keymap.clone();
         let keys = move |action: &str| keymap.label(action).unwrap_or_default();
         ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::text_secondary());
+        // Whether the File menu showed last frame, so its recent list is read once as it opens.
+        let file_menu_was_open = std::mem::take(&mut self.file_menu_open);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.add(egui::Button::new("New or open…").shortcut_text(keys("file.new"))).clicked() {
@@ -2290,6 +2435,7 @@ impl App {
                 if ui.add(egui::Button::new("Open…").shortcut_text(keys("file.open"))).clicked() {
                     self.open_project_dialog(true);
                 }
+                self.open_recent_menu(ui, file_menu_was_open);
                 ui.separator();
                 if ui.add_enabled(has_project, egui::Button::new("Save").shortcut_text(keys("file.save"))).clicked() {
                     self.save_active(false);
@@ -2367,6 +2513,13 @@ impl App {
                 let clip = has_project && self.shown_clip().is_some();
                 if ui.add_enabled(clip, egui::Button::new(label).shortcut_text(keys("view.editor"))).clicked() {
                     self.toggle_editor();
+                }
+                // The detail area's Clip / Devices switch, for a clip with an editor.
+                let devices = self.detail_open && self.detail_showing == detail_view::Showing::Devices;
+                let label = if devices { "Show clip" } else { "Show devices" };
+                let editor = has_project && self.piano_clip(self.shown_clip()).is_some();
+                if ui.add_enabled(editor, egui::Button::new(label).shortcut_text(keys("view.devices"))).clicked() {
+                    self.toggle_devices();
                 }
                 ui.separator();
                 let (zoom, limits) = (self.settings.zoom, crate::settings::ZOOMS);
@@ -2612,6 +2765,7 @@ impl App {
             }
             "view.editor" if self.shown_clip().is_some() => self.toggle_editor(),
             "view.editor" => {}
+            "view.devices" => self.toggle_devices(),
             "view.mappingMode" => self.toggle_mapping_mode(),
             "view.arrangement" => {
                 self.shown = View::Arrangement;
@@ -2630,7 +2784,9 @@ impl App {
                         self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i))
                     }
                 };
-                let showing = self.detail_open && self.piano_clip(clip).is_some();
+                let showing = self.detail_open
+                    && self.detail_showing == detail_view::Showing::Clip
+                    && self.piano_clip(clip).is_some();
                 if showing && let Some(quantize) = self.piano_roll.quantize_selected() {
                     actions.push(quantize);
                 }
@@ -3675,9 +3831,12 @@ impl App {
         if chosen != current {
             actions.push(Action::new("launcher.setQuantization", json!({ "value": chosen })));
         }
+        let count_in = row(quant_rect.right() + PAD, 64.0);
+        let bars = self.session().map_or(0, |s| s.count_in_bars());
+        crate::record_controls::count_in_menu(ui, count_in, bars, actions);
 
-        // Centre: play, stop, position.
-        let transport_width = 28.0 * 2.0 + 1.0 + PAD + 64.0;
+        // Centre: play, stop, record, position.
+        let transport_width = 28.0 * 3.0 + 2.0 + PAD + 64.0;
         let mut x = bar.center().x - transport_width / 2.0;
         let play = row(x, 28.0);
         let response = widgets::button_area(ui, play, Id::new("play"), "Play");
@@ -3706,7 +3865,10 @@ impl App {
             motion::mix(theme::control_background(), theme::control_hover(), widgets::hover(ui, &response)),
         );
         painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::text_primary());
-        x = stop.right() + PAD;
+        let record = row(stop.right() + 1.0, 28.0);
+        let recording = self.session().is_some_and(|s| s.records_arrangement());
+        crate::record_controls::record_button(ui, &painter, record, recording, actions);
+        x = record.right() + PAD;
         let position = row(x, 64.0);
         painter.rect_filled(position, 0.0, theme::window_background());
         widgets::text_in(

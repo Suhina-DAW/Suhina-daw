@@ -372,3 +372,165 @@ fn many_sources_reuse_the_ones_that_are_silent() {
     assert_eq!(crate::port_id("Keys"), crate::port_id("Keys"));
     assert_ne!(crate::port_id("Keys"), crate::port_id("Pads"));
 }
+
+/// The first frame of `out` (interleaved stereo) that is not silent.
+fn onset(out: &[f32]) -> Option<usize> {
+    out.iter().position(|s| s.abs() > 1e-6).map(|i| i / 2)
+}
+
+/// Renders `count` blocks of `frames`, telling the renderer before each that it renders at
+/// `now(block)` on the live clock, with a delay of `delay` frames; `send` is called before the
+/// block of that index is rendered.
+fn clocked(
+    renderer: &mut Renderer,
+    count: usize,
+    frames: usize,
+    delay: u32,
+    now: impl Fn(usize) -> u64,
+    mut send: impl FnMut(usize),
+) -> Vec<f32> {
+    let mut out = Vec::new();
+    let mut block = vec![0.0f32; frames * 2];
+    for index in 0..count {
+        send(index);
+        renderer.set_live_clock(now(index), delay);
+        renderer.process(&mut block);
+        out.extend_from_slice(&block);
+    }
+    out
+}
+
+fn armed_synth() -> (Renderer, crate::LiveSender) {
+    let mut renderer = stopped(&synth());
+    let mut controller = renderer.controller();
+    let live = controller.take_live_input().unwrap();
+    controller.send(LaunchCommand::SetArmed { track: TrackId(1), armed: true, input: Default::default() }).unwrap();
+    (renderer, live)
+}
+
+/// Microseconds of `frames` frames.
+fn micros(frames: usize) -> u64 {
+    (frames as u64 * 1_000_000).div_ceil(u64::from(SR))
+}
+
+#[test]
+fn a_stamped_note_plays_a_fixed_delay_after_its_time_at_any_block_size() {
+    // #269: a note played between two blocks used to land on the next block's first frame, up
+    // to a block late. Stamped, it lands on the frame where its time and the delay fall,
+    // whatever the block size and wherever in the block it was played.
+    for frames in [64usize, 128, 256, 1024] {
+        let delay = frames as u32 * 2;
+        for into_block in [0.0, 0.1, 0.37, 0.5, 0.93] {
+            let (mut renderer, mut live) = armed_synth();
+            let start = 1_000_000;
+            let block_us = |n: usize| start + micros(frames * n);
+            // Played some way into the time of block 4, before block 5 is rendered.
+            let played = block_us(4) + (micros(frames) as f64 * into_block) as u64;
+            let out = clocked(&mut renderer, 12, frames, delay, block_us, |index| {
+                if index == 5 {
+                    live.send_at(Default::default(), LiveEvent::NoteOn { key: 69, velocity: 1.0 }, played);
+                }
+            });
+            // Where the note was played, in frames from the first block's time.
+            let at = (played - start) as f64 * f64::from(SR) / 1e6 + f64::from(delay);
+            let [frame] = renderer.live_played()[..] else { panic!("{frames} {into_block}: one note") };
+            assert!((frame as f64 - at).abs() <= 1.0, "{frames} {into_block}: {frame} for {at}");
+            // And it is heard from there (the synth starts notes on its own 64-frame steps).
+            let heard = onset(&out).unwrap_or_else(|| panic!("{frames} {into_block}: no sound")) as u64;
+            assert!((frame..frame + 72).contains(&heard), "{frames} {into_block}: heard at {heard}, played at {frame}");
+        }
+    }
+}
+
+#[test]
+fn a_stamped_note_waits_for_a_later_block_and_keeps_its_order() {
+    let (mut renderer, mut live) = armed_synth();
+    let frames = 64;
+    let block_us = |n: usize| micros(frames * n);
+    // A long delay: the note's frame is three blocks later than the block that takes it.
+    let delay = (frames * 4) as u32;
+    let out = clocked(&mut renderer, 10, frames, delay, block_us, |index| {
+        if index == 1 {
+            live.send_at(Default::default(), LiveEvent::NoteOn { key: 69, velocity: 1.0 }, block_us(1));
+        }
+    });
+    assert_eq!(renderer.live_played(), [(frames * 5) as u64]);
+    assert!(onset(&out).is_some_and(|heard| heard >= frames * 5));
+    // A note-off sent with no time after a waiting note-on does not overtake it: the key ends
+    // up released, not stuck.
+    let (mut renderer, mut live) = armed_synth();
+    let out = clocked(&mut renderer, 400, frames, delay, block_us, |index| {
+        if index == 1 {
+            live.send_at(Default::default(), LiveEvent::NoteOn { key: 69, velocity: 1.0 }, block_us(1));
+            live.send(LiveEvent::NoteOff { key: 69 });
+        }
+    });
+    assert_eq!(renderer.live_played(), [(frames * 5) as u64; 2], "the note-off waits for its note-on");
+    assert!(peak(&out[390 * frames * 2..]) < 1e-3, "released");
+}
+
+#[test]
+fn notes_without_a_time_or_too_late_play_at_the_next_blocks_first_frame() {
+    for time in [0, 1] {
+        let (mut renderer, mut live) = armed_synth();
+        let frames = 256;
+        let block_us = |n: usize| 10_000_000 + micros(frames * n);
+        let out = clocked(&mut renderer, 4, frames, (frames * 2) as u32, block_us, |index| {
+            if index == 2 {
+                // Without a time, or from long ago.
+                live.send_at(Default::default(), LiveEvent::NoteOn { key: 69, velocity: 1.0 }, time);
+            }
+        });
+        assert_eq!(renderer.live_played(), [(frames * 2) as u64], "{time}");
+        assert!(onset(&out).is_some_and(|heard| heard >= frames * 2));
+    }
+}
+
+#[test]
+fn a_jittery_render_thread_does_not_move_the_notes() {
+    // The render thread wakes late by up to half a block, and sometimes renders two blocks at
+    // once; the notes keep their spacing to within a few frames, where they used to jitter by a
+    // whole block.
+    let frames = 256usize;
+    let delay = (frames * 3) as u32;
+    let jitter = |n: usize| [0, 40, 1500, 2600, 300, 0, 2000, 900][n % 8];
+    let block_us = move |n: usize| 5_000_000 + micros(frames * n) + jitter(n);
+    let mut distances = Vec::new();
+    for (index, into) in [(20usize, 0.2), (31, 0.8), (40, 0.5), (55, 0.05)] {
+        let (mut renderer, mut live) = armed_synth();
+        let played = 5_000_000 + micros(frames * (index - 1)) + (micros(frames) as f64 * into) as u64;
+        clocked(&mut renderer, index + 8, frames, delay, block_us, |n| {
+            if n == index {
+                live.send_at(Default::default(), LiveEvent::NoteOn { key: 69, velocity: 1.0 }, played);
+            }
+        });
+        let [heard] = renderer.live_played()[..] else { panic!("one note") };
+        distances.push(heard as f64 - (played - 5_000_000) as f64 * f64::from(SR) / 1e6);
+    }
+    let (low, high) = distances.iter().fold((f64::MAX, f64::MIN), |(l, h), d| (l.min(*d), h.max(*d)));
+    assert!(high - low < frames as f64 / 4.0, "{distances:?}");
+}
+
+#[test]
+fn a_drivers_stamps_are_placed_on_the_live_clock() {
+    let mut clock = crate::StampClock::default();
+    // The driver's clock starts at 0; messages arrive 300 to 900 µs after their stamps.
+    assert_eq!(clock.time(1_000, 50_900), 50_900, "the first one as it arrived");
+    assert_eq!(clock.time(2_000, 51_300), 51_300, "a shorter gap moves the clock");
+    assert_eq!(clock.time(3_000, 52_800), 52_300, "a longer gap is a late arrival");
+    // Never after it arrived, and never 0.
+    assert_eq!(clock.time(4_000, 10), 10);
+    let mut fresh = crate::StampClock::default();
+    assert_eq!(fresh.time(5, 0), 1);
+    // A stamp that goes back (the driver started its clock again) starts over.
+    let mut clock = crate::StampClock::default();
+    clock.time(1_000_000, 2_000_000);
+    assert_eq!(clock.time(10, 2_100_000), 2_100_000);
+    // Hostile stamps neither panic nor go past the arrival.
+    let mut clock = crate::StampClock::default();
+    for (stamp, arrived) in [(u64::MAX, 5), (0, u64::MAX), (u64::MAX, u64::MAX), (7, 7)] {
+        let time = clock.time(stamp, arrived);
+        assert!(time >= 1 && time <= arrived.max(1), "{stamp} {arrived}: {time}");
+    }
+    assert!(crate::live_now() >= 1);
+}

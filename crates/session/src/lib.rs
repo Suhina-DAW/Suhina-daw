@@ -9,6 +9,7 @@ pub mod audio;
 mod automation;
 pub mod backup;
 mod blank;
+mod clip_shape;
 mod commands;
 mod devices;
 mod editing;
@@ -26,7 +27,10 @@ mod plugins;
 mod preview;
 mod projects;
 mod rack;
+mod record_writer;
+mod recording;
 mod relink;
+mod scales;
 mod sends;
 mod soundmap;
 mod tempo;
@@ -52,6 +56,7 @@ pub use rack::{
     BlockCounts, Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, ProcessGroup,
     is_instrument, plugin_group, start_offline,
 };
+pub use recording::{COUNT_IN_BARS, RECORDED_FOLDER};
 pub use relink::{MAX_RELINK, search as find_candidates};
 pub use soundmap::{scope_files, sound_map_commands};
 pub use suhina_plugins::Placement;
@@ -207,6 +212,11 @@ impl Player {
         self.controller.take_live_input()
     }
 
+    /// The reading end of what the engine records (`docs/spec/recording.md`); `None` once taken.
+    pub fn take_recorder(&mut self) -> Option<suhina_engine::RecordReceiver> {
+        self.controller.take_recorder()
+    }
+
     /// Hands a running plug-in's audio half to the engine for the plug-in device `key`.
     pub fn send_plugin(
         &mut self,
@@ -273,6 +283,8 @@ pub struct Session {
     /// The armed tracks, whose instruments play the MIDI inputs (ADR 0017). Not part of the
     /// project: arming is not undone and not saved.
     armed: Vec<suhina_model::TrackId>,
+    /// Takes being recorded and the count-in (`docs/spec/recording.md`).
+    pub(crate) recording: recording::Recording,
 }
 
 /// Files kept decoded ahead of the commands that use them.
@@ -302,6 +314,7 @@ impl Session {
             player_behind: false,
             backup: backup::SessionBackups::default(),
             armed: Vec::new(),
+            recording: recording::Recording::default(),
         }
     }
 
@@ -439,6 +452,10 @@ impl Session {
         // command queue is empty, so this send only fails if the engine is gone, and then every
         // later command says so.
         let _ = player.send(suhina_engine::LaunchCommand::SetQuantization(self.quantization));
+        // Takes of the engine this one replaces end where it was; a new engine records anew.
+        self.end_takes_now();
+        let sample_rate = player.sample_rate();
+        self.recording.attach(player.take_recorder(), sample_rate);
         self.player = Some(player);
         self.audio_changed = false;
         // A new engine hears the tracks armed before it.
@@ -515,6 +532,8 @@ impl Session {
         &mut self,
         open: impl FnOnce(&Project, &suhina_engine::AudioPool, Option<Player>) -> Result<Player, E>,
     ) -> Result<(), E> {
+        // A take ends where the engine it records from was (a lost device keeps what it had).
+        self.end_takes_now();
         let old = self.player.take();
         match open(&self.project, &self.audio, old) {
             Ok(player) => {
@@ -538,6 +557,7 @@ impl Session {
     /// when the project plays again).
     pub fn detach_player(&mut self) -> Option<Player> {
         self.plugins.stop_all();
+        self.end_takes_now();
         self.player.take()
     }
 
