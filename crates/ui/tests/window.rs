@@ -3933,7 +3933,6 @@ fn launching_a_clip_greys_the_arrangement_until_back_to_arrangement() {
 }
 
 #[test]
-<<<<<<< HEAD
 fn a_device_selects_and_deletes_even_beside_a_shown_clip() {
     let devices =
         |h: &Harness<'static, App>| h.state().session().map(|s| s.project().channels[0].devices.len()).unwrap_or(0);
