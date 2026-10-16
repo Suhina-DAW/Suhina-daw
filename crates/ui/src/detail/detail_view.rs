@@ -777,7 +777,7 @@ fn device_panel(
         .on_hover_text("Right-click for the device's menu");
     panel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Device {}", device.name)));
     if selected {
-        painter.rect_stroke(rect, 1.0, theme::hairline(theme::text_primary()), egui::StrokeKind::Inside);
+        painter.rect_stroke(rect, 1.0, theme::hairline(theme::selection()), egui::StrokeKind::Inside);
     }
     let clicked = panel.clicked();
     panel.context_menu(|ui| menus::device_menu(ui, track, device.index, actions));
