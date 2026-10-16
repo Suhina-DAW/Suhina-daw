@@ -232,9 +232,23 @@ fn dragging_a_note_moves_the_selection_by_grid_steps_and_alt_moves_freely() {
     assert_eq!(&notes(&h)[1..], &before[1..]);
     undo(&mut h);
     assert_eq!(notes(&h), before);
-    // With Alt the drag is not snapped.
+    // With Alt pressed once the drag has begun, it is not snapped (Alt held at the press
+    // changes the note's velocity instead: › Velocity).
     let from = note_rect(&h, &before[0]).center() - vec2(6.0, 0.0);
-    drag(&mut h, from, from + vec2(beat * 1.3, 0.0), Modifiers::ALT);
+    let to = from + vec2(beat * 1.3, 0.0);
+    h.hover_at(from);
+    h.step();
+    button(&mut h, from, true, Modifiers::NONE);
+    h.hover_at(from + (to - from) * 0.25);
+    h.step();
+    h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::ALT));
+    for step in 2..=4 {
+        h.hover_at(from + (to - from) * (step as f32 / 4.0));
+        h.step();
+    }
+    button(&mut h, to, false, Modifiers::ALT);
+    h.input_mut().events.push(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.run();
     let free = notes(&h)[0].time - before[0].time;
     assert!((free - 1.3).abs() < 0.05, "{free}");
 }

@@ -260,6 +260,7 @@ mod tests {
                     data: LaneData::Audio(AudioRegion { absolute_file: absolute, ..AudioRegion::new(file) }),
                 }],
                 extensions: Extensions::default(),
+                scale: None,
             }],
             ..Project::default()
         }

@@ -104,6 +104,7 @@ mod tests {
                 length: 4.0,
                 lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
                 extensions: Extensions::default(),
+                scale: None,
             }],
             arrangement: Arrangement {
                 lanes: vec![ArrangementLane { name: "Lead".into(), track: Some(TrackId(1)), clips }],

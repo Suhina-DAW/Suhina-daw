@@ -47,8 +47,6 @@ const QUANTIZATION: [&str; 14] = [
 ];
 /// The quantisation of a session before anything is set.
 const DEFAULT_QUANTIZATION: &str = "1 bar";
-/// The piano roll's own grid value before one is picked.
-const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
@@ -230,7 +228,7 @@ pub struct App {
     editor_closed: bool,
     last_clip: Option<ClipRef>,
     /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
-    piano_grid: &'static str,
+    piano_grid: crate::piano_roll_grid::PianoGrid,
     detail_width: f32,
     page: PageState,
     settings: Settings,
@@ -340,7 +338,7 @@ impl App {
             detail_drag: None,
             editor_closed: false,
             last_clip: None,
-            piano_grid: DEFAULT_PIANO_GRID,
+            piano_grid: crate::piano_roll_grid::PianoGrid::default(),
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
@@ -1386,8 +1384,10 @@ impl App {
                 self.detail_area(ui, inner, &mut actions)
             } else {
                 self.place_editors(&[]);
-                // A hidden piano roll does not keep the keyboard, nor the view to one track.
+                // A hidden piano roll does not keep the keyboard, nor the view to one track, and
+                // a note its audition sounds goes off.
                 self.piano_roll.focused = false;
+                actions.extend(self.piano_roll.stop_audition());
                 self.arrangement.focus = None;
                 // In a row under the view, the splitter stays along the bottom, to drag it open.
                 if grid.is_some() && self.settings.device_layout != DeviceLayout::Stack {
@@ -1644,7 +1644,11 @@ impl App {
         }
         // A MIDI clip shows its notes in the piano roll beside its properties; under the
         // Arrangement view it can be pulled to the top.
-        let piano = self.piano_clip(clip);
+        let mut piano = self.piano_clip(clip);
+        // The notes of other clips the piano roll draws behind this one's (› Ghost notes).
+        if let (Some(piano), Some(clip), Some(session)) = (piano.as_mut(), clip, self.session()) {
+            piano.ghosts = crate::piano_roll_ghosts::ghosts(session.project(), clip, self.piano_roll.ghost_source);
+        }
         let least = self.least_detail_height();
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
         let pulled = pullable && self.detail_max;
@@ -1752,14 +1756,13 @@ impl App {
             None => detail,
         };
         if piano.is_none() {
+            // A note the audition sounds goes off with the piano roll.
+            actions.extend(self.piano_roll.stop_audition());
             self.piano_roll.hide();
         }
         let mut places = Vec::new();
-        let options = piano_roll::Options {
-            right_click_deletes: self.keymap.preset().right_click_deletes(),
-            toolbar_size: self.settings.toolbar_size,
-            mouse: self.keymap.mouse(),
-        };
+        let options =
+            piano_roll::Options { toolbar_size: self.settings.toolbar_size, workflow: self.keymap.workflow() };
         // The toolbar's tooltips show the keys the keymap has now, so a rebind (or a preset) is
         // visible on the button.
         let keymap = self.keymap.clone();
@@ -1799,11 +1802,18 @@ impl App {
         if std::mem::take(&mut self.piano_roll.hide_requested) {
             self.hide_editor();
         }
-        // A grid value picked in the piano roll's toolbar: its own, or the control bar's when
-        // the piano roll follows it.
+        // A workflow mode or setting picked in the piano roll's toolbar: kept in the keymap.
+        if let Some(picked) = self.piano_roll.workflow_picked.take() {
+            picked.apply(&mut self.keymap);
+            self.keymap_changed = true;
+        }
+        // A grid value picked in the piano roll's grid menu or with its keys: its own, or the
+        // control bar's when the piano roll follows it.
         if let Some(picked) = self.piano_roll.grid_picked.take() {
             if self.settings.piano_grid_follows {
-                actions.push(Action::new("launcher.setQuantization", json!({ "value": picked })));
+                if let Some(value) = picked.control_bar_value() {
+                    actions.push(Action::new("launcher.setQuantization", json!({ "value": value })));
+                }
             } else {
                 self.piano_grid = picked;
             }
@@ -1869,8 +1879,9 @@ impl App {
     /// The piano roll for the shown clip: an arrangement clip's, or the Session view's selected
     /// slot's clip.
     fn piano_clip(&self, clip: Option<detail_view::ClipRef>) -> Option<piano_roll::PianoClip> {
-        let grid = self.piano_grid_name();
-        let quantization = suhina_session::parse_quantization(grid).ok()?;
+        let follows = self.settings.piano_grid_follows;
+        let control_bar = self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()));
+        let quantization = suhina_session::parse_quantization(control_bar).ok()?;
         let mut piano = match clip? {
             detail_view::ClipRef::Arrangement(track, index) => {
                 piano_roll::arrangement_clip(self.session()?.project(), track, index, quantization)?
@@ -1879,7 +1890,13 @@ impl App {
                 piano_roll::launcher_clip(self.session()?.project(), track, scene, quantization)?
             }
         };
-        piano.grid_name = grid;
+        if follows {
+            piano.grid_menu = crate::piano_roll_grid::PianoGrid::from_value(control_bar);
+        } else {
+            piano.grid_menu = self.piano_grid;
+            piano.grid = self.piano_grid.fixed_step(piano.bar_beats);
+        }
+        piano.grid_follows = follows;
         Some(piano)
     }
 
@@ -1890,15 +1907,6 @@ impl App {
             View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
         };
         self.piano_clip(clip).map(|c| c.address)
-    }
-
-    /// The grid value the piano roll uses.
-    fn piano_grid_name(&self) -> &'static str {
-        if self.settings.piano_grid_follows {
-            self.session().map_or(DEFAULT_QUANTIZATION, |s| quantization_label(s.quantization()))
-        } else {
-            self.piano_grid
-        }
     }
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
