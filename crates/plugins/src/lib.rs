@@ -214,6 +214,13 @@ impl PluginAudio {
         self.note(outcome);
     }
 
+    /// Whether the block sent with [`PluginAudio::send`] has been answered, waiting for it at
+    /// most until `until`, without taking it ([`Link::wait_answered`]): after `true`,
+    /// [`PluginAudio::finish`] takes the result without waiting. Counts nothing. Real-time safe.
+    pub fn poll(&self, until: Instant) -> bool {
+        self.link.wait_answered(until)
+    }
+
     /// The second half: waits at most `timeout` for the block sent with [`PluginAudio::send`]
     /// and reads its result into `output`. Real-time safe.
     pub fn finish(&mut self, output: &mut [f32], timeout: Duration) -> Outcome {

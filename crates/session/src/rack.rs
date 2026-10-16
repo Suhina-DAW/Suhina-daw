@@ -209,6 +209,10 @@ pub struct Hosted {
     /// no note is left hanging and no automation is lost.
     carried: Vec<Event>,
     counts: Arc<BlockCounts>,
+    /// When the block out was sent, for `longest_us`: the engine may look at other chains'
+    /// plug-ins before it waits for this one's answer (#151), so the round trip is timed from
+    /// here, not from the wait.
+    sent_at: Option<std::time::Instant>,
 }
 
 impl Hosted {
@@ -223,6 +227,7 @@ impl Hosted {
             automated: Vec::with_capacity(MAX_BLOCK_PARAMS),
             carried: Vec::with_capacity(MAX_EVENTS),
             counts: Arc::new(BlockCounts::default()),
+            sent_at: None,
         }
     }
 
@@ -364,7 +369,7 @@ impl Hosted {
         if timeout.is_zero() {
             self.counts.no_time.fetch_add(1, Ordering::Relaxed);
         }
-        let started = std::time::Instant::now();
+        let started = self.sent_at.take().unwrap_or_else(std::time::Instant::now);
         let outcome = match self.output.get_mut(..buffer.len()) {
             Some(output) => self.audio.finish(output, timeout),
             None => suhina_plugins::Outcome::Busy,
@@ -395,6 +400,10 @@ impl PluginProcessor for Hosted {
         self.wait_for(buffer, timeout)
     }
 
+    fn poll(&mut self, until: std::time::Instant) -> bool {
+        self.audio.poll(until)
+    }
+
     /// Its host process and number there, unless releases from a block it could not take wait
     /// to be sent (they go on its own link first) or its link still has a block out.
     fn joint(&self) -> Option<Joint> {
@@ -418,6 +427,7 @@ impl PluginProcessor for Hosted {
             return Sent::Refused;
         };
         if self.audio.send_joint(input, &self.events, followers, buffer.len(), patience) {
+            self.sent_at = Some(std::time::Instant::now());
             return Sent::Out;
         }
         // The host is still busy with an earlier block: this one is lost to it, as a miss; its

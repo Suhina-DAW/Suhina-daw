@@ -247,3 +247,31 @@ fn a_block_names_the_instances_that_run_it_after_the_links_own() {
     assert!(seen[1].is_empty());
     assert_eq!(seen[2], many[..MAX_FOLLOWERS]);
 }
+
+#[test]
+fn looking_for_an_answer_leaves_the_block_to_wait() {
+    let mut link = Link::create(2, BLOCK as u32).unwrap_or_else(|e| panic!("{e}"));
+    // Nothing out: nothing to wait for.
+    assert!(link.wait_answered(Instant::now()));
+    let host = halving_host(link.address(), 2, Some((0, Duration::from_millis(100))));
+    let input = ramp(BLOCK * 2, 1.0);
+    let mut output = vec![0.0; BLOCK * 2];
+    assert!(link.send_with_events(&input, &[], output.len()));
+    // A look that is already past its time returns at once, and a short wait gives up.
+    let started = Instant::now();
+    assert!(!link.wait_answered(started));
+    assert!(!link.wait_answered(Instant::now() + Duration::from_millis(5)));
+    assert!(started.elapsed() < Duration::from_millis(60), "{:?}", started.elapsed());
+    // Neither took the block: it is still out, and its answer comes.
+    assert!(!link.ready());
+    assert!(link.wait_answered(Instant::now() + LONG));
+    // Answered, but its result is not taken until `wait`, which then does not wait.
+    assert!(!link.ready());
+    let started = Instant::now();
+    assert_eq!(link.wait(&mut output, Instant::now()), Outcome::Done);
+    assert!(started.elapsed() < Duration::from_millis(5));
+    assert_eq!(output[3], input[3] * 0.5);
+    assert!(link.ready());
+    assert_eq!(link.process(&input, &mut output, LONG), Outcome::Done);
+    assert_eq!(host.join().ok(), Some(2));
+}

@@ -49,8 +49,8 @@ pub use notes::{MAX_NOTES_PER_CLIP, MAX_NOTES_PER_COMMAND, midi_velocity};
 pub use plugins::{device_plugin, plugin_commands};
 pub use projects::{MAX_OPEN_PROJECTS, ProjectId, Projects, all_commands, commands_markdown, project_commands};
 pub use rack::{
-    Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, ProcessGroup, is_instrument,
-    plugin_group, start_offline,
+    BlockCounts, Hosted, OfflinePlugins, PluginEnv, PluginProgress, PluginReport, PluginStatus, ProcessGroup,
+    is_instrument, plugin_group, start_offline,
 };
 pub use relink::{MAX_RELINK, search as find_candidates};
 pub use soundmap::{scope_files, sound_map_commands};
