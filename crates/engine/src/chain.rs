@@ -25,13 +25,15 @@
 //! that play into it add their output to its buffer instead of the output, and its devices run
 //! over the sum.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use suhina_device_api::{Device, NoteEvent, ProcessContext, Role};
 use suhina_model::{DeviceKind, Project, TrackId};
 
 use crate::automation::{DeviceLanes, MixLanes};
-use crate::plugin::{Delay, Followed, MAX_JOINED, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices};
+use crate::plugin::{
+    Delay, Followed, MAX_JOINED, OFFLINE_TIMEOUT, PluginProcessor, PluginSlot, Plugins, Sent, plugin_devices,
+};
 use crate::plugin_params::SlotParams;
 use crate::sends::SendOut;
 
@@ -107,6 +109,8 @@ pub(crate) struct Chain {
     /// run, and the plug-in slot whose block is out, if one is.
     stage: usize,
     waiting: Option<usize>,
+    /// When the waiting slot's block went out, for an offline render's patience.
+    sent_at: Option<Instant>,
     /// The plug-ins that follow the waiting one in its joint block.
     joined: Joined,
     /// Per key, the renderer frame its note ends at, or `NOT_HELD`.
@@ -305,6 +309,7 @@ impl Chain {
             done: 0,
             stage: 0,
             waiting: None,
+            sent_at: None,
             joined: Joined::default(),
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
@@ -341,6 +346,7 @@ impl Chain {
             done: 0,
             stage: 0,
             waiting: None,
+            sent_at: None,
             joined: Joined::default(),
             held: [NOT_HELD; 128],
             next_off: NOT_HELD,
@@ -379,6 +385,7 @@ impl Chain {
         self.done = 0;
         self.stage = 0;
         self.waiting = None;
+        self.sent_at = None;
         self.deadline = deadline;
     }
 
@@ -402,12 +409,13 @@ impl Chain {
         }
     }
 
-    /// Runs the devices over the rest of the block one stage further, for chains that run
-    /// their plug-ins at the same time: built-in effects and instruments run here, with the block's `context`;
-    /// at the next plug-in that takes the block without waiting, the block is handed over and
-    /// this returns true, for [`Chain::collect`] to wait for it once every chain has handed its
-    /// block over. Returns false once every device has run (a plug-in that cannot take a block
-    /// that way runs as in [`Chain::finish`]).
+    /// Runs the devices over the rest of the block as far as it can go without waiting, for
+    /// chains that run their plug-ins at the same time: built-in effects and instruments and
+    /// `.sd` devices run here, with the block's `context`; at the next plug-in that takes the
+    /// block without waiting, the block is handed over and this returns true, for
+    /// [`Chain::answered`] to tell when its answer is in and [`Chain::collect`] to take it, after
+    /// which this goes on from there. Returns false once every device has run (a plug-in that
+    /// cannot take a block that way runs as in [`Chain::complete`]).
     pub(crate) fn advance(&mut self, frames: usize, context: &ProcessContext) -> bool {
         self.context = *context;
         if self.waiting.is_some() {
@@ -427,6 +435,7 @@ impl Chain {
             waiting,
             device_lanes,
             joined,
+            sent_at,
             ..
         } = self;
         let from = (*done).min(to);
@@ -478,6 +487,7 @@ impl Chain {
                     match sent {
                         Sent::Out => {
                             *waiting = Some(*stage);
+                            *sent_at = Some(Instant::now());
                             return true;
                         }
                         // A miss already counted: running it again would count it twice.
@@ -497,14 +507,45 @@ impl Chain {
         false
     }
 
-    /// Waits for the block [`Chain::advance`] handed over, if one is out, and takes its result.
+    /// Whether a block [`Chain::advance`] handed over is out, waiting for its answer.
+    pub(crate) fn is_waiting(&self) -> bool {
+        self.waiting.is_some()
+    }
+
+    /// Whether [`Chain::collect`] can take the block out now without waiting: its plug-in has
+    /// answered, or the time it is given is over (the block's deadline; offline,
+    /// [`OFFLINE_TIMEOUT`] after it went out), and `collect` counts the miss. Waits for the
+    /// answer at most until `until` (a time already past only looks). True when no block is
+    /// out. Never allocates.
+    pub(crate) fn answered(&mut self, until: Instant) -> bool {
+        let Some(index) = self.waiting else { return true };
+        let Some(limit) = self.limit() else { return true };
+        if Instant::now() >= limit {
+            return true;
+        }
+        match self.slots.get_mut(index) {
+            Some(Slot::Plugin(plugin)) => plugin.poll(until.min(limit)) || Instant::now() >= limit,
+            _ => true,
+        }
+    }
+
+    /// Until when the block out may take: the block's deadline, or offline, where there is
+    /// none, [`OFFLINE_TIMEOUT`] after it went out.
+    fn limit(&self) -> Option<Instant> {
+        self.deadline.or_else(|| self.sent_at.and_then(|at| at.checked_add(OFFLINE_TIMEOUT)))
+    }
+
+    /// Waits for the block [`Chain::advance`] handed over, if one is out, and takes its result
+    /// (a miss when it is not answered in its time, [`Chain::answered`]).
     pub(crate) fn collect(&mut self, frames: usize) {
         let Some(index) = self.waiting.take() else { return };
+        let limit = self.limit();
+        self.sent_at = None;
         let to = frames.min(MAX_BLOCK);
         let from = self.done.min(to);
-        let Self { slots, buffer, span_events, deadline, joined, stage, .. } = self;
+        let Self { slots, buffer, span_events, joined, stage, .. } = self;
         *stage = match buffer.get_mut(from * 2..to * 2) {
-            Some(span) => collect_plugins(slots, index, span, span_events, *deadline, joined),
+            Some(span) => collect_plugins(slots, index, span, span_events, limit, joined),
             None => index + 1,
         };
     }
@@ -835,6 +876,40 @@ impl Chain {
     #[cfg(test)]
     pub(crate) fn missed(&mut self) -> u64 {
         self.plugin_slots().map(|slot| slot.missed).sum()
+    }
+}
+
+/// How long the engine sleeps on one chain's plug-in when none of the blocks out has been
+/// answered, before it looks at all of them again (see [`run_as_answered`]): an answer from
+/// that plug-in wakes it at once, one from another is seen at most this late.
+pub(crate) const ANSWER_SLICE: Duration = Duration::from_micros(50);
+
+/// Takes each chain's block as soon as its plug-in answers and runs that chain on to its next
+/// plug-in, until no chain has a block out (#151): a chain does not wait for the plug-ins of the
+/// other chains, only for its own, and only until the block's deadline. The chains were started
+/// with [`Chain::advance`]. While nothing has answered, it waits for the first chain still out,
+/// for at most [`ANSWER_SLICE`] at a time. Never allocates; returns by the deadline in real time
+/// (a plug-in still out then is a miss), and offline once every plug-in has answered or used up
+/// [`OFFLINE_TIMEOUT`].
+pub(crate) fn run_as_answered(chains: &mut [Chain], frames: usize, context: &ProcessContext) {
+    loop {
+        let now = Instant::now();
+        let mut out = false;
+        let mut moved = false;
+        for chain in chains.iter_mut().filter(|chain| chain.is_waiting()) {
+            if chain.answered(now) {
+                chain.collect(frames);
+                chain.advance(frames, context);
+                moved = true;
+            }
+            out |= chain.is_waiting();
+        }
+        if !out {
+            return;
+        }
+        if !moved && let Some(chain) = chains.iter_mut().find(|chain| chain.is_waiting()) {
+            chain.answered(now + ANSWER_SLICE);
+        }
     }
 }
 

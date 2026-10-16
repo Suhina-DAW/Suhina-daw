@@ -16,6 +16,8 @@ mod buses_tests;
 mod chain;
 #[cfg(test)]
 mod chain_tests;
+#[cfg(test)]
+mod chain_wait_tests;
 mod cpu;
 mod cue;
 #[cfg(test)]
@@ -68,7 +70,7 @@ use ahead::AheadReader;
 pub use ahead::StretchWorker;
 pub use audio::{AudioData, AudioPool};
 use audio::{AudioEvent, Fades};
-use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK};
+use chain::{CHAIN_INPUT_GAIN, Chain, MAX_BLOCK, run_as_answered};
 pub use cpu::CpuMonitor;
 pub use cue::MAX_CUE_GAIN;
 pub use input::MAX_INPUT_CHANNELS;
@@ -678,23 +680,16 @@ impl Renderer {
         }
         // What went straight to the output waits for the slowest chain (latency compensation).
         self.graph.direct_delay.run(out);
-        // The chains no chain plays into run their plug-ins at the same time, a stage at a
-        // time (every chain hands its block over, then every chain waits), so the block's
-        // deadline is shared by the slowest plug-in rather than by all of them in turn. A bus
-        // runs after the chains that play into it, in order below.
+        // The chains no chain plays into run their plug-ins at the same time, so the block's
+        // deadline is shared by the slowest chain rather than by all of them in turn: each
+        // chain runs until it hands a block to a plug-in, and goes on as soon as that plug-in
+        // answers, while the others are still out (#151). A bus runs after the chains that play
+        // into it, in order below.
         let chains = &mut self.graph.chains;
-        loop {
-            let mut out_for_an_answer = false;
-            for chain in chains.iter_mut().filter(|c| !c.is_bus) {
-                out_for_an_answer |= chain.advance(frames, &context);
-            }
-            if !out_for_an_answer {
-                break;
-            }
-            for chain in chains.iter_mut() {
-                chain.collect(frames);
-            }
+        for chain in chains.iter_mut().filter(|c| !c.is_bus) {
+            chain.advance(frames, &context);
         }
+        run_as_answered(chains, frames, &context);
         // In order, so a bus or a return has every chain that plays into it before it runs.
         sends::finish(&mut self.graph.chains, out, &mut self.cue.bus, frames, &context);
         self.graph.levels.finish(&self.graph.chains, frames, &mut self.meters);
