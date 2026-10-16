@@ -174,27 +174,14 @@ pub fn overlay(painter: &Painter, rect: Rect, label: Option<&str>, picked: bool,
 mod tests {
     use super::*;
     use suhina_engine::model::{
-        Clip, ContentId, Extensions, LaunchMapping, LaunchMode, LaunchSettings, LauncherColumn, Scene, Slot, TrackId,
+        Clip, ContentId, LaunchMapping, LaunchMode, LaunchSettings, LauncherColumn, Scene, Slot, TrackId,
     };
 
     /// One column of one slot, its clip in `mode`, and Q mapped to it.
     fn project(mode: LaunchMode) -> Project {
         let mut project = Project::default();
-        let clip = Clip {
-            content: ContentId(1),
-            start: 0.0,
-            length: 1.0,
-            offset: 0.0,
-            loop_range: None,
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
-            launch: LaunchSettings { mode, ..LaunchSettings::default() },
-            extensions: Extensions::default(),
-            follow_action: Default::default(),
-        };
+        let clip =
+            Clip { launch: LaunchSettings { mode, ..LaunchSettings::default() }, ..Clip::new(ContentId(1), 0.0, 1.0) };
         project.launcher.scenes.push(Scene::default());
         project
             .launcher

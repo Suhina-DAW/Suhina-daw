@@ -34,7 +34,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) | decision | current | preview, audition, preview voice, add a sample while playing, AudioPool, set_audio, clip.addFiles, preview.play, preview.noteOn, preview.noteOff, held preview note, key column, MIDI preview, browser sound | How a sample added while the project plays reaches the engine, and how the browser and the piano roll's key column preview sound through the engine without locks or allocation on the audio thread |
 | [0012: The file library: an index on disk, watched](decisions/0012-file-library.md) | decision | current | file index, library index, folder scan, watching folders, notify, inotify, polling, network drive, browser.json, library crate, search speed | How the browser's folders are indexed, kept on disk and kept up to date (start-up check, file-system watching, polling), and the limits that protect it from hostile folders |
 | [0013: The sample map: features, layout and cache](decisions/0013-sample-map-analysis.md) | decision | current | sample map, soundmap crate, audio features, MFCC, spectral centroid, band energy, onset, pitch glide, t-SNE, bhtsne, PCA, UMAP, grid layout, RasterFairy, nearest neighbours, feature cache, kinds, classifier, kind set by hand | How the sample map analyses samples (features), lays them out (PCA and t-SNE, grid assignment), finds similar ones (a linear scan), caches the results, and which crates it uses |
-| [0014: Stock presets](decisions/0014-stock-presets.md) | decision | current | preset, stock preset, factory preset, preset contribution, CC0, presets folder, preset format, preset licence, DX7 bank | Presets that ship with Suhina for its built-in effects and instruments - where they live, their licence (CC0), what a contribution needs, and the proposed file format |
+| [0014: Presets for devices](decisions/0014-stock-presets.md) | decision | current | preset, stock preset, factory preset, preset contribution, CC0, presets folder, preset format, preset licence, DX7 bank, .sd preset | Presets for built-in and SDK-authored devices - where stock presets live, their licence (CC0), contribution rules and the shared format |
 | [0015: Extensions: optional components outside the tree](decisions/0015-extensions.md) | decision | draft | extension, add-on, optional component, model weights, model licence, inference runtime, non-free, plug-in host boundary, extension manifest, third-party model, ONNX, separation | How Suhina uses optional components it does not ship — separate programs with a manifest, a licence and declared permissions, never libraries linked into the process, and never downloaded by Suhina |
 | [0016: Parity target: what Suhina compares itself to, and what it leaves out](decisions/0016-parity-target.md) | decision | draft | parity, feature comparison, how far are we from Live, scope of the project, what Suhina does not aim at, milestone for recording, automation, MIDI editing, MIDI effects, devices | What Suhina measures itself against in another DAW, what it deliberately leaves out, and how the parity measurement is kept honest and free of the manual's content |
 | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md) | decision | current | MIDI input, MIDI controller, keyboard, arm, armed track, track.setArm, midi.inputs, live notes, sustain pedal, input latency, monitoring, recording, low latency, midir | How played input reaches the engine (MIDI controllers first, audio inputs later), what arming a track is, and what a key press costs in latency today and how that is made smaller |
@@ -86,6 +86,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Window zoom](spec/window-zoom.md) | spec | current | zoom, UI zoom, window zoom, interface size, scale, Ctrl+Plus, Ctrl+Minus, Cmd+Plus, bigger text, high-DPI, zoom display | Zooming the whole window (every panel, text and control larger or smaller), its keys, limits and how it is remembered |
 | [The claim bot](claim-bot.md) | howto | current | claim, /claim, /claim @user, claim for someone else, on behalf, /unclaim, /hold, /ready, claim bot, project board, PROJECT_TOKEN, status automation, good first issue, lapsed claim, duplicate pull request, feature not agreed, project sync, board out of date, cards missing from the board, Touches, overlapping work, overlap, blocked by, blocked, dependency, Depends on, stacked pull requests, merge order | How the claim bot moves an issue's card on the project board, holds work, refuses blocked work, lists overlapping work, and how the Depends on check orders pull requests |
 | [Author a data-only SDK device](device-sdk.md) | howto | current | make an effect, MIDI effect or instrument, SDK tutorial, .sd example, node discovery | Author data-only effects, MIDI effects and instruments in Rust or with AI agents |
+| [Keyboard shortcuts](guide/keyboard-shortcuts.md) | howto | current | user guide, keyboard shortcuts, what does this key do, list of keys, every shortcut explained, keybindings, hotkeys, action ids, which action a key runs, back up keys, share keymap, keymap.json, rebind a key, keys for agents | User guide to the keyboard shortcuts, one entry per action with its default key, where it works and what it does, written for users and for agents |
 | [How to check it](how-to-check.md) | howto | current | how to check it, test steps, QA steps, how to test, pull request description, manual testing, reviewer steps, check a change | How to write a pull request's "How to check it" section, steps a newcomer can follow from the test build to check a change in what Suhina does |
 | [Releasing](releasing.md) | howto | current | release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog | How versions are numbered, how release builds, the nightly and test builds of pull requests are made, and how many pull requests are merged through the merge queue |
 | [Keyboard shortcuts](shortcuts.md) | howto | current | shortcuts, keys, keymap, keymap.json, keymap preset, Draw-first, Select-first, Mouse-first, mouse switches, right click deletes, left click draws, Alt right plays, rebind, cut copy paste, duplicate, mute clips, hotkeys, quantise, Ctrl+U, piano roll keys, tool keys, number keys choose a tool, arrow keys, select all, mute tool key | Keyboard shortcuts in the desktop app: the default keys, the keymap presets, the keymap file and how to change them |
@@ -101,8 +102,8 @@ Change this code, and check these documents.
 | Code | Documents |
 |---|---|
 | `.claude/skills/how-to-check/SKILL.md` | [How to check it](how-to-check.md) |
-| `.github/ISSUE_TEMPLATE/5-preset.yml` | [0014: Stock presets](decisions/0014-stock-presets.md) |
-| `.github/PULL_REQUEST_TEMPLATE/preset.md` | [0014: Stock presets](decisions/0014-stock-presets.md) |
+| `.github/ISSUE_TEMPLATE/5-preset.yml` | [0014: Presets for devices](decisions/0014-stock-presets.md) |
+| `.github/PULL_REQUEST_TEMPLATE/preset.md` | [0014: Presets for devices](decisions/0014-stock-presets.md) |
 | `.github/pull_request_template.md` | [How to check it](how-to-check.md) |
 | `.github/workflows/ci.yml` | [Releasing](releasing.md) |
 | `.github/workflows/claim.yml` | [The claim bot](claim-bot.md) |
@@ -133,7 +134,7 @@ Change this code, and check these documents.
 | `crates/device-api/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
 | `crates/device-api/src/lib.rs` | [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/device-registry/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |
-| `crates/device-registry/src/lib.rs` | [0014: Stock presets](decisions/0014-stock-presets.md) |
+| `crates/device-registry/src/lib.rs` | [0014: Presets for devices](decisions/0014-stock-presets.md) |
 | `crates/device-sdk/Cargo.toml` | [0021: Data-only device graphs](decisions/0021-device-graph-files.md), [Suhina device graph (`.sd`)](spec/sd-device-format.md) |
 | `crates/device-sdk/examples/auto_pan.rs` | [Author a data-only SDK device](device-sdk.md) |
 | `crates/device-sdk/examples/catalog.rs` | [Author a data-only SDK device](device-sdk.md), [SDK node reference](spec/sdk-nodes.md) |
@@ -284,7 +285,7 @@ Change this code, and check these documents.
 | `crates/ui/src/drop.rs` | [Arrangement editing](spec/arrangement-editing.md), [Browser](spec/browser.md) |
 | `crates/ui/src/follow_view.rs` | [Components](design/components.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/grid.rs` | [Design brief](design/brief.md), [UI: main window and Session view](spec/ui-session-view.md) |
-| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](shortcuts.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/keymap.rs` | [Keyboard shortcuts](guide/keyboard-shortcuts.md), [Keyboard shortcuts](shortcuts.md), [Arrangement editing](spec/arrangement-editing.md), [UI: main window and Session view](spec/ui-session-view.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/launch_keys.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/lib.rs` | [Architecture](architecture.md) |
 | `crates/ui/src/loading_dialog.rs` | [Components](design/components.md) |
@@ -302,7 +303,7 @@ Change this code, and check these documents.
 | `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/session_view.rs` | [Components](design/components.md), [Browser](spec/browser.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/settings.rs` | [Arrangement editing](spec/arrangement-editing.md), [Window zoom](spec/window-zoom.md) |
-| `crates/ui/src/settings_view.rs` | [0020: Latency: what the number is, and where it is shown](decisions/0020-latency-and-its-readout.md), [Design brief](design/brief.md), [Components](design/components.md), [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
+| `crates/ui/src/settings_view.rs` | [0020: Latency: what the number is, and where it is shown](decisions/0020-latency-and-its-readout.md), [Design brief](design/brief.md), [Components](design/components.md), [Keyboard shortcuts](guide/keyboard-shortcuts.md), [Keyboard shortcuts](shortcuts.md), [Window zoom](spec/window-zoom.md) |
 | `crates/ui/src/slot_launch.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/src/splash.rs` | [Components](design/components.md) |
 | `crates/ui/src/start_panel.rs` | [Components](design/components.md) |
@@ -323,7 +324,7 @@ Change this code, and check these documents.
 | `devices/fm-synth/src/patch.rs` | [DX7 voice data](spec/dx7-voice-format.md) |
 | `docs/decisions/0008-patch-devices.md` | [plugdata and the device SDK: scope comparison](research/parity-plugdata-device-sdk.md) |
 | `docs/spec/sdk-nodes.md` | [plugdata and the device SDK: scope comparison](research/parity-plugdata-device-sdk.md) |
-| `presets/**` | [0014: Stock presets](decisions/0014-stock-presets.md) |
+| `presets/**` | [0014: Presets for devices](decisions/0014-stock-presets.md) |
 | `scripts/branch_update.py` | [Releasing](releasing.md) |
 | `scripts/claim_bot_test.py` | [The claim bot](claim-bot.md) |
 | `scripts/depends_on_test.py` | [The claim bot](claim-bot.md) |

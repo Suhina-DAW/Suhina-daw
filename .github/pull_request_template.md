@@ -61,6 +61,6 @@
 - [ ] The documents that describe what changed are updated (`python scripts/docs.py impact`).
 - [ ] The parity measurement is current: the coverage this change moves is updated in
       `scripts/parity/score.py` (and `scripts/parity/devices.json` for a built-in effect or
-      instrument) and `python scripts/parity/update_report.py` was run, or the description says
-      `Parity: no change` and why
+      instrument), or the description says `Parity: no change` and why. The report's numbers and
+      the `last_verified` dates are written on `main` after the merge; leave them alone
       ([AGENTS.md › Before you finish a task](https://github.com/suhina-daw/suhina-daw/blob/main/AGENTS.md#4-before-you-finish-a-task)).
