@@ -3288,6 +3288,7 @@ fn move_slot(session: &mut Session, params: &Value) -> Result<Value, CommandErro
         )
     });
     let target = project.tracks.iter().find(|t| t.id == to_track).ok_or("the target track is missing")?;
+    let source_track = project.tracks.iter().find(|t| t.id == from_track).ok_or("the source track is missing")?;
     let fits = (!kinds.0 || target.content.notes) && (!kinds.1 || target.content.audio) && (kinds.0 || kinds.1);
     if !fits {
         let what = if kinds.1 { "an audio clip" } else { "a MIDI clip" };
@@ -3296,6 +3297,25 @@ fn move_slot(session: &mut Session, params: &Value) -> Result<Value, CommandErro
     let Some(to_column) = project.launcher.columns.iter().position(|c| c.track == to_track) else {
         return Err(format!("track {:?} has no clip slots", target.name).into());
     };
+    // The swap's other direction: a clip coming back to the source's slot must be one the
+    // source's track plays, checked before anything moves, so a refusal leaves both as they are.
+    let displaced =
+        project.launcher.columns.get(to_column).and_then(|c| c.slots.get(to_scene)).and_then(|s| s.clip.as_ref());
+    if let Some(displaced) = displaced {
+        let kinds = project.content(displaced.content).map_or((false, false), |c| {
+            (
+                c.lanes.iter().any(|l| matches!(l.data, LaneData::Notes(_))),
+                c.lanes.iter().any(|l| matches!(l.data, LaneData::Audio(_))),
+            )
+        });
+        let fits = (!kinds.0 || source_track.content.notes)
+            && (!kinds.1 || source_track.content.audio)
+            && (kinds.0 || kinds.1);
+        if !fits {
+            let what = if kinds.1 { "an audio clip" } else { "a MIDI clip" };
+            return Err(format!("track {:?} cannot hold {what}", source_track.name).into());
+        }
+    }
     let from_clip = project
         .launcher
         .columns
@@ -3317,7 +3337,13 @@ fn move_slot(session: &mut Session, params: &Value) -> Result<Value, CommandErro
         .clip
         .replace(from_clip);
     let swapped = back.is_some();
-    project.launcher.columns.get_mut(from_column).ok_or("the slot is missing")?.slots[from_scene].clip = back;
+    project
+        .launcher
+        .columns
+        .get_mut(from_column)
+        .and_then(|c| c.slots.get_mut(from_scene))
+        .ok_or("the slot is missing")?
+        .clip = back;
     Ok(json!({
         "moved": true,
         "track": to_track.0,
