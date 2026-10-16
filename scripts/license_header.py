@@ -107,7 +107,7 @@ def apply(path: str, text: str) -> tuple[str, str]:
     header = wanted(path)
     if header is None:
         return text, "ok"
-    bom = "﻿" if text.startswith("﻿") else ""
+    bom = "\ufeff" if text.startswith("\ufeff") else ""
     body = text[len(bom) :]
     newline = "\r\n" if "\r\n" in body else "\n"
     lines = body.split(newline)
