@@ -125,7 +125,8 @@ pub fn layout(rect: Rect, has_sends: bool) -> Layout {
     let column = |top: f32, height: f32| {
         Rect::from_min_size(Pos2::new(inner.left(), top), Vec2::new(FADER_COLUMN.min(inner.width()), height))
     };
-    parts.readout = Some(column(top, READOUT));
+    // The readout spans the strip, so "-12.0" is never cut; it starts over the fader.
+    parts.readout = Some(row(top, READOUT));
     top += READOUT + UNDER_READOUT;
     let fader = column(top, fader.min(bottom - top).max(0.0));
     parts.meter =
@@ -325,7 +326,8 @@ fn fader_column(
     id: Id,
     actions: &mut Vec<Action>,
 ) {
-    let area = readout.union(fader);
+    // The fader column takes the pointer, up to the readout's top; the meter beside it stays its own.
+    let area = Rect::from_min_max(Pos2::new(fader.left(), readout.top()), fader.max);
     state.value_areas.push(area);
     let label = widgets::format_db(shown(state, column, Control::Volume, column.volume_db));
     let response = widgets::value_area(
@@ -341,7 +343,7 @@ fn fader_column(
     widgets::text_in(
         painter,
         readout,
-        Align2::CENTER_CENTER,
+        Align2::LEFT_CENTER,
         &widgets::format_db(db),
         theme::mono_font(theme::TEXT_SMALL),
         value_color,
