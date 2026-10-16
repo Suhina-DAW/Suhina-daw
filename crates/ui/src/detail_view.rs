@@ -1407,6 +1407,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs a GPU adapter; run with --ignored"]
     fn render_the_authored_control_gallery() {
         let graph = styled_gallery::build().unwrap();
         for parameter in &graph.parameters {
@@ -1439,6 +1440,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs a GPU adapter; run with --ignored"]
     fn render_sdk_example_with_stock_controls() {
         let graph = custom_panel::build().unwrap();
         let mut project = demo_project();
@@ -1467,6 +1469,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs a GPU adapter; run with --ignored"]
     fn render_sdk_example_in_a_narrow_panel() {
         let graph = custom_panel::build().unwrap();
         let mut project = demo_project();

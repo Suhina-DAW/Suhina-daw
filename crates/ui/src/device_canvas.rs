@@ -583,11 +583,11 @@ mod tests {
                 }
             }
         }
-        harness.render().unwrap().save("../../target/delay-panel.png").unwrap();
+        snapshot(&mut harness, "delay-panel.png");
         let nord = crate::theme::Theme::from_json(include_str!("../themes/nord.json")).0;
         crate::theme::set_palette(&harness.ctx, nord.colors);
         harness.run();
-        harness.render().unwrap().save("../../target/delay-panel-nord.png").unwrap();
+        snapshot(&mut harness, "delay-panel-nord.png");
         crate::theme::set_palette(&harness.ctx, crate::theme::Palette::DARK);
         use egui_kittest::kittest::Queryable;
         let mut narrow_parameters = parameters.clone();
@@ -616,7 +616,7 @@ mod tests {
         narrow.run();
         narrow.get_by_label("Feedback").click();
         narrow.run();
-        narrow.render().unwrap().save("../../target/delay-focus.png").unwrap();
+        snapshot(&mut narrow, "delay-focus.png");
         let mut time_parameters = parameters.clone();
         for p in &mut time_parameters {
             if p.id.starts_with("sync_") {
@@ -640,7 +640,7 @@ mod tests {
             );
         });
         time_harness.run();
-        time_harness.render().unwrap().save("../../target/delay-time-panel.png").unwrap();
+        snapshot(&mut time_harness, "delay-time-panel.png");
         let start = Pos2::new(64., 110.);
         let clicked = click(&canvas, &parameters, start);
         assert!(
@@ -717,7 +717,7 @@ mod tests {
         harness.get_by_label("Motion waveform").click();
         harness.run();
         assert!(harness.state().1.is_empty(), "opening Wave must not edit the parameter");
-        harness.render().unwrap().save("../../target/delay-wave-menu.png").unwrap();
+        snapshot(&mut harness, "delay-wave-menu.png");
         harness.get_by_label("Wander").click();
         harness.run();
         assert_eq!(harness.state().1.len(), 1);
@@ -727,7 +727,7 @@ mod tests {
         harness.get_by_label("Motion rate mode").click();
         harness.run();
         assert_eq!(harness.state().1.len(), 1);
-        harness.render().unwrap().save("../../target/delay-rate-menu.png").unwrap();
+        snapshot(&mut harness, "delay-rate-menu.png");
         harness.get_by_label("Triplet").click();
         harness.run();
         assert_eq!(harness.state().1.len(), 2);
@@ -746,7 +746,7 @@ mod tests {
         harness.get_by_label("Motion rhythm").click();
         harness.run();
         assert_eq!(harness.state().1.len(), 2);
-        harness.render().unwrap().save("../../target/delay-rhythm-menu.png").unwrap();
+        snapshot(&mut harness, "delay-rhythm-menu.png");
         let before = harness.get_by_label("1/8 T").rect();
         harness.hover_at(egui::pos2(before.right() + 8., before.center().y));
         harness.run();
@@ -755,7 +755,7 @@ mod tests {
             harness.get_by_label("1/8 T").rect(),
             "hovering the scroll bar must not resize menu content"
         );
-        harness.render().unwrap().save("../../target/delay-rhythm-hover.png").unwrap();
+        snapshot(&mut harness, "delay-rhythm-hover.png");
         harness.get_by_label("1/8 T").click();
         harness.run();
         assert_eq!(harness.state().1.last().unwrap().params["param"], "mod_division");
@@ -786,7 +786,14 @@ mod tests {
         harness.run();
         assert!(harness.query_by_label("Left delay").is_none());
         assert!(harness.query_by_label("time left").is_some());
-        harness.render().unwrap().save("../../target/delay-motion.png").unwrap();
+        snapshot(&mut harness, "delay-motion.png");
+    }
+    /// Saves a picture of `harness` to `target/` for the design review when
+    /// `SUHINA_UI_SNAPSHOTS` is set; drawing it needs a GPU adapter, which test machines may lack.
+    fn snapshot<State>(harness: &mut egui_kittest::Harness<'_, State>, name: &str) {
+        if std::env::var_os("SUHINA_UI_SNAPSHOTS").is_some() {
+            harness.render().unwrap().save(format!("../../target/{name}")).unwrap();
+        }
     }
     fn click(canvas: &Arc<DeviceUi>, parameters: &[GraphParameter], position: Pos2) -> Vec<Action> {
         pointer_gesture(canvas, parameters, position, None)
