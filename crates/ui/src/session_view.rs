@@ -11,6 +11,7 @@ use egui::{Align2, Color32, Id, Pos2, Rect, Response, Sense, StrokeKind, Ui, Vec
 use serde_json::json;
 use suhina_engine::model::{MappingTarget, TrackId};
 
+use crate::colour_picker;
 use crate::drop::{DropProbe, DropTarget};
 use crate::grid::{Column, ColumnKind, Grid, SlotState};
 use crate::menus::{self, TrackMenu};
@@ -509,6 +510,7 @@ fn column_header(
         let menu = TrackMenu {
             track: column.track,
             name: &column.name,
+            colour: column.color,
             is_group: column.kind == ColumnKind::Group,
             selection: &[],
             into: &into,
@@ -525,11 +527,14 @@ fn column_header(
     if response.double_clicked() {
         state.open_devices = Some(column.track);
     }
-    let fill = if state.selected == Some(column.track) { theme::control_active() } else { theme::control_background() };
+    // The header is the track's colour, its name in the text colour that reads on it; a selected
+    // track's header has an outline in that colour.
+    let fill = colour_picker::fill(column.color, column.mute);
     painter.rect_filled(rect, 0.0, fill);
-    let strip = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 2.0), rect.max);
-    painter.rect_filled(strip, 0.0, lane(rgb(column.color), column.mute));
-    let color = if column.mute { theme::text_hint() } else { theme::text_primary() };
+    let color = theme::text_on(fill);
+    if state.selected == Some(column.track) {
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.5, color), StrokeKind::Inside);
+    }
     // Nested tracks step in a little; a group's name follows its fold arrow.
     let mut text = rect.shrink2(Vec2::new(PAD, 0.0));
     text.min.x += (column.depth as f32 * 4.0).min(text.width() / 2.0);

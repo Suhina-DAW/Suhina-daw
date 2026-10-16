@@ -9,6 +9,8 @@ covers:
   - crates/ui/src/mixer_strip.rs
   - crates/ui/src/view_settings.rs
   - crates/ui/tests/mixer_strip.rs
+  - crates/ui/src/colour_picker.rs
+  - crates/ui/tests/track_colour.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/slot_launch.rs
   - crates/ui/src/launch_keys.rs
@@ -86,7 +88,10 @@ create a new scene or track.
 
 ### Track header
 
-Track name over a strip in the track colour (Live colours the name itself). Clicking selects the
+**Suhina:** the whole header is the track colour, with the name in a text colour that reads on
+it, so tracks are told apart at a glance; the channel strip under the column carries the same
+colour (Mixer › the channel strip), and the Arrangement headers have it as a band down their edge
+(Track colour below). Clicking selects the
 track; dragging moves it (after the header of an open group is into that group, and over another
 group's column it joins that group, [arrangement editing](arrangement-editing.md) › Groups inside
 groups); right-clicking opens its menu (rename, colour, group, ungroup, move into group, move out
@@ -294,6 +299,25 @@ vertical channel strip under its slots, and the strip shows more the taller the 
   devices in the detail area, opening the detail area if it was hidden. A single click there does
   nothing, as before.
 - The main column shows the main output's meter where a track's meter stands.
+- **The colour band** down the strip's left edge, at every mixer height, is the track colour;
+  its name row is filled with it too. A click on the band opens the colour palette (Track
+  colour).
+
+### Track colour
+
+**Suhina:** a track's colour shows over an area large enough to tell tracks apart: the Session
+column's header and the strip's name row are filled with it, the strip has a band down its left edge,
+and an Arrangement header a band down its left edge, the header's full height. A muted track's
+colour is dimmed. Text drawn on the colour is the light or the dark text colour of the theme,
+whichever stands out more from it.
+
+The colour is picked from one palette, the theme's eight track colours, wherever a colour is
+offered: a click on a track's colour band (the strip's in the Session view, the header's in the
+Arrangement) opens it as a popup, the track's right-click menu has it as before, and a colour
+tag's right-click menu in the browser has it before the free colour choice. Picking a swatch runs
+`track.setColor` with that colour, one undo step, and closes the popup; picking the colour the
+track already has runs nothing. A colour of any value (from an imported project, or set with
+`track.setColor` from the CLI or MCP) shows as it is; the palette marks none of its swatches then.
 
 ## Detail area: a selected clip
 

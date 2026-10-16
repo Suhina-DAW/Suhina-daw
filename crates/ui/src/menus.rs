@@ -3,34 +3,20 @@
 
 //! Context menus the views share. Every entry is a command, the same the CLI and MCP run.
 
-use egui::{Id, Key, Sense, Ui, Vec2};
+use egui::{Id, Key, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::{AudioInput, InputChannels, MidiInput, MidiPort, Monitor, Rgb, TimeSignature, TrackId};
 
-use crate::grid::to_rgb;
+use crate::colour_picker;
 use crate::theme;
 use crate::widgets::Action;
-
-/// Colours a track can be given from its menu: the theme's eight track colours
-/// (`track.1` to `track.8`; the first four are the default track colours).
-pub fn track_swatches() -> [Rgb; 8] {
-    [
-        theme::track_color_1(),
-        theme::track_color_2(),
-        theme::track_color_3(),
-        theme::track_color_4(),
-        theme::track_color_5(),
-        theme::track_color_6(),
-        theme::track_color_7(),
-        theme::track_color_8(),
-    ]
-    .map(to_rgb)
-}
 
 /// What a track's menu needs to know.
 pub struct TrackMenu<'a> {
     pub track: TrackId,
     pub name: &'a str,
+    /// The colour the track shows, outlined among the swatches.
+    pub colour: Rgb,
     pub is_group: bool,
     /// The tracks selected in the view; grouping takes them when this track is one of them.
     pub selection: &'a [TrackId],
@@ -181,23 +167,13 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
     }
     ui.data_mut(|d| d.insert_temp(id, text));
 
-    // Colour.
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::splat(3.0);
-        for color in track_swatches() {
-            let (rect, response) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::click());
-            let hex = format!("#{:02x}{:02x}{:02x}", color.0, color.1, color.2);
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Colour {hex}")));
-            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(color.0, color.1, color.2));
-            if response.hovered() {
-                ui.painter().rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), egui::StrokeKind::Inside);
-            }
-            if response.clicked() {
-                actions.push(Action::new("track.setColor", json!({ "track": track, "color": hex })));
-                ui.close();
-            }
+    // Colour: the palette every colour choice offers.
+    if let Some(colour) = colour_picker::swatch_row(ui, Some(menu.colour)) {
+        if colour != menu.colour {
+            actions.push(colour_picker::set_colour(menu.track, colour));
         }
-    });
+        ui.close();
+    }
     if let Some((input, channels)) = menu.audio {
         ui.menu_button(format!("Audio input: {}", audio_input_text(input)), |ui| {
             audio_input_choices(ui, menu.track, input, channels, actions);

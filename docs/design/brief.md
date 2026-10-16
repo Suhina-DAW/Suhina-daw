@@ -3,7 +3,7 @@ description: Suhina's visual language: principles, what stays familiar and what 
 read_when: UI design, colours, tokens, typography, theme, accent, track colours, browser design, squint test, reference mockups
 type: spec
 status: draft
-last_verified: 2026-10-13
+last_verified: 2026-10-16
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/themes.rs
@@ -78,6 +78,7 @@ From [research](#sources) and the first design rounds:
 | Knobs | Small circle with a pointer line, value below | Live's open arc knobs |
 | Value fields | Neutral grey fill; volume fills full height with a level tick at the edges only; pan is a thin bottom bar growing from a centre tick | Live's cyan-filled boxes |
 | Toggles | Track on = light grey number button; solo = accent; arm = red ring, filled when armed | The orange numbered track button |
+| Track headers | A band of the track colour down the Arrangement header's edge; the Session header filled with it, its name in the theme's light or dark text, whichever reads | A dot of colour too small to tell tracks apart |
 | Clip slots | Flat cells, a small square in the track colour; playing = brighter cell with an accent progress line; queued = accent outline; recording = red dot and line | Fully coloured slots with triangle and square glyphs |
 | Arrangement clips | Neutral body, 2 px top strip and note or wave marks in the track colour | Colour-filled clip bodies |
 | MIDI notes | Track colour, velocity as brightness, selected note with a light outline | Velocity as saturation; blue selected notes |
@@ -134,7 +135,7 @@ a theme file can change any of them (see Themes). Current values:
 | `pan.background` | `#232220` | Behind a track header's pan field |
 | `pan.centre` | `#55524C` | The centre mark of a pan field |
 | `track.1`–`track.4` | `#D08F6E` `#C6AC5E` `#73AAC0` `#A497CC` | The colours tracks without one of their own take in turn; also the browser's icons (effects, MIDI files, samples, instruments and presets) |
-| `track.5`–`track.8` | `#8FA87A` `#C27C8E` `#7F8FB0` `#B9B2A6` | The other colours a track's menu offers |
+| `track.5`–`track.8` | `#8FA87A` `#C27C8E` `#7F8FB0` `#B9B2A6` | The other colours of the track colour palette (track menu, colour areas, colour tags' menu) |
 | `kind.kick`, `kind.snare`, `kind.clap`, `kind.closedHat`, `kind.openHat`, `kind.hat`, `kind.rim`, `kind.tom`, `kind.crash`, `kind.ride`, `kind.cymbal`, `kind.percussion`, `kind.bass`, `kind.tonal`, `kind.vocal`, `kind.effect`, `kind.other` | `#D06E5E` `#73AAC0` `#5EC0B0` `#C6AC5E` `#D08F6E` `#D8C47A` `#8CA8E0` `#B074A4` `#E0A0C8` `#C8B8E8` `#A497CC` `#8FC06E` `#A84F4F` `#6EB0D0` `#E8D0A0` `#9CC49C` `#8A8680` | Sample-map points of each kind ([spec](../spec/sample-map.md)) |
 | type | 11 px UI, 10 px values, 9 px rulers | |
 | row height | 20 px grid rows and fields, 15–16 px inline fields, 17 px browser rows (`theme::BROWSER_ROW`) | |

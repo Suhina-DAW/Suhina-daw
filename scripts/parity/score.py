@@ -62,8 +62,8 @@ CHAPTERS = [
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
-    (6, "Arrangement View", 22, 0.59, "partial",
-     "Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, "
+    (6, "Arrangement View", 22, 0.60, "partial",
+     "Layout, zoom, transport, track headers with a band of the track colour that opens the colour palette, ruler/play start, play from the selected clip, clip drag+move, "
      "overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to "
      "triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades "
      "and ruler clicks (Alt for off the grid), nested groups folded and unfolded, "
@@ -74,8 +74,10 @@ CHAPTERS = [
      "through them and marks them). A clip's loop range is read and drawn but no "
      "command sets it. Missing previous/next marker, punch in/out, editing signature changes on the ruler, "
      "time selections, crop, crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.66, "partial",
-     "Slots, scenes, scene launch, stop buttons, track status, quantised launching, a mixer resized "
+    (7, "Session View", 13, 0.67, "partial",
+     "Slots, scenes, scene launch, stop buttons, track status, column headers filled with the track "
+     "colour and a colour palette opened from the channel strip (one palette shared with the "
+     "track menu and colour tags), quantised launching, a mixer resized "
      "from its top edge with a channel strip per track that shows more as it grows (volume fader "
      "with meter and dB, pan, sends, name, device list), a double-click that makes a clip (a "
      "setting), "

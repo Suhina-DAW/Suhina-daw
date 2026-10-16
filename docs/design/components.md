@@ -8,6 +8,8 @@ covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
   - crates/ui/src/mixer_strip.rs
+  - crates/ui/src/colour_picker.rs
+  - crates/ui/tests/track_colour.rs
   - crates/ui/src/view_settings.rs
   - crates/ui/tests/open_recent.rs
   - crates/ui/src/widgets.rs
@@ -117,7 +119,7 @@ from top to bottom:
 | Sidebar | 104 px, a 1 px `border` on its right; section titles (Pinned, Recent, Folders) 10 px `text.hint` with 8 px top padding; items 17 px, 10 px `text.secondary` (`text.primary` when selected); selected item `control.activeBackground`, hover `panel.hoverBackground`; a folder's state at its right in 9 px mono `text.hint` ("…" scanning, "poll", "gone"); "+ Add folder" in `text.hint` opens a path field in its place |
 | Tree row | 17 px; indent 12 px per level; 10 px lead (a chevron in `text.hint` for what opens, a play triangle for a selected or hovered sample or MIDI file), 12 px type icon, 5 px, name 10 px `text.value` (`text.primary` selected), tag dots, meta right in 9 px mono `text.hint` (length, "plug-in", the folder a search found it in); selected row `control.activeBackground`, hover `panel.hoverBackground`; a 2 px `border.strong` bar at the right edge shows the scroll position |
 | Type icons | Our own strokes, 1.1 px, 12 px: folder and heading `text.secondary`; MIDI note `track.2` (ochre); audio wave `track.3` (steel blue); instrument and preset `track.4`; effect `track.1`; project page `text.secondary` |
-| Colour tag | 6 px dot after the name, 2 px apart, in the tag's colour |
+| Colour tag | 6 px dot after the name, 2 px apart, in the tag's colour; a tag's right-click menu in the footer offers the colour palette (Session view › Colour palette), then any colour |
 | Preview strip | 54 px, `window.background`, a 1 px `border` on top: 22 px play button (`control.background`, its glyph `accent` while playing), file name 10 px, length, BPM ("~" when detected) and key right in 9 px mono `text.secondary`; under them the waveform ([waveforms](../spec/waveforms.md); a MIDI file: 2 px note bars), played part `text.secondary`, rest `text.hint`, playhead 1 px `accent` |
 | List and Map | 22 px row above the results: two buttons like the category filters, List and Map; Map shows the [sample map](../spec/sample-map.md) in the results area |
 | Sample map | A 24 px top bar (Cloud and Grid, the status in 10 px `text.secondary`, then +, −, Fit, Large and Window at the right; in its own window Dock instead of Large and Window, the window `window.background` all over), the map on `window.background`, a 20 px legend under it (a 7 px dot and "Kick 150" in 10 px, per kind, in the kind's colour; dimmed kinds at 30 %). Points: 2–6 px dots by zoom (a 1.2 px ring for a preset), or square cells 1 px apart in the grid; a guessed kind at 70 % and dimmed points at 18 %; rings: in use 1.5 px in the kind's colour, selected 1 px `text.primary`, previewed or under the pointer 1.5 px `accent`, similar 1 px `accent`. Kind names 17.6 px in the kind's colour with a 1 px `window.background` shadow, fading out from 4× to 6× zoom. Show similar adds a 180 px `panel.background` list at the right. Kind colours are our own muted hues, the theme's `kind.*` tokens (kick `#D06E5E`, snare `#73AAC0`, clap `#5EC0B0`, closed hat `#C6AC5E`, open hat `#D08F6E`, …; [brief](brief.md) › Tokens) |
@@ -137,13 +139,33 @@ space, the mixer at the bottom.
 | Track column | 116 px; return column 84 px; scene ("Main") column 96 px |
 | Column separator | 1 px `border.strong` through header, grid and mixer |
 | Row separator | 1 px `border` between scene rows, continued through returns and scenes |
-| Track header | 20 px, `control.background` (`control.activeBackground` when selected), 2 px bottom strip in the track colour; name 11 px `text.primary` (`text.hint` when off). A click selects the track, a drag moves it, a right-click opens its menu |
+| Track header | 20 px, filled with the track colour (55 % of it over `control.background` when off); name 11 px in the text colour that reads on it (Colour palette); a selected track's header has a 1.5 px inset outline in that same colour. A click selects the track, a drag moves it, a right-click opens its menu; the strip's colour band opens the palette |
 | Main header | 20 px, `control.background`, "Main" in `text.primary`, no colour strip |
 | Scene button | 20 px, `control.background` (hover `#34332F`), a 4.5 px play glyph in `text.secondary` (`text.primary` hovered) 6 px from its left, name after it in 11 px, number right in 10 px mono `text.hint`; a playing scene `control.playingBackground`, its glyph the stop square, its click `scene.stop` |
 | Stop row | 20 px under the last scene, `panel.background`: per track a 7 × 7 square outline in `text.secondary` (`accent` while the stop is queued), centred; in the scene column the square and "Stop all" |
 | Empty space | Right of the last track: "+ MIDI track" and "+ Audio track" buttons (20 px, `control.background`, 10 px `text.secondary`, 2 px apart, 6 px from its top left) and, below them, "Drop files or devices to add a track" in 10 px `text.hint`. Drops from the browser there make new tracks; the Arrangement has the same under its last lane |
 
 Track colours: the track's own colour if it has one, else `track.1`–`track.4` in track order.
+
+### Colour palette
+
+One palette for every colour choice: the theme's eight track colours `track.1`–`track.8`, as
+14 px swatches 3 px apart, the track's current colour with a 1.5 px `text.primary` inset outline,
+a hovered one with 1 px. It is offered in the track's right-click menu (both views), in a popup
+under a track's colour area, and in a colour tag's right-click menu (before the free colour
+button there). A swatch is a button named "Colour #rrggbb"; picking one runs `track.setColor`
+(one undo step; the colour the track already has runs nothing) and closes the menu or popup.
+
+The colour areas, each a button named "<track> colour" that opens the popup on a click:
+
+| Where | Area |
+|---|---|
+| Arrangement track header, return row | A 6 px band down the header's left edge, the header's full height |
+| Session channel strip | A 5 px band down the strip's left edge, in its padding, the strip's full height at every mixer height |
+
+Text on a track colour (the Session header, the strip's name row) is `text.primary` or
+`window.background`, whichever has the higher contrast ratio with the fill; on the default
+colours it is `window.background`.
 
 ### Clip slot
 
@@ -193,7 +215,8 @@ volume readout, fader with the meter, toggles.
 | Meter | Two 4 px bars, as below, standing 6 px right of the fader column, from the top of the fader to its bottom; at the least height, where there is no fader, it is not drawn |
 | Pan row | The pan knob (22 px) at the left, its value right of it, 6 px apart, 10 px mono `text.secondary` ("C", "15L"). While a send is dragged, its letter and level stand there instead ("A -12.0") |
 | Sends row | One send knob per return, 4 px apart from the left, as many as fit (four in a track column) |
-| Name | 16 px: the track's name in 11 px `text.primary` (`text.hint` while the track is off), at the left, cut off at the strip's edge |
+| Colour band | 5 px down the left edge, in the strip's padding, the strip's full height, the track colour (dimmed as the header while the track is off); a click opens the palette (Colour palette) |
+| Name | 16 px, filled with the track colour as the column's header: the track's name in 11 px in the text colour that reads on it, 4 px in, cut off at the strip's edge |
 | Device list | 16 px rows, one per device in chain order: its name in 10 px `text.secondary` 4 px in (`text.hint` while the device is off), "plug-in" right in 9 px `text.hint` for a plug-in; `control.hoverBackground` hovered, `control.activeBackground` for the row clicked last. The wheel scrolls it. "No devices" in 10 px `text.hint` when the chain is empty. A click selects the track and opens the detail area on its devices |
 | Send knob | A knob with the return's letter in its centre (8 px mono `text.hint`), pointer `text.value` (`text.primary` hovered); −70 dB … +6 dB over the travel. A 1.5 px `text.value` dot under it when the send is before the fader |
 | Knob | 22 px; circle r 9, `control.background` fill, 1 px `text.hint` stroke; pointer 1.5 px from centre to r 8; travel −135° … +135°; pan pointer `text.primary`, sends `#C9C4BB` |
@@ -228,10 +251,10 @@ track along the bottom edge.
 | Fade handles | 7 × 7 px squares at the clip's top corners, inside the clip, shown while it is hovered or selected (and while dragged) on clips at least 21 × 14 px; with a fade, at the fade's end along the top edge. `text.secondary`, `text.primary` hovered, 1 px `window.background` outline; an 11 × 11 px area takes the pointer, drawn and hit above the gain field. A horizontal drag sets the fade (`clip.setFades`): the fade's end snaps to the grid, Alt for free; double-click removes it; right-click opens a menu of the shapes with the current one checked |
 | Fade curve handle | A 7 px circle on the fade's line half-way through the fade, on fades at least 21 px wide, drawn and hit (11 × 11 px) like the fade handles. A vertical drag moves it with the pointer and bends the curve so the line passes through it (`clip.setFades` `inCurve`/`outCurve`): up towards +1, down towards −1, stopping at either; double-click sets it to 0. The line is drawn with at most 256 points |
 | Playhead | 1 px `accent` through the ruler and all lanes while playing; while stopped, at the play start marker once it is past beat 0 |
-| Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `panel.background` (`control.background` when selected), 5 px top/bottom and 6 px side padding (8 px more per group level), 6 px between groups. A click selects the track (Ctrl adds), a drag moves it, a right-click opens its menu (name field, colour swatches, group, ungroup, delete) |
+| Header column | 232 px by default, dragged wider or narrower by its inner edge (160–520 px); on the right of the timeline, or the left (Settings, or right-click above the headers); `panel.background` (`control.background` when selected), the 6 px colour band down its left edge (Colour palette), 5 px top/bottom and 6 px side padding after the band (8 px more per group level), 6 px between groups. A click selects the track (Ctrl adds), a drag moves it, a right-click opens its menu (name field, colour swatches, group, ungroup, delete) |
 | Group fold triangle | 12 px at the start of a group's first row, before the track number, on a group that holds tracks: a 7 × 4 px triangle, `text.hint` (`text.primary` under the pointer), pointing right while the group is folded and down while it is open. A click folds the group's tracks away or opens it ([spec](../spec/arrangement-editing.md) › Folded groups); a folded group's row then draws the clips of the track it stands in for |
 | Automation lanes | Under a track while its envelope button (an 18 × 15 px button at the end of the header's first row: `control.background`, `control.activeBackground` while lanes are shown, a small envelope line in `text.secondary`, `text.primary` when shown) has them open: 40 px each, a 1 px `border` under each. The envelope is a 1.5 px line in the track colour (`text.hint` while a manual change has it off), 4 px from the lane's top and bottom; points are 3.5 px circles (4.5 px hovered) in the same colour, `text.primary` when selected, with a 1 px `window.background` outline; an 11 × 11 px area takes the pointer. A selection box is `accent` at 15 % with a 1 px `accent` line. The lane's header (`panel.background`, 5 px top and 6 px side padding): a dropdown of the parameter, the 30 × 15 px On/Off toggle (as the track-on toggle; off has a 1 px `accent` inset), 16 × 15 px **+** and **×** buttons (`control.background`, 11 px `text.secondary`), and under them a 10 px line: the number of points in `text.hint`, "Off: set by hand" in `text.secondary`, or "Click the lane to add a point". Gestures: [automation spec](../spec/automation.md#in-the-arrangement-view) |
-| Return and main rows | 20 px each along the bottom, `panel.background` headers: the name in 11 px and the volume as a plain 10 px mono value on the right (dragged up or down; the main track's is shown only); between them the meter lying down, 48 px long, 6 px left of the volume, its clip light at the right end |
+| Return and main rows | 20 px each along the bottom, `panel.background` headers: a return's colour band as a track's (the main row has none, its name lined up with the others), the name in 11 px and the volume as a plain 10 px mono value on the right (dragged up or down; the main track's is shown only); between them the meter lying down, 48 px long, 6 px left of the volume, its clip light at the right end |
 | Header meter | The track's meter (Session view › Meter) standing at the header's right edge, 6 px in, its rows 6 px clear of it; from the top of row 1 to the bottom of row 2 once row 2 shows, row 1's height before |
 
 ### Track header levels
@@ -241,7 +264,7 @@ a lane between 20 and 26 px shows the first row clipped.
 
 | Track height | Shows |
 |---|---|
-| ≥ 26 px | Row 1, 15 px: track on (30 px, the track number in 10 px mono), solo (18 px, "S"), cue (18 px, "C"), arm (18 px, on a track that plays notes or audio), 2 px apart, a 6 px colour square (on a group, a fold arrow in the track colour, 7 px, pointing down open and right folded), the name in 11 px. The row steps in 8 px per group the track is inside |
+| ≥ 26 px | Row 1, 15 px: track on (30 px, the track number in 10 px mono), solo (18 px, "S"), cue (18 px, "C"), arm (18 px, on a track that plays notes or audio), 2 px apart, the name in 11 px 6 px after them (on a group, a fold arrow first, 7 px, pointing down open and right folded); the colour is the band down the header's edge. The row steps in 8 px per group the track is inside |
 | ≥ 48 px | Row 2, 6 px under row 1: the volume field (the rest of the row) and the pan field (46 px), 4 px apart |
 | ≥ 70 px | Routing, 4 px under row 2: "→" and the output dropdown ("Main" or a group track, `track.setOutput`); audio input and monitor In / Auto / Off (planned, with recording) |
 | ≥ 90 px | On a track that plays audio, 4 px under routing: "Audio" (28 px, 10 px `text.hint`) and the audio input dropdown ("No input", or "In 3" or "In 1/2" and " · Auto", " · Monitor in" or " · Monitor off"; `track.setAudioInput`); its menu, also under "Audio input: …" in the track's menu in both views, offers No input, each channel of the input device and each neighbouring pair (the first eight while no input device is open, saying so), then Monitor auto, in or off. On a track that plays notes, 4 px under routing: "MIDI" (28 px, 10 px `text.hint`) and the MIDI input dropdown, the rest of the row ("All ports", a port, or "No input", then " · Ch N" for one channel; `track.setMidiInput`). The track's menu, in both views, has the same choices under "MIDI input: …": every port, each port there is (one chosen but not connected says so), none; every channel, or Ch 1 to 16 in a grid of four |

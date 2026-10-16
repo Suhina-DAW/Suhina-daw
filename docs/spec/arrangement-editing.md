@@ -15,6 +15,7 @@ covers:
   - crates/engine/src/loop_tests.rs
   - apps/suhina-cli/src/play.rs
   - crates/ui/src/menus.rs
+  - crates/ui/src/colour_picker.rs
   - crates/ui/src/drop.rs
   - crates/session/src/files.rs
   - crates/project-file/src/lib.rs
@@ -528,6 +529,12 @@ from its lower half), and a right-click opens the track's menu: name, colour, gr
 **Move into group** (a submenu of every other group it can go into), **Move out of group** (one
 level up, right after the group it leaves), delete. A group's header starts with a triangle that
 folds its tracks away (Folded groups). The Session view's column headers have the same menu.
+
+A header's left edge is a 6 px band of the track's colour, the header's full height (dimmed while
+the track is off); return rows have one too. A click on the band opens the colour palette under
+it, the same swatches as the menu's; a swatch sets the colour (`track.setColor`, one undo step).
+A press on the band that drags still resizes the header column where the band meets its inner
+edge ([Session view](ui-session-view.md) › Track colour).
 
 A **double-click on a header** (on its name or its background, not on one of its controls) also
 shows the track's devices in the detail area, opening the detail area if it was hidden; a clip

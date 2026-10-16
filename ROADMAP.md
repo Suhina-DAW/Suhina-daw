@@ -537,6 +537,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - Tracks: click a header to select it (Ctrl adds), Ctrl+G groups the selection, drag a header
   to move the track (a group moves with its tracks); right-click a header or a Session column for
   name, colour, group, ungroup and delete. Clips: right-click or Delete and Ctrl+D.
+- Track colours show at a glance: an Arrangement header has a band of the track's colour down
+  its edge, a Session column's header and its channel strip's name are filled with it, and the
+  strip has a band down its left edge. A click on a band opens the colour palette (the theme's eight
+  track colours, the same swatches as the track's menu and a colour tag's menu); a swatch sets the
+  colour in one undo step (`track.setColor`, [spec](docs/spec/ui-session-view.md#track-colour)).
 - Groups inside groups, up to 16 levels ([#209](https://github.com/suhina-daw/suhina-daw/issues/209)):
   the sound goes through every group's volume, mute and devices to the output, solo follows the
   nesting, and the fold triangle on a group's header hides its tracks in both views. Drag a header
