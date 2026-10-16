@@ -11,7 +11,7 @@ covers:
   - crates/session/src/recording.rs
   - crates/session/src/record_writer.rs
   - crates/session/tests/recording.rs
-  - crates/ui/src/record_controls.rs
+  - crates/ui/src/session/record_controls.rs
   - crates/ui/tests/recording.rs
 ---
 

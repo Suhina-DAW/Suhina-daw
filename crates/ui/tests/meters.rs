@@ -8,7 +8,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 /// The label of the meter whose label starts with `name`.
 fn meter(harness: &Harness<'static, App>, name: &str) -> String {

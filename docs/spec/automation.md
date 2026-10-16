@@ -14,7 +14,7 @@ covers:
   - crates/engine/src/buses.rs
   - crates/session/src/automation.rs
   - crates/session/tests/automation.rs
-  - crates/ui/src/automation_lanes.rs
+  - crates/ui/src/arrangement/automation_lanes.rs
   - crates/ui/tests/automation_lanes.rs
   - crates/project-file/src/lib.rs
 ---

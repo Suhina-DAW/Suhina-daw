@@ -13,7 +13,7 @@ use egui_kittest::kittest::Queryable;
 use suhina_engine::model::{Device, DeviceKind, Extensions, Project, TrackId};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 900.0);
 /// A MIDI clip on Drums in the Arrangement view, and one in a Session slot.

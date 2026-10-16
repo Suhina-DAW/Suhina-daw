@@ -5,12 +5,12 @@ type: spec
 status: draft
 last_verified: 2026-10-16
 covers:
-  - crates/ui/src/theme.rs
-  - crates/ui/src/themes.rs
-  - crates/ui/src/grid.rs
+  - crates/ui/src/kit/theme.rs
+  - crates/ui/src/settings/themes.rs
+  - crates/ui/src/interaction/grid.rs
   - apps/suhina/src/theme_files.rs
   - crates/ui/themes/**
-  - crates/ui/src/settings_view.rs
+  - crates/ui/src/settings/settings_view.rs
 ---
 
 # Design brief

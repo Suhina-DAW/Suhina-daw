@@ -16,7 +16,7 @@ use suhina_engine::model::{ChannelId, LaneData};
 use suhina_library::Library;
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 
@@ -950,7 +950,7 @@ fn plug_ins_group_by_type() {
 
 #[test]
 fn a_folder_for_the_browser_is_chosen_in_the_systems_dialog() {
-    use suhina_ui::pick::PickField;
+    use suhina_ui::interaction::pick::PickField;
     let (settings, folder) = (temp("pick-settings"), temp("pick"));
     let other = temp("pick-other");
     pack(&folder);

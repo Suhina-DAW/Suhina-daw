@@ -14,7 +14,7 @@ use suhina_engine::model::{MappingSource, MappingTarget, TrackId};
 use suhina_engine::{AudioPool, Renderer};
 use suhina_session::{Player, Session};
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, Status, View, theme};
+use suhina_ui::{App, Status, View, kit::theme};
 
 /// The demo project in the window with an engine that is attached but not playing, so a
 /// launch is taken and says so. The renderer is kept so the engine's queue stays open.

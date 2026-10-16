@@ -5,32 +5,32 @@ type: spec
 status: draft
 last_verified: 2026-10-16
 covers:
-  - crates/ui/src/theme.rs
-  - crates/ui/src/session_view.rs
-  - crates/ui/src/mixer_strip.rs
-  - crates/ui/src/colour_picker.rs
+  - crates/ui/src/kit/theme.rs
+  - crates/ui/src/session/session_view.rs
+  - crates/ui/src/session/mixer_strip.rs
+  - crates/ui/src/interaction/colour_picker.rs
   - crates/ui/tests/track_colour.rs
-  - crates/ui/src/view_settings.rs
+  - crates/ui/src/settings/view_settings.rs
   - crates/ui/tests/open_recent.rs
-  - crates/ui/src/widgets.rs
-  - crates/ui/src/arrangement_view.rs
-  - crates/ui/src/timeline.rs
-  - crates/ui/src/automation_lanes.rs
-  - crates/ui/src/motion.rs
-  - crates/ui/src/settings_view.rs
-  - crates/ui/src/themes.rs
-  - crates/ui/src/meter.rs
-  - crates/ui/src/waveform.rs
-  - crates/ui/src/detail_view.rs
-  - crates/ui/src/follow_view.rs
-  - crates/ui/src/project_dialog.rs
-  - crates/ui/src/start_panel.rs
-  - crates/ui/src/pick.rs
-  - crates/ui/src/browser_view.rs
-  - crates/ui/src/loading_dialog.rs
-  - crates/ui/src/missing_files.rs
-  - crates/ui/src/splash.rs
-  - crates/ui/src/logo.rs
+  - crates/ui/src/kit/widgets.rs
+  - crates/ui/src/arrangement/arrangement_view.rs
+  - crates/ui/src/arrangement/timeline.rs
+  - crates/ui/src/arrangement/automation_lanes.rs
+  - crates/ui/src/kit/motion.rs
+  - crates/ui/src/settings/settings_view.rs
+  - crates/ui/src/settings/themes.rs
+  - crates/ui/src/kit/meter.rs
+  - crates/ui/src/kit/waveform.rs
+  - crates/ui/src/detail/detail_view.rs
+  - crates/ui/src/detail/follow_view.rs
+  - crates/ui/src/app/project_dialog.rs
+  - crates/ui/src/app/start_panel.rs
+  - crates/ui/src/interaction/pick.rs
+  - crates/ui/src/browser/browser_view.rs
+  - crates/ui/src/app/loading_dialog.rs
+  - crates/ui/src/app/missing_files.rs
+  - crates/ui/src/app/splash.rs
+  - crates/ui/src/kit/logo.rs
   - assets/brand/**
 ---
 
@@ -479,7 +479,7 @@ top. Files dropped anywhere on it open as on the rest of the window.
 
 ## Plug-in loading dialog
 
-Shown over the window while the active project's plug-ins start (`crates/ui/src/loading_dialog.rs`),
+Shown over the window while the active project's plug-ins start (`crates/ui/src/app/loading_dialog.rs`),
 until none is loading or it is sent to the background; a project opened next shows it again.
 
 | Part | Spec |
@@ -491,7 +491,7 @@ until none is loading or it is sent to the background; a project opened next sho
 
 ## Splash
 
-Shown while Suhina starts (`crates/ui/src/splash.rs`), drawn inside the main window over its
+Shown while Suhina starts (`crates/ui/src/app/splash.rs`), drawn inside the main window over its
 first frames rather than in a window of its own: a second window would need its own GL or wgpu
 context, the slowest part of starting, and one window that shrinks and grows would fight the
 main window's remembered size and position (and Wayland lets a program neither place nor
@@ -505,7 +505,7 @@ splash that went after them was never seen.
 |---|---|
 | Behind | The whole window `window.background`; clicks there do nothing until it has gone |
 | Panel | 300 × 200 px (smaller in a smaller window), centred, `panel.background`, 1 px `border.strong` border |
-| Logo | The Suhina logo (`assets/brand/suhina-logo.svg`) 200 px wide (24 px clear of the panel's sides in a narrower one), its centre 12 px above the middle; the name in `text.primary`, the wave in its own `#FFD97D`. The app fills the file's paths itself (`crates/ui/src/logo.rs`, tiny-skia) at the screen's pixel density; if that fails, "Suhina" in 13 px `text.primary` instead |
+| Logo | The Suhina logo (`assets/brand/suhina-logo.svg`) 200 px wide (24 px clear of the panel's sides in a narrower one), its centre 12 px above the middle; the name in `text.primary`, the wave in its own `#FFD97D`. The app fills the file's paths itself (`crates/ui/src/kit/logo.rs`, tiny-skia) at the screen's pixel density; if that fails, "Suhina" in 13 px `text.primary` instead |
 | Version | "Version x.y.z" (the app's `CARGO_PKG_VERSION`), 10 px mono `text.secondary`, under the logo |
 | Status | "Starting", 10 px `text.hint`, centred at the bottom |
 | Going | Fades out in 120 ms once the start-up work has run, it has been shown for 1 s, and 0.3 s have passed since the first frame after that work (where the window comes on screen only once the work is done, it is still seen there); at once with animations off |
@@ -545,7 +545,7 @@ eases over 120 ms. The clip's name keeps 6 px clear of it and is shortened with 
 
 ## Clip editor (MIDI)
 
-Built so far (`crates/ui/src/piano_roll.rs`, the ruler in `crates/ui/src/piano_roll_ruler.rs`): the 24 px ruler (the 8 px clip loop row over 16 px of bar numbers and lines, with the start and end markers), the 36 px
+Built so far (`crates/ui/src/detail/piano_roll.rs`, the ruler in `crates/ui/src/detail/piano_roll_ruler.rs`): the 24 px ruler (the 8 px clip loop row over 16 px of bar numbers and lines, with the start and end markers), the 36 px
 key column, the note rows, notes and the velocity lane (72 px, or 30 % of the detail area's height
 when that is less, with 127 and 1 in its scale column). Rows are drawn as white-key rows
 (`panel.background`) and black-key rows (`window.background`) until the clip has a scale; with

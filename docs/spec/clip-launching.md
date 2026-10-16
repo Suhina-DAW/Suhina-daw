@@ -15,7 +15,7 @@ covers:
   - crates/session/tests/launcher.rs
   - crates/engine/src/fade_tests.rs
   - crates/session/tests/scenes.rs
-  - crates/ui/src/menus.rs
+  - crates/ui/src/interaction/menus.rs
   - crates/session/tests/follow.rs
   - crates/session/tests/files.rs
   - crates/session/tests/launch_settings.rs

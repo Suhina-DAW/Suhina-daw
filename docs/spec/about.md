@@ -5,7 +5,7 @@ type: spec
 status: draft
 last_verified: 2026-10-14
 covers:
-  - crates/ui/src/project_dialog.rs
+  - crates/ui/src/app/project_dialog.rs
 ---
 
 # About Suhina

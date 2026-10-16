@@ -13,10 +13,10 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use suhina_engine::model::{LaneData, Note, TrackId};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::detail_view::ClipRef;
-use suhina_ui::piano_roll_ghosts::GhostSource;
+use suhina_ui::detail::detail_view::ClipRef;
+use suhina_ui::detail::piano_roll_ghosts::GhostSource;
 use suhina_ui::settings::Settings;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 /// The demo clip the tests edit: on Drums, at bar 17 (beat 64). Walk on Bass and Chords 1 on
@@ -70,7 +70,7 @@ fn notes(h: &Harness<'static, App>) -> Vec<Note> {
 fn ghosts(h: &Harness<'static, App>, from: &str) -> usize {
     let project = h.state().session().unwrap().project();
     let source = h.state().piano_roll().ghost_source;
-    let ghosts = suhina_ui::piano_roll_ghosts::ghosts(project, EDITED, source);
+    let ghosts = suhina_ui::detail::piano_roll_ghosts::ghosts(project, EDITED, source);
     ghosts.notes.iter().filter(|g| ghosts.sources.get(g.source).is_some_and(|s| s == from)).count()
 }
 

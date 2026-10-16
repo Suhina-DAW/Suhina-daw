@@ -7,8 +7,8 @@ last_verified: 2026-10-15
 covers:
   - crates/device-sdk/src/ui/widgets.rs
   - crates/device-sdk/src/ui.rs
-  - crates/ui/src/device_canvas.rs
-  - crates/ui/src/detail_view.rs
+  - crates/ui/src/detail/device_canvas.rs
+  - crates/ui/src/detail/detail_view.rs
   - crates/device-sdk/examples/custom_panel.rs
   - crates/device-sdk/examples/orbit_filter.rs
 ---

@@ -9,7 +9,7 @@ covers:
   - crates/engine/src/meters_tests.rs
   - crates/session/src/meters.rs
   - crates/session/tests/meters.rs
-  - crates/ui/src/meter.rs
+  - crates/ui/src/kit/meter.rs
   - crates/ui/tests/meters.rs
 ---
 

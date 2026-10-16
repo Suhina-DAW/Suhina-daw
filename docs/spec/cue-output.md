@@ -12,7 +12,7 @@ covers:
   - crates/output/src/exclusive.rs
   - crates/session/src/audio.rs
   - crates/session/tests/cue.rs
-  - crates/ui/src/widgets.rs
+  - crates/ui/src/kit/widgets.rs
   - crates/automation/src/render.rs
 ---
 

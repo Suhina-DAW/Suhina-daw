@@ -10,10 +10,10 @@ use egui_kittest::kittest::Queryable;
 use serde_json::json;
 use suhina_engine::model::LaunchMode;
 use suhina_ui::demo::demo_project;
-use suhina_ui::grid::Grid;
-use suhina_ui::session_view::{self, SessionViewState};
-use suhina_ui::theme;
-use suhina_ui::widgets::Action;
+use suhina_ui::interaction::grid::Grid;
+use suhina_ui::kit::theme;
+use suhina_ui::kit::widgets::Action;
+use suhina_ui::session::session_view::{self, SessionViewState};
 
 struct View {
     grid: Grid,

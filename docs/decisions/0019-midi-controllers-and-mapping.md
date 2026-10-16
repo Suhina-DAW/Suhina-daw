@@ -34,7 +34,7 @@ What exists, or is in review:
   engine's graph, except a device parameter, which has a cheap path
   (`Player::set_device_param`) that changes one value from the next block.
 - **The window's drags**: a volume drag in the Session View shows the moving value locally and
-  runs `track.setVolume` once, when the mouse is released (`crates/ui/src/session_view.rs`).
+  runs `track.setVolume` once, when the mouse is released (`crates/ui/src/session/session_view.rs`).
 - **Settings and keymap**: the window keeps `settings.txt` and `keymap.json` in its storage
   folder; the keymap maps keys to commands that take no parameters.
 - **Extensions** ([ADR 0015](0015-extensions.md)): an optional component is a separate program

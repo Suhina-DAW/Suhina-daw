@@ -5,14 +5,14 @@ type: spec
 status: draft
 last_verified: 2026-10-16
 covers:
-  - crates/ui/src/piano_roll.rs
-  - crates/ui/src/piano_roll_grid.rs
-  - crates/ui/src/piano_roll_ruler.rs
-  - crates/ui/src/piano_roll_gestures.rs
-  - crates/ui/src/piano_roll_ghosts.rs
-  - crates/ui/src/piano_roll_scale.rs
-  - crates/ui/src/midi_tools.rs
-  - crates/ui/src/detail_view.rs
+  - crates/ui/src/detail/piano_roll.rs
+  - crates/ui/src/detail/piano_roll_grid.rs
+  - crates/ui/src/detail/piano_roll_ruler.rs
+  - crates/ui/src/detail/piano_roll_gestures.rs
+  - crates/ui/src/detail/piano_roll_ghosts.rs
+  - crates/ui/src/detail/piano_roll_scale.rs
+  - crates/ui/src/detail/midi_tools.rs
+  - crates/ui/src/detail/detail_view.rs
   - crates/session/src/notes.rs
   - crates/session/src/scales.rs
   - crates/session/src/note_tools.rs
@@ -120,7 +120,7 @@ bottom:
 
    The tools are **Select**, **Draw**, **Paint**, **Erase**, **Slice** and **Mute** (› Drawing
    notes, › Muting), each an
-   icon button: the shape is drawn in code with our own strokes ([`crates/ui/src/browser_view.rs`](../../crates/ui/src/browser_view.rs)
+   icon button: the shape is drawn in code with our own strokes ([`crates/ui/src/browser/browser_view.rs`](../../crates/ui/src/browser/browser_view.rs)
    › `icon` does the same for the browser), on a 14 px box, 1.1 px wide, in `text.secondary`; the
    chosen tool's is `text.primary` on `control.activeBackground`. A click chooses the tool; the
    number keys **1** to **6** do too, after a click in the piano roll (› Shortcuts). The pointer
@@ -299,7 +299,7 @@ pull up.
      third of a beat), adaptive ones too; bar values stay as they are.
 
   The keys work after a click in the piano roll, like its other keys (› Shortcuts). The grid value
-  and its steps are the `piano_roll_grid` module of the `ui` crate (`crates/ui/src/piano_roll_grid.rs`).
+  and its steps are the `piano_roll_grid` module of the `ui` crate (`crates/ui/src/detail/piano_roll_grid.rs`).
 - **Built:** Settings › Clip editor › Piano roll › **Piano roll grid** set to **Control bar** makes the
   piano roll use the control bar's value instead, and its menu and keys then set the control
   bar's (`launcher.setQuantization`). The control bar has no adaptive grid and no 1/32 triplet,

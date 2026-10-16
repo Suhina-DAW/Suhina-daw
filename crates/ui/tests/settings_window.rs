@@ -9,8 +9,8 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::settings_view::Page;
-use suhina_ui::{App, theme};
+use suhina_ui::settings::settings_view::Page;
+use suhina_ui::{App, kit::theme};
 
 /// A window too short for most pages.
 const SHORT: (f32, f32) = (1000.0, 420.0);

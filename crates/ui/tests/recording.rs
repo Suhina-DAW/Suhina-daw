@@ -10,7 +10,7 @@ use egui_kittest::kittest::Queryable;
 use suhina_engine::{AudioPool, Renderer};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 fn app_with_engine(renderer: &mut Renderer) -> Harness<'static, App> {
     let mut session = Session::new(demo_project());

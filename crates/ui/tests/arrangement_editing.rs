@@ -11,7 +11,7 @@ use egui_kittest::kittest::Queryable;
 use suhina_engine::model::Clip;
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::{App, theme};
+use suhina_ui::{App, kit::theme};
 
 fn arrangement(session: Session) -> Harness<'static, App> {
     let mut app = App::new();

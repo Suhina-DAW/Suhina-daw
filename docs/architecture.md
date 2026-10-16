@@ -21,9 +21,14 @@ covers:
   - crates/output/src/exclusive.rs
   - crates/session/src/audio.rs
   - crates/ui/src/lib.rs
+  - crates/ui/src/arrangement.rs
+  - crates/ui/src/session.rs
+  - crates/ui/src/detail.rs
+  - crates/ui/src/interaction.rs
+  - crates/ui/src/kit.rs
   - crates/library/src/worker.rs
   - crates/ui/src/browser.rs
-  - crates/ui/src/missing_files.rs
+  - crates/ui/src/app/missing_files.rs
   - apps/suhina/src/main.rs
   - crates/automation/src/server.rs
 ---
@@ -104,6 +109,39 @@ reads the program's RAM for the control bar. Design tokens in `theme.rs`; the co
 | `devices/compressor` | Compressor: stereo-linked feed-forward, peak detector on a high-passed side-chain, soft knee, attack and release in decibels, input and output gain, dry/wet for parallel compression; no latency. | dsp, device-api |
 | `devices/limiter` | Brickwall peak limiter: threshold as a drive into the ceiling, release, 1.5 ms lookahead (a sliding minimum and a moving average), so no sample comes out over the ceiling; the lookahead is its latency. | dsp, device-api |
 | `devices/fm-synth` | The FM synth, an instrument: six operators, 32 algorithms, sixteen voices; the engine is a port of MSFA (the engine in Dexed, Apache-2.0) that matches it sample for sample; reads and writes DX7 voice files ([spec](spec/dx7-voice-format.md)). | device-api |
+
+### Inside the `ui` crate
+
+The `ui` crate is sorted into folders, one per view, and two folders the views share, so that a
+change to one view touches the files of that view and parallel pull requests seldom meet:
+
+```text
+crates/ui/src/
+  lib.rs         the modules, and the types the app takes (App, Status, View)
+  app.rs, app/   the window: its state, menus, keys, layout and dialogs (project, loading,
+                 missing files), the start panel and the splash
+  arrangement/   the Arrangement view: arrangement_view, timeline, automation_lanes
+  session/       the Session view: session_view, mixer_strip, slot_launch, launch_keys,
+                 record_controls
+  detail/        the detail area: detail_view (device chain and clip properties), device_canvas,
+                 follow_view, the piano roll (piano_roll and its parts) and midi_tools
+  browser.rs, browser/   the browser's state (browser.rs) and its views: browser_view,
+                 sample_map, sample_map_panel
+  settings.rs, settings/ the stored settings (settings.rs, view_settings, keymap, workflow) and
+                 the Settings window (settings_view, settings_rows, themes)
+  interaction/   what views share: drop (dragging between views), pick, menus, nesting, grid
+                 (the tracks and slots as the views see them), colour_picker, empty_space, status
+  kit/           what every view draws with: theme, widgets, meter, motion, logo, waveform
+  demo.rs        the demo project the app opens with `--demo` and the tests draw
+```
+
+The rule: a view uses `interaction/`, `kit/` and the stored settings, never another view's
+files. `interaction/` uses `kit/`; `kit/` uses neither. Only `app` puts the views together.
+Something two views need, such as dragging a clip from the Session view to the Arrangement view,
+goes through `interaction/` (the dragged data in `drop`) and the session's commands; a helper two
+views share moves into `interaction/` or `kit/`. A view module is declared in its folder's module
+file (`arrangement.rs` for `arrangement/`), and code names it by its full path
+(`crate::arrangement::timeline::Timeline`).
 
 ## From a file to the speakers
 
@@ -274,7 +312,7 @@ renderer without a deadline.
 | A way for the user or an agent to change something | a command in `session` | Typed params, undo, a test in `session/tests` |
 | A new kind of file to decode or analyse | `media` | Input sizes are hostile; cap them |
 | Something agents need | `automation`, on top of commands | File roots; `isError` for failed commands |
-| A view or control in the UI | `ui`, drawn from `Grid`-like data built from the project and monitors | Dispatches commands; never edits the model directly; sizes and colours from `theme` and `docs/design/` |
+| A view or control in the UI | `ui`, in the folder of its view, drawn from `Grid`-like data built from the project and monitors ([Inside the `ui` crate](#inside-the-ui-crate)) | Dispatches commands; never edits the model directly; sizes and colours from `theme` and `docs/design/` |
 | A built-in instrument or effect | a crate under `devices/`, blocks in `dsp` | ADR 0004; `conformance::check` in a test; import mapping in the format crate |
 
 ## Planned parts

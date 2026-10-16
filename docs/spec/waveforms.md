@@ -5,15 +5,15 @@ type: spec
 status: current
 last_verified: 2026-10-13
 covers:
-  - crates/ui/src/waveform.rs
-  - crates/ui/src/waveform/tests.rs
+  - crates/ui/src/kit/waveform.rs
+  - crates/ui/src/kit/waveform/tests.rs
   - crates/ui/tests/waveforms.rs
 ---
 
 # Waveforms
 
 One renderer draws every waveform: audio clips in the Arrangement view, the browser's preview
-strip and the tooltip of a point on the sample map. It is in `crates/ui/src/waveform.rs`.
+strip and the tooltip of a point on the sample map. It is in `crates/ui/src/kit/waveform.rs`.
 
 ## What other editors do (public documentation)
 
@@ -93,7 +93,7 @@ on, at 255 frames a column, where columns read the samples. Summarising the file
 
 ## Tests
 
-- `src/waveform/tests.rs`: levels and reading per lane, odd files, the dB scale, geometry at
+- `src/kit/waveform/tests.rs`: levels and reading per lane, odd files, the dB scale, geometry at
   several zooms against text snapshots in `crates/ui/tests/golden/waveform-*.txt`
   (`SUHINA_UPDATE_GOLDEN=1` rewrites them), and the frame budget.
 - `tests/waveforms.rs` (ignored, needs a GPU): renders the waveform at several zooms to

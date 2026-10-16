@@ -14,9 +14,9 @@ use serde_json::json;
 use suhina_engine::model::{LaneData, Note};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::piano_roll::{Tool, key_name};
-use suhina_ui::widgets::Action;
-use suhina_ui::{App, theme};
+use suhina_ui::detail::piano_roll::{Tool, key_name};
+use suhina_ui::kit::widgets::Action;
+use suhina_ui::{App, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 /// The demo clip the tests edit: on Drums, at bar 17 (beat 64), a one-bar loop.

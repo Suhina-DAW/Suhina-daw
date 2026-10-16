@@ -10,14 +10,14 @@ use egui_kittest::kittest::Queryable;
 use serde_json::json;
 use suhina_engine::model::TrackId;
 use suhina_session::Session;
-use suhina_ui::arrangement_view::{self, ArrangementViewState};
+use suhina_ui::arrangement::arrangement_view::{self, ArrangementViewState};
+use suhina_ui::arrangement::timeline::Timeline;
 use suhina_ui::demo::demo_project;
-use suhina_ui::grid::{Grid, SlotState};
-use suhina_ui::session_view::{self, SessionViewState};
-use suhina_ui::themes::FileAction;
-use suhina_ui::timeline::Timeline;
-use suhina_ui::widgets::Action;
-use suhina_ui::{App, OpenAs, Status, View, theme};
+use suhina_ui::interaction::grid::{Grid, SlotState};
+use suhina_ui::kit::widgets::Action;
+use suhina_ui::session::session_view::{self, SessionViewState};
+use suhina_ui::settings::themes::FileAction;
+use suhina_ui::{App, OpenAs, Status, View, kit::theme};
 
 const SIZE: (f32, f32) = (1280.0, 800.0);
 
@@ -796,7 +796,7 @@ fn settings_change_right_away_and_are_handed_out_to_be_saved() {
     let saved = harness.state_mut().take_changed_settings();
     assert_eq!(saved.as_ref().map(|s| s.animations), Some(false));
     assert_eq!(saved.map(|s| s.track_headers), Some(suhina_ui::settings::Side::Left));
-    assert!(!suhina_ui::motion::enabled(&harness.ctx));
+    assert!(!suhina_ui::kit::motion::enabled(&harness.ctx));
     assert_eq!(harness.state_mut().take_changed_settings(), None);
     harness.get_by_label("Close settings").click();
     harness.run();
@@ -808,8 +808,10 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
     let mut harness = window(demo_app());
     let mut colors = theme::Palette::DARK;
     colors.accent = egui::Color32::from_rgb(0x12, 0xAB, 0x9F);
-    let night =
-        suhina_ui::themes::ThemeEntry { id: "night".into(), theme: theme::Theme { name: "Night".into(), colors } };
+    let night = suhina_ui::settings::themes::ThemeEntry {
+        id: "night".into(),
+        theme: theme::Theme { name: "Night".into(), colors },
+    };
     let ctx = harness.ctx.clone();
     harness.state_mut().set_themes(&ctx, vec![night], Some("themes".into()));
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
@@ -852,7 +854,7 @@ fn a_theme_picked_in_settings_colours_the_window_and_is_saved() {
 
     // A file saved elsewhere redraws the window.
     colors.accent = egui::Color32::from_rgb(1, 2, 3);
-    let edited = suhina_ui::themes::ThemeEntry {
+    let edited = suhina_ui::settings::themes::ThemeEntry {
         id: "night-copy".into(),
         theme: theme::Theme { name: "Night copy".into(), colors },
     };
@@ -1555,7 +1557,7 @@ fn dragging_a_header_below_a_group_header_puts_the_track_in_the_group() {
 
 /// The demo project with an audio track, "Loop", whose clip plays `loop.wav` (two seconds of a
 /// tone that fades out), and the waveforms of that file.
-fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::Waveforms) {
+fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::kit::waveform::Waveforms) {
     use suhina_engine::model::*;
     let mut project = demo_project();
     project.tracks.push(Track {
@@ -1618,7 +1620,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         "loop.wav".into(),
         std::sync::Arc::new(suhina_engine::AudioData { sample_rate: 8000, channels: 1, samples }),
     );
-    (project, suhina_ui::waveform::from_pool(&pool))
+    (project, suhina_ui::kit::waveform::from_pool(&pool))
 }
 
 fn audio_app() -> App {
@@ -1954,7 +1956,7 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
     harness.run();
     assert!(harness.state().keymap().mouse().right_deletes);
     assert!(harness.state_mut().take_changed_keymap().is_some(), "the keymap is saved with it");
-    assert_eq!(harness.state().keymap().preset(), suhina_ui::keymap::Preset::Custom, "the mode is Custom");
+    assert_eq!(harness.state().keymap().preset(), suhina_ui::settings::keymap::Preset::Custom, "the mode is Custom");
     // And back again.
     harness.get_by_label("Right click on a note: Nothing").click();
     harness.run();
@@ -1978,7 +1980,7 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
     assert!(harness.state().keymap().mouse().all_on());
     assert_eq!(
         harness.state_mut().take_changed_keymap().map(|k| k.mouse()),
-        Some(suhina_ui::keymap::MouseSettings::ALL_ON)
+        Some(suhina_ui::settings::keymap::MouseSettings::ALL_ON)
     );
     assert!(harness.query_by_label("Preset: Custom").is_some(), "Custom is one of the modes there too");
     harness.get_by_label("Settings page: Clip editor").click();
@@ -2936,7 +2938,7 @@ fn a_clips_name_selects_it_and_its_mark_launches_it() {
 
 #[test]
 fn the_arrows_step_through_the_slots_of_tracks_and_stop_at_the_edges() {
-    use suhina_ui::session_view::{Step, step_slot};
+    use suhina_ui::session::session_view::{Step, step_slot};
     let grid = Grid::build(&demo_project(), None);
     let (drums, bass, vox) = (TrackId(1), TrackId(2), TrackId(4));
     assert_eq!(step_slot(&grid, (bass, 1), Step::Up), Some((bass, 0)));
@@ -3467,7 +3469,7 @@ fn render_the_start_panel() {
 
 #[test]
 fn browse_buttons_ask_for_the_systems_dialog_and_fill_their_fields() {
-    use suhina_ui::pick::PickField;
+    use suhina_ui::interaction::pick::PickField;
     // Settings › General: the folders and the start template.
     let mut harness = window(demo_app());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
@@ -3526,7 +3528,7 @@ fn browse_buttons_ask_for_the_systems_dialog_and_fill_their_fields() {
 
 #[test]
 fn open_on_the_start_panel_shows_the_systems_dialog() {
-    use suhina_ui::pick::PickField;
+    use suhina_ui::interaction::pick::PickField;
     let mut harness = window(App::new());
     harness.get_by_label("Open a project").click();
     harness.run();
@@ -3542,13 +3544,13 @@ fn open_on_the_start_panel_shows_the_systems_dialog() {
 #[test]
 fn help_about_shows_the_version_and_copies_it() {
     let mut harness = window(demo_app());
-    let version = suhina_ui::project_dialog::VERSION;
+    let version = suhina_ui::app::project_dialog::VERSION;
     assert!(harness.query_by_label_contains(version).is_none());
     harness.get_by_label("Help").click();
     harness.run();
     harness.get_by_label_contains("About Suhina").click();
     harness.run();
-    let line = suhina_ui::project_dialog::version_line();
+    let line = suhina_ui::app::project_dialog::version_line();
     assert!(line.starts_with(&format!("Suhina {version} (")), "{line}");
     harness.get_by_label(&format!("Copy version: {line}")).click();
     harness.run();

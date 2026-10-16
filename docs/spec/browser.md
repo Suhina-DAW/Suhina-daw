@@ -14,9 +14,9 @@ covers:
   - crates/session/src/preview.rs
   - crates/engine/src/preview.rs
   - crates/ui/src/browser.rs
-  - crates/ui/src/browser_view.rs
-  - crates/ui/src/drop.rs
-  - crates/ui/src/session_view.rs
+  - crates/ui/src/browser/browser_view.rs
+  - crates/ui/src/interaction/drop.rs
+  - crates/ui/src/session/session_view.rs
 ---
 
 # Browser

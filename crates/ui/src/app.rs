@@ -6,6 +6,12 @@
 //! Every change goes through `Session::execute` (AGENTS.md rule 6); the window only reads the
 //! project and the engine's monitor to draw them.
 
+pub mod loading_dialog;
+pub mod missing_files;
+pub mod project_dialog;
+pub mod splash;
+pub mod start_panel;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -14,31 +20,31 @@ use serde_json::json;
 use suhina_engine::model::TrackId;
 use suhina_session::{CommandKind, ProjectId, Projects, Session};
 
-use crate::arrangement_view::{self, ArrangementViewState};
-use crate::browser::{BrowserState, ResultsMode};
-use crate::browser_view;
-use crate::detail_view::{self, ClipRef};
-use crate::drop::{self, BrowserItem, DropProbe, DropTarget};
-use crate::follow_view;
-use crate::grid::{Grid, SlotState};
-use crate::keymap::Keymap;
-use crate::loading_dialog;
-use crate::motion;
-use crate::piano_roll::{self, PianoRollState};
-use crate::pick::{PickField, PickRequest};
-use crate::project_dialog::{
-    self, AboutChoice, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice,
+use crate::app::project_dialog::{
+    AboutChoice, Choice, DialogState, Lists, RecoveryChoice, SaveChoice, SavePrompt, UnsavedChoice,
 };
-use crate::session_view::{self, SessionViewState, Step};
+use crate::app::start_panel::{AudioSummary, StartChoice, StartState};
+use crate::arrangement::arrangement_view::{self, ArrangementViewState};
+use crate::arrangement::timeline::{Folds, Timeline};
+use crate::browser::browser_view;
+use crate::browser::{BrowserState, ResultsMode};
+use crate::detail::detail_view::{self, ClipRef};
+use crate::detail::follow_view;
+use crate::detail::piano_roll::{self, PianoRollState};
+use crate::interaction::drop::{self, BrowserItem, DropProbe, DropTarget};
+use crate::interaction::grid::{Grid, SlotState};
+use crate::interaction::pick::{PickField, PickRequest};
+use crate::interaction::status::Status;
+use crate::kit::motion;
+use crate::kit::theme::{self, PAD};
+use crate::kit::widgets::{self, Action, Drag};
+use crate::session::session_view::{self, SessionViewState, Step};
+use crate::settings::keymap::Keymap;
+use crate::settings::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
+use crate::settings::themes::{FileAction, ThemeEntry, Themes};
 use crate::settings::{
     AtStart, DeviceLayout, EditorPlacement, MixerControls, OnOpen, PianoRollTop, PlayFrom, Settings, Side,
 };
-use crate::settings_view::{self, About, PageState, PluginRequest, PluginsView, Sources};
-use crate::start_panel::{self, AudioSummary, StartChoice, StartState};
-use crate::theme::{self, PAD};
-use crate::themes::{FileAction, ThemeEntry, Themes};
-use crate::timeline::{Folds, Timeline};
-use crate::widgets::{self, Action, Drag};
 
 /// Launch quantisation choices, as `launcher.setQuantization` takes them; the Arrangement
 /// view's grid follows the same value.
@@ -97,7 +103,7 @@ struct PendingDrop {
     decoded: std::sync::mpsc::Receiver<Vec<DecodedDrop>>,
 }
 
-type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioData>, crate::waveform::Peaks);
+type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioData>, crate::kit::waveform::Peaks);
 
 /// A project's view state, kept while another project's tab is showing.
 #[derive(Default)]
@@ -106,7 +112,7 @@ struct Stash {
     arrangement: Option<ArrangementViewState>,
     revision: u64,
     timeline: Option<(u64, Folds, Timeline)>,
-    waveforms: std::sync::Arc<crate::waveform::Waveforms>,
+    waveforms: std::sync::Arc<crate::kit::waveform::Waveforms>,
 }
 
 /// A clip carried from one view to the other with the mouse: where it comes from, and its name
@@ -136,13 +142,6 @@ pub enum View {
     #[default]
     Session,
     Arrangement,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Status {
-    Hint(String),
-    Done(String),
-    Error(String),
 }
 
 /// The Settings dialog at most: the page list, the page and their margins wide, and tall enough
@@ -189,7 +188,7 @@ pub struct App {
     /// Close the window on the next frame.
     quit_now: bool,
     /// The active project's missing audio files, their bar and panel.
-    missing: crate::missing_files::MissingFiles,
+    missing: crate::app::missing_files::MissingFiles,
     remember_choice: bool,
     /// A project that became active and needs an audio output.
     player_request: Option<ProjectId>,
@@ -207,7 +206,7 @@ pub struct App {
     /// with: folding a group changes what the lanes are, without changing the project.
     timeline: Option<(u64, Folds, Timeline)>,
     /// Waveforms of the open project's audio files.
-    waveforms: std::sync::Arc<crate::waveform::Waveforms>,
+    waveforms: std::sync::Arc<crate::kit::waveform::Waveforms>,
     /// The plug-in library as Settings shows it, and a scan running in the background.
     plugins: PluginsView,
     plugins_read: bool,
@@ -231,7 +230,7 @@ pub struct App {
     editor_closed: bool,
     last_clip: Option<ClipRef>,
     /// The piano roll's own grid value, used unless Settings has it follow the control bar's.
-    piano_grid: crate::piano_roll_grid::PianoGrid,
+    piano_grid: crate::detail::piano_roll_grid::PianoGrid,
     detail_width: f32,
     page: PageState,
     settings: Settings,
@@ -275,7 +274,7 @@ pub struct App {
     /// The browser panel (`docs/spec/browser.md`), the same for every project.
     pub browser: BrowserState,
     /// The sample map, in the browser's results, large in the main area or in a window of its own.
-    pub sample_map: crate::sample_map_panel::Panel,
+    pub sample_map: crate::browser::sample_map_panel::Panel,
     /// The map's own window: where it opened (kept while it is open, so the window is not moved
     /// back while the user moves it), a new place waiting to be saved, and a drag that started in
     /// it, which the main window finishes.
@@ -316,7 +315,7 @@ impl App {
             save_then: None,
             quit_confirmed: false,
             quit_now: false,
-            missing: crate::missing_files::MissingFiles::default(),
+            missing: crate::app::missing_files::MissingFiles::default(),
             remember_choice: false,
             player_request: None,
             closed: Vec::new(),
@@ -342,7 +341,7 @@ impl App {
             detail_drag: None,
             editor_closed: false,
             last_clip: None,
-            piano_grid: crate::piano_roll_grid::PianoGrid::default(),
+            piano_grid: crate::detail::piano_roll_grid::PianoGrid::default(),
             detail_width: detail_view::STACK_WIDTH,
             page: PageState::default(),
             settings: Settings::default(),
@@ -367,7 +366,7 @@ impl App {
             default_folders: (PathBuf::from("Projects"), PathBuf::from("Templates")),
             window_title: String::new(),
             browser: BrowserState::default(),
-            sample_map: crate::sample_map_panel::Panel::default(),
+            sample_map: crate::browser::sample_map_panel::Panel::default(),
             map_window: MapWindow::default(),
             pending_drop: None,
             detail_drop: None,
@@ -1034,7 +1033,7 @@ impl App {
     /// The project dialog and the save prompt, over the window, and what was chosen in them.
     fn project_dialogs(&mut self, ui: &Ui, window: Rect) {
         let name = self.projects.active().and_then(|id| self.projects.name(id)).unwrap_or("the project").to_string();
-        if let Some(crate::missing_files::Outcome::Apply(files)) = self.missing.panel(ui, window, &name) {
+        if let Some(crate::app::missing_files::Outcome::Apply(files)) = self.missing.panel(ui, window, &name) {
             self.relink(files);
         }
         if let Some(mut state) = self.project_dialog.take() {
@@ -1146,7 +1145,7 @@ impl App {
     }
 
     /// The waveforms of the open project's audio files, once they are decoded.
-    pub fn set_waveforms(&mut self, waveforms: crate::waveform::Waveforms) {
+    pub fn set_waveforms(&mut self, waveforms: crate::kit::waveform::Waveforms) {
         self.waveforms = std::sync::Arc::new(waveforms);
         self.timeline = None;
     }
@@ -1236,7 +1235,7 @@ impl App {
 
     /// A Stems file arrives as one group of its stems and its master (`clip.addFiles` reports
     /// the groups it made): the group opens folded, so the drop reads as a single lane until its
-    /// triangle is clicked ([`crate::arrangement_view`]).
+    /// triangle is clicked ([`crate::arrangement::arrangement_view`]).
     fn fold_new_groups(&mut self, result: &serde_json::Value) {
         for group in result["groups"].as_array().map(Vec::as_slice).unwrap_or_default() {
             if let Some(id) = group.as_u64().and_then(|n| u32::try_from(n).ok()) {
@@ -1300,8 +1299,12 @@ impl App {
         self.shortcuts(ui, &mut actions);
         self.apply_zoom(ui.ctx());
         self.sample_map_window(ui.ctx(), &mut actions);
-        let scale = if self.settings.waveform_db { crate::waveform::Scale::Db } else { crate::waveform::Scale::Linear };
-        crate::waveform::set_scale(ui.ctx(), scale);
+        let scale = if self.settings.waveform_db {
+            crate::kit::waveform::Scale::Db
+        } else {
+            crate::kit::waveform::Scale::Linear
+        };
+        crate::kit::waveform::set_scale(ui.ctx(), scale);
 
         let grid = self.session().map(|s| {
             let mut grid = Grid::build(s.project(), s.player().map(|p| p.monitor()));
@@ -1368,7 +1371,7 @@ impl App {
             // With the detail area across the full width, the browser takes its side of what is
             // left above it (Settings › Detail area › Detail area layout).
             let full_width = grid.is_some()
-                && self.settings.view.detail_layout == crate::view_settings::DetailLayout::FullWidth
+                && self.settings.view.detail_layout == crate::settings::view_settings::DetailLayout::FullWidth
                 && self.settings.device_layout != DeviceLayout::Stack;
             let inner = if self.settings.browser_open && !full_width { self.browser_panel(ui, inner) } else { inner };
             let mut view_area = inner;
@@ -1427,7 +1430,8 @@ impl App {
             self.view.can_paste = self.session().is_some_and(|s| s.copied_clip_is_audio().is_some());
             self.view.drop = probe.clone();
             self.arrangement.drop = probe;
-            let meters = crate::meter::Meters::read(self.session().and_then(|s| s.player()).map(|p| p.meter_monitor()));
+            let meters =
+                crate::kit::meter::Meters::read(self.session().and_then(|s| s.player()).map(|p| p.meter_monitor()));
             // Meters fall for a moment after the sound stops: drawn again at once while they
             // move, and looked at again soon after they last moved, as the engine renders in
             // blocks that can be longer than a frame. An engine that stopped rendering leaves
@@ -1699,7 +1703,8 @@ impl App {
         let mut piano = self.piano_clip(clip);
         // The notes of other clips the piano roll draws behind this one's (› Ghost notes).
         if let (Some(piano), Some(clip), Some(session)) = (piano.as_mut(), clip, self.session()) {
-            piano.ghosts = crate::piano_roll_ghosts::ghosts(session.project(), clip, self.piano_roll.ghost_source);
+            piano.ghosts =
+                crate::detail::piano_roll_ghosts::ghosts(session.project(), clip, self.piano_roll.ghost_source);
         }
         let least = self.least_detail_height();
         let pullable = !stacked && piano.is_some() && self.shown == View::Arrangement;
@@ -1845,9 +1850,12 @@ impl App {
                 // (the quantise settings and Ctrl+U still work: › Other note tools).
                 if piano_roll.tools_open && !stacked {
                     let selected = piano_roll.selected.clone();
-                    let tools =
-                        crate::midi_tools::Tools { address: &piano.address, notes: &piano.notes, selected: &selected };
-                    rest = crate::midi_tools::show(ui, rest, &tools, piano_roll, actions);
+                    let tools = crate::detail::midi_tools::Tools {
+                        address: &piano.address,
+                        notes: &piano.notes,
+                        selected: &selected,
+                    };
+                    rest = crate::detail::midi_tools::show(ui, rest, &tools, piano_roll, actions);
                 }
                 let cx = piano_roll::Context { options, keymap: &keymap, copied, playhead };
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
@@ -1957,7 +1965,7 @@ impl App {
             }
         };
         if follows {
-            piano.grid_menu = crate::piano_roll_grid::PianoGrid::from_value(control_bar);
+            piano.grid_menu = crate::detail::piano_roll_grid::PianoGrid::from_value(control_bar);
         } else {
             piano.grid_menu = self.piano_grid;
             piano.grid = self.piano_grid.fixed_step(piano.bar_beats);
@@ -2653,10 +2661,10 @@ impl App {
         if !focused {
             return;
         }
-        let events = ui.input(|i| crate::launch_keys::key_events(&i.events));
+        let events = ui.input(|i| crate::session::launch_keys::key_events(&i.events));
         let mut taken = Vec::new();
         for (index, event) in events {
-            if keys.handle(project, &event, actions) == crate::launch_keys::Outcome::Taken {
+            if keys.handle(project, &event, actions) == crate::session::launch_keys::Outcome::Taken {
                 taken.push(index);
             }
         }
@@ -2703,7 +2711,11 @@ impl App {
         let notes = self.piano_roll.focused;
         let pressed = ui.input_mut(|i| {
             self.keymap.pressed(i, |id| {
-                if notes { !crate::keymap::not_in_piano_roll(id) } else { !crate::keymap::piano_roll_only(id) }
+                if notes {
+                    !crate::settings::keymap::not_in_piano_roll(id)
+                } else {
+                    !crate::settings::keymap::piano_roll_only(id)
+                }
             })
         });
         for action in pressed {
@@ -2800,7 +2812,7 @@ impl App {
             {
                 actions.push(edit)
             }
-            _ if crate::keymap::piano_roll_only(action) => actions.extend(self.piano_key(action)),
+            _ if crate::settings::keymap::piano_roll_only(action) => actions.extend(self.piano_key(action)),
             // In the Session view copy and paste act on the selected clip slot.
             "selection.copy" | "selection.paste" if self.shown == View::Session => {
                 let Some((track, scene)) = self.view.selected_slot else {
@@ -3231,7 +3243,7 @@ impl App {
             let keys = if embedded || ui.ctx().egui_wants_keyboard_input() {
                 Vec::new()
             } else {
-                ui.input_mut(|i| keymap.pressed(i, |id| !crate::keymap::piano_roll_only(id)))
+                ui.input_mut(|i| keymap.pressed(i, |id| !crate::settings::keymap::piano_roll_only(id)))
             };
             ui.input(|i| MapWindowFrame {
                 changed,
@@ -3626,7 +3638,7 @@ impl App {
                         };
                     decoded.into_iter().map(move |(stream, data)| {
                         let data = std::sync::Arc::new(data);
-                        let peaks = crate::waveform::peaks(&data);
+                        let peaks = crate::kit::waveform::peaks(&data);
                         (path.clone(), stream, data, peaks)
                     })
                 })
@@ -3725,7 +3737,7 @@ impl App {
     fn clip_progress(
         project: Option<&suhina_engine::model::Project>,
         monitor: &suhina_engine::LauncherMonitor,
-        column: &crate::grid::Column,
+        column: &crate::interaction::grid::Column,
     ) -> Option<f32> {
         // The launcher column's index in the monitor, and the slot playing there.
         let index = column.launcher?;
@@ -3833,7 +3845,7 @@ impl App {
         }
         let count_in = row(quant_rect.right() + PAD, 64.0);
         let bars = self.session().map_or(0, |s| s.count_in_bars());
-        crate::record_controls::count_in_menu(ui, count_in, bars, actions);
+        crate::session::record_controls::count_in_menu(ui, count_in, bars, actions);
 
         // Centre: play, stop, record, position.
         let transport_width = 28.0 * 3.0 + 2.0 + PAD + 64.0;
@@ -3867,7 +3879,7 @@ impl App {
         painter.rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 0.0, theme::text_primary());
         let record = row(stop.right() + 1.0, 28.0);
         let recording = self.session().is_some_and(|s| s.records_arrangement());
-        crate::record_controls::record_button(ui, &painter, record, recording, actions);
+        crate::session::record_controls::record_button(ui, &painter, record, recording, actions);
         x = record.right() + PAD;
         let position = row(x, 64.0);
         painter.rect_filled(position, 0.0, theme::window_background());
@@ -4023,7 +4035,7 @@ impl App {
             .and_then(Session::last_backup)
             .map(|b| format!(" · backed up {}", suhina_session::backup::clock_time(b.written)));
         let right = grid.map(|g| {
-            let tracks = g.columns.iter().filter(|c| c.kind != crate::grid::ColumnKind::Return).count();
+            let tracks = g.columns.iter().filter(|c| c.kind != crate::interaction::grid::ColumnKind::Return).count();
             format!("{tracks} tracks · {} scenes{}", g.scenes.len(), backed_up.as_deref().unwrap_or(""))
         });
         let right_width = match (&right, &backed_up) {

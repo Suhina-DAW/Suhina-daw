@@ -125,7 +125,7 @@ docs/
   INDEX.md    generated list of documents and the code each covers (scripts/docs.py)
   commands.md generated list of every command (suhina-cli commands --markdown)
 assets/brand/ the logo as SVG: `suhina-logo.svg` (the name with the wave, drawn on the splash by
-              `crates/ui/src/logo.rs`) and `suhina-mark.svg` (the wave mark alone, for icons)
+              `crates/ui/src/kit/logo.rs`) and `suhina-mark.svg` (the wave mark alone, for icons)
 third_party/  vendored source built behind a feature: the ASIO SDK's host part (GPL-3.0, `asio`)
 scripts/   research helpers (e.g. extracting and diffing .als files), the parity measurement
            (parity/, reading a manual the user owns; its output is never committed), docs.py
@@ -189,7 +189,7 @@ Several agents often run at once, so an agent never starts work that exists alre
 - **Before opening an issue**, search the open issues for the same problem; when one exists,
   comment there instead.
 - **Before writing code**, comment `/claim` with the plan and a `Touches:` line naming the paths
-  you will change (`Touches: crates/ui/src/piano_roll, crates/session`), and read the bot's answer.
+  you will change (`Touches: crates/ui/src/detail, crates/session`), and read the bot's answer.
   When it says the work is taken, that it is blocked by another issue, or that it is already yours
   and names a pull request, do not start a second one: continue in that pull request, take the
   blocking issue instead, or stop and tell the user.

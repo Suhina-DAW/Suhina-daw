@@ -7,9 +7,9 @@ last_verified: 2026-10-15
 covers:
   - crates/soundmap/**
   - crates/session/src/soundmap.rs
-  - crates/ui/src/sample_map.rs
-  - crates/ui/src/sample_map_crowd.rs
-  - crates/ui/src/sample_map_panel.rs
+  - crates/ui/src/browser/sample_map.rs
+  - crates/ui/src/browser/sample_map_crowd.rs
+  - crates/ui/src/browser/sample_map_panel.rs
 ---
 
 # Sample map
@@ -31,8 +31,8 @@ presets that come with audio previews (NKS) take part in the same map.
   the features, the layout methods and the cache.
 - **Status:** built, except NKS presets: the analysis, layout, grid, kinds and caches
   (`crates/soundmap`), the `soundmap.*` commands (`crates/session/src/soundmap.rs`), the map
-  view (`crates/ui/src/sample_map.rs`) and its place in the browser and the main area
-  (`crates/ui/src/sample_map_panel.rs`). NKS presets wait for the format to be checked on our
+  view (`crates/ui/src/browser/sample_map.rs`) and its place in the browser and the main area
+  (`crates/ui/src/browser/sample_map_panel.rs`). NKS presets wait for the format to be checked on our
   own files ([`nks-format.md`](nks-format.md) › To observe). Statements marked **(to decide)**
   are open.
 

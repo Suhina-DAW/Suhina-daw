@@ -5,8 +5,8 @@ type: spec
 status: current
 last_verified: 2026-10-16
 covers:
-  - crates/ui/src/settings_view.rs
-  - crates/ui/src/settings_rows.rs
+  - crates/ui/src/settings/settings_view.rs
+  - crates/ui/src/settings/settings_rows.rs
   - crates/ui/src/settings.rs
   - crates/ui/tests/settings_window.rs
 ---
@@ -81,7 +81,7 @@ shows that page; Escape in the field empties it (a second Escape closes Settings
 
 ## The table
 
-The window is drawn from one table, `ROWS` in `crates/ui/src/settings_rows.rs`: an entry per
+The window is drawn from one table, `ROWS` in `crates/ui/src/settings/settings_rows.rs`: an entry per
 setting with its page, its section, its name, its note, the keys it is saved under, and how its
 control is drawn. A page shows its entries in the table's order, starting a section where the
 section changes. Most entries are one row (a name, a note and a segmented control or a field); a

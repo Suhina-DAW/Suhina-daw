@@ -92,7 +92,7 @@ its comments say what the work waits for, so ask there instead of starting.
 **Claim it** in a comment on the issue before you write code:
 
 > /claim Plan: … When: …
-> Touches: crates/ui/src/piano_roll, crates/session
+> Touches: crates/ui/src/detail, crates/session
 
 The claim bot ([`docs/claim-bot.md`](docs/claim-bot.md)) moves the card to `In progress` and
 assigns you, and refuses the claim when the work is not free or another issue it is *Blocked by*
