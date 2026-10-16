@@ -52,6 +52,8 @@ const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
+/// How many recent projects File › Open recent lists.
+const RECENT_IN_MENU: usize = 10;
 /// The detail area's height in a row, by default, and the splitter between it and the view.
 const DETAIL_HEIGHT: f32 = 200.0;
 /// The least the view keeps above the detail area; pulled past it, the piano roll goes to the top.
@@ -248,6 +250,8 @@ pub struct App {
     project_lists: Lists,
     /// The dialog or the start panel opened and their lists should be read again, by the app.
     lists_wanted: bool,
+    /// The File menu showed last frame (File › Open recent reads its list as the menu opens).
+    file_menu_open: bool,
     /// The start panel, shown while no project is open.
     start: StartState,
     /// The start panel's lists were asked for since it last appeared.
@@ -349,6 +353,7 @@ impl App {
             project_dialog: None,
             project_lists: Lists::default(),
             lists_wanted: false,
+            file_menu_open: false,
             start: StartState::default(),
             start_lists: false,
             forget_request: None,
@@ -1556,6 +1561,31 @@ impl App {
         }
     }
 
+    /// File › Open recent: the recent projects the project dialog lists, newest first, each opened
+    /// as File › Open… opens a file. The list is read again each time the File menu opens.
+    fn open_recent_menu(&mut self, ui: &mut Ui, was_open: bool) {
+        self.file_menu_open = true;
+        if !was_open {
+            self.lists_wanted = true;
+        }
+        let recent: Vec<PathBuf> = self.project_lists.recent.iter().take(RECENT_IN_MENU).cloned().collect();
+        ui.add_enabled_ui(!recent.is_empty(), |ui| {
+            ui.menu_button("Open recent", |ui| {
+                for path in recent {
+                    let name =
+                        path.file_stem().map_or_else(|| path.display().to_string(), |s| s.to_string_lossy().into());
+                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                        if path.is_file() {
+                            self.request_open(path);
+                        } else {
+                            self.status = Status::Error(format!("{} is no longer there", path.display()));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
     /// What the Session view asked for this frame that the window keeps: the mixer's height,
     /// saved in Settings, and the detail area opened from a strip's device list.
     fn session_view_done(&mut self) {
@@ -2314,6 +2344,8 @@ impl App {
         let keymap = self.keymap.clone();
         let keys = move |action: &str| keymap.label(action).unwrap_or_default();
         ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::text_secondary());
+        // Whether the File menu showed last frame, so its recent list is read once as it opens.
+        let file_menu_was_open = std::mem::take(&mut self.file_menu_open);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.add(egui::Button::new("New or open…").shortcut_text(keys("file.new"))).clicked() {
@@ -2322,6 +2354,7 @@ impl App {
                 if ui.add(egui::Button::new("Open…").shortcut_text(keys("file.open"))).clicked() {
                     self.open_project_dialog(true);
                 }
+                self.open_recent_menu(ui, file_menu_was_open);
                 ui.separator();
                 if ui.add_enabled(has_project, egui::Button::new("Save").shortcut_text(keys("file.save"))).clicked() {
                     self.save_active(false);

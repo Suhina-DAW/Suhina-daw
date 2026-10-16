@@ -507,6 +507,9 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
 - **The detail area across the full width** ([#492](https://github.com/suhina-daw/suhina-daw/issues/492)):
   Settings › Interface › Detail area › Layout puts it beside the browser (as before) or under the
   browser too, spanning the whole window.
+- **File › Open recent** ([#314](https://github.com/suhina-daw/suhina-daw/issues/314)): the
+  recent projects, newest first, each opened as File › Open… opens a file (by the When opening a
+  project setting); a project that is gone says so in the status bar.
 - **Double-click makes a clip** ([#493](https://github.com/suhina-daw/suhina-daw/issues/493)):
   a setting in Settings › Interface, On by default; Off, a double-click on an empty slot or lane
   spot no longer makes an empty MIDI clip.

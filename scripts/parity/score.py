@@ -58,7 +58,7 @@ CHAPTERS = [
      "and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.38, "partial",
-     ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
+     ".suhina save/open, File > Open recent, .als import, templates, several projects in tabs, missing-file locate and "
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
