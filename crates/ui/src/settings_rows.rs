@@ -13,6 +13,7 @@ use crate::settings::{
     ToolbarSize, WarpMode,
 };
 use crate::settings_view::{Entry, Page, block, row};
+use crate::view_settings::DetailLayout;
 
 /// The keys of `keymap.json`, where the keys and the mouse switches are saved.
 pub(crate) const KEYMAP: &[&str] = &["keymap.json"];
@@ -200,6 +201,14 @@ pub(crate) static ROWS: &[Entry] = &[
     ),
     row(
         Page::Arrangement,
+        "Clips",
+        "Double-click makes a clip",
+        "On an empty slot or an empty spot of a lane",
+        &["double_click_clip"],
+        |cx, r| cx.on_off(r, |s| &mut s.view.double_click_clip),
+    ),
+    row(
+        Page::Arrangement,
         "Tracks",
         "Track headers",
         "Which side of the timeline they are on",
@@ -259,9 +268,9 @@ pub(crate) static ROWS: &[Entry] = &[
     ),
     block(
         Page::ClipEditor,
-        "Mouse",
-        "Mouse switches",
-        "Left click draws, right click deletes a note, Shift+right click splits, Alt+right plays from the point",
+        "Workflow",
+        "Workflow settings",
+        "Click and double-click on the grid and on notes, the right and Alt+right buttons, the duplicate key",
         KEYMAP,
         crate::settings_view::mouse_switches,
     ),
@@ -295,6 +304,17 @@ pub(crate) static ROWS: &[Entry] = &[
         |cx, r| {
             let options = [("Row", DeviceLayout::Row), ("Stack", DeviceLayout::Stack)];
             cx.choose(r, &options, |s| &mut s.device_layout);
+        },
+    ),
+    row(
+        Page::DetailArea,
+        "Devices",
+        "Detail area layout",
+        "Beside the browser, or across the whole window under it",
+        &["detail_layout"],
+        |cx, r| {
+            let options = [("Beside", DetailLayout::Beside), ("Full width", DetailLayout::FullWidth)];
+            cx.choose(r, &options, |s| &mut s.view.detail_layout);
         },
     ),
     // Browser.
@@ -420,7 +440,8 @@ mod tests {
 
     /// Kept in `settings.json` but changed outside the Settings window: the browser and the map
     /// window as they were left.
-    const NOT_IN_THE_WINDOW: [&str; 5] = ["browser", "browser_width", "map_dot_size", "map_window", "map_window_rect"];
+    const NOT_IN_THE_WINDOW: [&str; 6] =
+        ["browser", "browser_width", "map_dot_size", "map_window", "map_window_rect", "session_mixer_height"];
 
     fn saved_keys() -> Vec<String> {
         let settings = Settings { midi_inputs_off: vec!["Keys".into()], ..Settings::default() };

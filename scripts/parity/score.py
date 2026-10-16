@@ -28,12 +28,13 @@ MEASURED_COMMIT = "eeb8899"
 # including the workflow that regenerates them on main.
 SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 
-# The manual the measurement was read from, and the command count the report quotes. Both are kept
-# by hand: the manual is not in the repository, and docs/commands.md is regenerated on main, so a
-# pull request cannot read the count of a command it just added from it.
+# The manual the measurement was read from, kept by hand: the manual is not in the repository.
+# COMMANDS below is a placeholder that pull requests leave alone: update_report.py replaces it with
+# the count of docs/commands.md, generated from the command registry on main. It stays until the
+# pull requests opened before that change have merged, so the ones that changed it do not conflict.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 186
+COMMANDS = 190
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -44,7 +45,7 @@ CHAPTERS = [
      "(version, nightly date and commit, platform). Settings pages, grouped by task in headed sections, scrolling and searchable: General, Arrangement, Session and mixer, Clip editor, Transport, Detail area, Browser, Appearance (zoom, theme, graphics), MIDI, Audio (driver/device/rate/buffer/exclusive/cue; "
      "a change or a device back after unplugging keeps playback and launched clips going; "
      "input device, MIDI inputs on/off), "
-     "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
+     "Shortcuts, Plug-ins; the detail area beside the browser or across the full width. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
      "Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer "
@@ -58,7 +59,7 @@ CHAPTERS = [
      "and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.38, "partial",
-     ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
+     ".suhina save/open, File > Open recent, .als import, templates, several projects in tabs, missing-file locate and "
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
@@ -74,8 +75,11 @@ CHAPTERS = [
      "through them and marks them). A clip's loop range is read and drawn but no "
      "command sets it. Missing previous/next marker, punch in/out, editing signature changes on the ruler, "
      "time selections, crop, crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.62, "partial",
-     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
+    (7, "Session View", 13, 0.66, "partial",
+     "Slots, scenes, scene launch, stop buttons, track status, quantised launching, a mixer resized "
+     "from its top edge with a channel strip per track that shows more as it grows (volume fader "
+     "with meter and dB, pan, sends, name, device list), a double-click that makes a clip (a "
+     "setting), "
      "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
      "the view switch); "
      "scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature "
@@ -98,18 +102,29 @@ CHAPTERS = [
      "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
      "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
      "automation envelope."),
-    (10, "Editing MIDI", 41, 0.37, "started",
+    (10, "Editing MIDI", 41, 0.44, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
      "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute "
      "tools (keys 1 to 6, the wheel with the right button held steps through them) and "
-     "its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, "
+     "its own grid value (one grid menu: snap on or off, adaptive widths that follow the zoom, fixed "
+     "values, finer and coarser, triplets, Ctrl+1 to Ctrl+4), pulled up to the full height, copies, cuts, pastes and duplicates them, "
      "splits them at a drawn cut line (note.split splits every note the line crosses), plays keys "
      "through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is "
      "never played, in the model, the project file and an imported Live Set), "
      "quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, "
-     "through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty "
-     "MIDI clip is made with a double-click on a slot or a lane (clip.create). No "
-     "fold, scales, chords, probability or MPE lanes."),
+     "through note.* commands with undo; a duplicated clip's notes are its own once edited. A "
+     "workflow menu in its toolbar switches between three presets and a Custom mix of the click, "
+     "right-click, double-click and duplicate behaviours. The ruler shows the clip's loop and its "
+     "start and end markers, dragged on the grid (clip.setLoop, clip.setStart, clip.setLength), "
+     "zooms and scrolls time when dragged, and Z and Shift+Z zoom to the selection or the clip. A note's "
+     "left edge moves its start, Ctrl+drag copies, Alt+drag sets velocity, a line drawn in the "
+     "velocity lane sets many stems, the lane's height is dragged and an Audition button sounds "
+     "drawn and moved notes. Ghost notes of the clips playing together, of the same track or of "
+     "one picked clip are drawn faintly behind the notes. An empty "
+     "MIDI clip is made with a double-click on a slot or a lane (clip.create). A clip has a scale "
+     "(clip.setScale, a project default new clips take) whose keys the rows mark, and Fold and Fold "
+     "to scale show only the keys with notes or in the scale. No "
+     "chords, probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.12, "started",
      "A MIDI tools column runs quantise, transpose, humanise, fit to scale, invert, reverse, legato, "
      "x2 and /2 and the velocity randomise and ramp over the selection or the whole clip, each one "
@@ -134,17 +149,20 @@ CHAPTERS = [
      "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
      "with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No "
      "MIDI out, external instrument, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.57, "partial",
-     "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
+    (18, "Mixing", 18, 0.59, "partial",
+     "Faders (vertical in the Session view's channel strips), pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
      "sends pre or post fader into return tracks that run their device chains (track.setSend, "
      "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level "
      "meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output "
      "on a second pair of the device (previews, per-track cue, cue volume); return tracks "
      "imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers."),
-    (19, "Recording New Clips", 13, 0.00, "absent",
-     "Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI "
-     "recording, no overdub, no count-in, no capture MIDI."),
+    (19, "Recording New Clips", 13, 0.45, "partial",
+     "Arming and input monitoring (MIDI controllers, audio inputs); MIDI and audio recording into "
+     "an empty slot from the next launch boundary (ended on the next one, then played looped) or "
+     "into the arrangement, several armed tracks at once, a count-in of 1, 2 or 4 bars, takes lined "
+     "up with what was heard, audio written to WAV files off the audio thread, one undo step per "
+     "take. Missing overdub, punch in/out, recording automation, capture MIDI, session record button."),
     (20, "Bounce to Audio", 6, 0.15, "partial",
      "Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its "
      "running plug-ins' state as heard; no per-track or group bounce, no paste."),
@@ -153,8 +171,10 @@ CHAPTERS = [
      "Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, "
      "resampling) exists in crates/separation with a test backend; no model and nothing a user "
      "can run yet."),
-    (23, "Working with Instruments and Effects (Device View)", 34, 0.35, "partial",
+    (23, "Working with Instruments and Effects (Device View)", 34, 0.36, "partial",
      "Device chains per track and bus, parameters through device.* commands and the detail area, "
+     "the devices one click from a MIDI clip's editor (a Clip / Devices switch, Ctrl+Shift+D) and "
+     "a double-click on a track header or channel strip that shows its devices, "
      "DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. "
      "SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, "
      "graphs and custom panels, and support explicit revision updates. Missing A/B, "

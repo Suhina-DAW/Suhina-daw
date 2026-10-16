@@ -345,8 +345,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   another and answers once, which at small buffers takes about a third of the time of a round
   trip each, with the same sound
   ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)).
-- Still to do: waiting for each chain's plug-in as it answers
-  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), checking an imported Live Set
+- Each track's chain goes on to its next plug-in as soon as its own plug-in answers, while the
+  other tracks' plug-ins are still working, so heavy plug-ins on different tracks cost a block
+  about one heavy plug-in, and a slow or hung plug-in holds up only its own track
+  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)).
+- Still to do: checking an imported Live Set
   with real plug-ins ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and
   macOS editors, VST2 hosting (not decided).
 
@@ -497,8 +500,24 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   [#397](https://github.com/suhina-daw/suhina-daw/issues/397)).
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
-- Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
+- Send knobs in the Session mixer strip, one per return in the strip's sends row: drag for the level,
   double-click for off, right-click for before or after the fader.
+- **A channel strip per track in the Session view** ([#491](https://github.com/suhina-daw/suhina-daw/issues/491)):
+  the mixer under the slots is resized from its top edge (46 px up to just under the last
+  scene's stop row, 166 px by default, kept in Settings), and each strip shows more as it grows:
+  a compact volume at the least height, then a volume fader with the meter beside it and its dB
+  value, pan, the sends, the track's name, and a list of its devices and plug-ins (a click shows
+  them in the detail area). The fader is one undo step per drag, a double-click sets 0 dB
+  ([spec](docs/spec/ui-session-view.md)).
+- **The detail area across the full width** ([#492](https://github.com/suhina-daw/suhina-daw/issues/492)):
+  Settings › Interface › Detail area › Layout puts it beside the browser (as before) or under the
+  browser too, spanning the whole window.
+- **File › Open recent** ([#314](https://github.com/suhina-daw/suhina-daw/issues/314)): the
+  recent projects, newest first, each opened as File › Open… opens a file (by the When opening a
+  project setting); a project that is gone says so in the status bar.
+- **Double-click makes a clip** ([#493](https://github.com/suhina-daw/suhina-daw/issues/493)):
+  a setting in Settings › Interface, On by default; Off, a double-click on an empty slot or lane
+  spot no longer makes an empty MIDI clip.
 - Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
   `track.adjustPan` move each track by the same amount, keeping what is between them, and
   `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
@@ -512,6 +531,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/cue-output.md)).
 - A track header 70 px or taller shows where the track plays: the main output or a group
   (`track.setOutput`, loops refused).
+- The Session view's channel strip shows where each track plays ("→ Main" or a group) once the
+  mixer is 192 px or taller, and its dropdown routes the track (`track.setOutput`, one undo step).
 - A clip dropped over others replaces what it covers (shortens, splits or removes them), or
   stacks with them when Allow sample / MIDI stacking is on; stacked clips share the lane in
   sub-rows ([spec](docs/spec/arrangement-editing.md)).
@@ -578,14 +599,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   and the Arrangement headers (`track.setArm`; a click arms one track, Ctrl adds), every MIDI
   input port opened and Settings › MIDI to turn one off (`midi.inputs`,
   `midi.setInput`); a controller plugged in later is found within seconds. The latency follows
-  the buffer size. Still to do: recording
-  ([#263](https://github.com/suhina-daw/suhina-daw/issues/263)).
+  the buffer size.
 - **Audio input and monitoring:** choose an input device in Settings › Audio (off by default);
   each audio track hears one channel or a stereo pair of it, monitored while armed (Auto),
   always (In) or never (Off), through its devices and mix (`track.setAudioInput`); arm many
   tracks at once to hear a band on separate tracks
-  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017). Recording is next
-  ([#268](https://github.com/suhina-daw/suhina-daw/issues/268)).
+  ([#267](https://github.com/suhina-daw/suhina-daw/issues/267), ADR 0017).
 - **A MIDI input per track:** each track hears every MIDI port, one port, or none, and every
   channel or one, so a keyboard and a pad controller (or two players) each play their own armed
   track; set from the track's menu or the Arrangement header (`track.setMidiInput`), saved with
@@ -594,6 +613,20 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ahead of the device instead of two, and Settings › Audio and `audio.info` say how long a key
   takes to be heard (`live_latency_ms`); at 128 frames, at most about 5 ms plus the device
   ([#265](https://github.com/suhina-daw/suhina-daw/issues/265), ADR 0017).
+- **Notes keep their timing:** a note from a MIDI controller is played a fixed delay after the
+  time the driver stamped it with, at the frame where that falls, instead of on the next block's
+  first frame, so fast playing no longer jitters by up to a block
+  ([#269](https://github.com/suhina-daw/suhina-daw/issues/269), ADR 0017).
+- **Recording:** an armed track records into an empty clip slot from the next launch boundary
+  (the slot's record button, `clip.record`; a second click ends the take on the next boundary
+  and plays it, looped) or into the arrangement (the control bar's record button,
+  `transport.record`), with a count-in of 1, 2 or 4 bars (`transport.setCountIn`). Tracks that
+  play notes record what their MIDI controllers play; tracks with an audio input record it to a
+  WAV file in `Recorded/` next to the project, written off the audio thread. Takes are lined up
+  with what was heard (the key-to-sound and input latency taken off), and each take is one undo
+  step ([#266](https://github.com/suhina-daw/suhina-daw/issues/266),
+  [#268](https://github.com/suhina-daw/suhina-daw/issues/268),
+  [spec](docs/spec/recording.md)).
 - A buffer size is never asked of a driver that did not declare it: the dropdown lists the sizes
   the device's own range allows, a range holding none of the engine's sizes (or no range at all)
   leaves the driver its own buffer size and the notice says which size plays, and on WASAPI shared
@@ -657,6 +690,53 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
   (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
   their own, kept in `keymap.json`.
+- **Piano roll workflow modes** ([#490](https://github.com/suhina-daw/suhina-daw/issues/490)): a
+  workflow menu in the piano roll's toolbar switches between Select-first, Draw-first, Mouse-first
+  and **Custom** at any time; every behaviour that differs between them (click on empty grid,
+  right-click on a note, Shift+right, Alt+right, the duplicate key, double-click on empty grid and
+  on a note) is a setting of its own, and changing one makes the mode Custom, kept in
+  `keymap.json`. A double-click is counted by the piano roll itself, so it works right after
+  another click, adds one note in Mouse-first instead of adding and deleting it, and mutes or
+  erases one note in the Mute and Erase tools.
+- **The piano roll's grid menu** ([#346](https://github.com/suhina-daw/suhina-daw/issues/346)): the
+  grid value at the right end of the piano roll's toolbar opens one menu with **Snap to grid**, an
+  **adaptive grid** in five widths whose lines get finer as the view zooms in and coarser as it
+  zooms out, the **fixed** values from 8 bars to 1/32, **Narrow grid** and **Widen grid**, and
+  **Triplet grid**, each with its key: Ctrl+1 and Ctrl+2 make the grid finer and coarser, Ctrl+3
+  toggles triplets and Ctrl+4 snapping (in the keymap). With snapping off the lines stay and notes
+  are placed freely.
+- **The piano roll's ruler** ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)): an
+  8 px loop row shows the clip's loop as a bar with a handle at each end, and the bar numbers under
+  it the clip's start marker and, for a clip that does not loop, its end marker; dragging a handle,
+  the bar or a marker changes the loop, the start or the length on the piano roll's grid (Alt
+  free), one undo step each (`clip.setLoop {start, end}`, which now takes arrangement clips too,
+  `clip.setStart`, `clip.setLength`), and a click on the bar turns the loop on or off. Notes
+  outside the part the clip plays are shaded like the grid past its end. Dragging the ruler up and
+  down zooms time, sideways scrolls it; **Z** zooms to the selected notes and **Shift+Z** to the
+  whole clip.
+- **The piano roll's note gestures** ([#351](https://github.com/suhina-daw/suhina-daw/issues/351)):
+  dragging a note's left edge moves the selection's starts and keeps their ends (on the grid, Alt
+  free; `note.resize {startBy}`); Ctrl+drag (Cmd on macOS) copies the selection to where it is let
+  go and selects the copies (`note.duplicate {beats, semitones}`); Alt+drag on a note changes the
+  selection's velocity and shows the value; a drag from an empty spot of the velocity lane draws a
+  line that sets every stem it spans in one step (`note.setVelocity {velocities}`); the lane's top
+  edge drags it taller or shorter; and the toolbar's **Audition** button (off at start) makes drawn
+  and moved notes sound once through the track's instrument (`preview.noteOn {keys}`).
+- **Ghost notes in the piano roll** ([#348](https://github.com/suhina-daw/suhina-daw/issues/348)):
+  the notes of other clips are drawn faintly behind the edited clip's, in their own track's colour,
+  so a part can be written against another (a bass line against the chords). The toolbar's
+  **Ghosts** menu shows the clips playing at the same time (the default; for a slot's clip, the
+  other slots of its scene), the other clips of the same track, one clip picked from a list, or
+  none. Ghost notes are mapped through each clip's start, offset and loop, never take a click, and
+  the choice is a view setting kept until Suhina closes, not saved with the project.
+- **Clip scales and folding in the piano roll** ([#347](https://github.com/suhina-daw/suhina-daw/issues/347)):
+  a MIDI clip can have a scale (a root, C to B, and a mode: major, minor, harmonic and melodic
+  minor, the church modes, the pentatonics and blues), saved with the project. The toolbar's
+  **Scale** menu sets it (`clip.setScale`, one undo step) and the rows of its keys are lighter, with
+  a mark on the key column; **Fold** shows only the keys that have notes and **Fold to scale** the
+  scale's keys (and any key with a note), and clicks, drawing and drags work on the rows shown. The
+  project's default scale (`project.setDefaultScale`) is taken by new MIDI clips, and
+  `note.fitToScale` fits to the clip's scale when given none.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the
@@ -667,6 +747,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
+- **A MIDI clip's track devices one click away** ([#505](https://github.com/suhina-daw/suhina-daw/issues/505)):
+  the clip column's **Clip / Devices** switch (Ctrl+Shift+D, View › Show devices) puts the track's
+  device chain where the piano roll was and back, and a double-click on a track's header, a Session
+  column's name or its channel strip shows that track's devices, opening the detail area if it was
+  hidden ([spec](docs/spec/ui-clip-editor.md)).
 - In the Session view a click on a clip's name selects it and its mark launches it; the detail area
   shows a slot's clip (scene, length, loop, gain, fades). Launching selects the clip too (Settings ›
   Session and mixer › Select on launch), Enter launches the selected slot and the arrow keys

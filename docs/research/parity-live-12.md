@@ -20,12 +20,16 @@ everything outside those markers is prose, and it is edited here. The rule that 
 > **A number lives in a marked part. Prose does not quote a number the marks already carry.** If a
 > sentence needs one, the sentence goes inside a marker.
 
-CI runs `update_report.py --check`, so changing the numbers fails a pull request until the marked
-parts are regenerated with it:
+The marked parts are regenerated on `main` after every merge, by the same workflow that writes
+[`docs/INDEX.md`](../INDEX.md) and [`docs/commands.md`](../commands.md)
+([`docs-generated.yml`](../../.github/workflows/docs-generated.yml)), so a pull request changes only
+the inputs and two pull requests never conflict on the numbers. The command count comes from the
+command registry, through `docs/commands.md`. CI checks that the inputs render and the markers are
+whole, not that the marked parts are current:
 
 ```sh
-python scripts/parity/update_report.py          # rewrite the marked parts
-python scripts/parity/update_report.py --check  # what CI runs
+python scripts/parity/update_report.py --check-inputs  # what CI runs on a pull request
+python scripts/parity/update_report.py                 # rewrite the marked parts, to look; not committed
 ```
 
 | To change | Edit |
@@ -36,8 +40,9 @@ python scripts/parity/update_report.py --check  # what CI runs
 | a **new measurement**: the page counts, the section counts, the date, the commit | run `scripts/parity/run.py --pdf <a manual you own>`, then `MEASURED_AT`, `MEASURED_COMMIT`, `MANUAL_CHAPTERS`, `MANUAL_PDF_PAGES` and `SECTIONS` in `score.py` |
 
 The measurement's date and commit appear in the title and on both figures, so a stale measurement is
-visible rather than implied. `last_verified` in the front matter is set by hand: it is the day
-someone last checked this text against the code.
+visible rather than implied. `last_verified` in the front matter is stamped on `main` when a pull
+request changes this text (`scripts/docs.py stamp`; the docs bot's regenerations do not count), and
+set by hand by someone who checks the text against the code without changing it.
 
 This is an internal status measurement, not product text: it names Live and its devices only to
 say what Suhina does and does not have yet (AGENTS.md rule 8 keeps those names out of Suhina's own
@@ -67,11 +72,11 @@ documentation and UI). The scope decision it leads to is
 | The manual it was measured from | 43 chapters, 1039 PDF pages, 999 pages of feature text |
 | Page-weighted coverage of everything the manual documents | **about 22 %** |
 | Same, without Push 1 and 2, Max for Live (+ its devices) and video | **about 26 %** |
-| Same, over the scope the roadmap aims at (also without accessibility) | **about 26 %** |
+| Same, over the scope the roadmap aims at (also without accessibility) | **about 27 %** |
 | Weighting each chapter by its numbered sections instead of its pages | **17 %** (the two weightings agree) |
 | Numbered manual sections | **344**, of which **111 (32 %)** sit in chapters Suhina has not started at all |
 | Built-in devices | **8** (7 effects, 1 instrument) against Live's 63 (42 audio effects, 8 MIDI effects, 13 instruments) |
-| Commands | **186**, every one reachable from the UI, the CLI and MCP |
+| Commands | **191**, every one reachable from the UI, the CLI and MCP |
 | Still absent as whole features | MPE, Grooves, Tuning, Recording, Comping, Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |
 <!-- parity:end -->
 
@@ -123,15 +128,15 @@ documented behaviour that exists today.
 | # | Chapter | Manual pages | Suhina covers | Status | What exists / what is missing |
 |---|---|---|---|---|---|
 | 1 | Welcome to Live | 1 | — | n/a | Front matter. |
-| 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 52 % | partial | Release and nightly packages for Windows, macOS and Linux; Help > About names the build (version, nightly date and commit, platform). Settings pages, grouped by task in headed sections, scrolling and searchable: General, Arrangement, Session and mixer, Clip editor, Transport, Detail area, Browser, Appearance (zoom, theme, graphics), MIDI, Audio (driver/device/rate/buffer/exclusive/cue; a change or a device back after unplugging keeps playback and launched clips going; input device, MIDI inputs on/off), Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
+| 2 | First Steps (installation, Learn/Info view, Settings) | 11 | 52 % | partial | Release and nightly packages for Windows, macOS and Linux; Help > About names the build (version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue; a change or a device back after unplugging keeps playback and launched clips going; input device, MIDI inputs on/off), Shortcuts, Plug-ins; the detail area beside the browser or across the full width. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, Learn view, Info view. |
 | 3 | Live Concepts | 27 | 50 % | partial | Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer concepts exist. Routing, recording, racks, clip/device view and presets are missing or thin. |
 | 4 | Working with the Browser | 60 | 49 % | partial | Search, categories, folders watched on disk, pins, recent, colour tags, preview through the engine, sample map by sound similarity (smooth with 200 000 items, also while its window is resized) with kinds recognised from the sound and set by hand; samples and MIDI files dragged from the system's file manager land like a browser drag (exact placement waits for pointer positions from the windowing layer); installed plug-ins grouped by vendor, by type (instrument and effect groups from the formats' own categories) or in a flat list sortable by name, vendor, type, format and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, Cloud, Push transfer, filter groups, browser history. |
-| 5 | Managing Files and Sets | 43 | 38 % | partial | .suhina save/open, .als import, templates, several projects in tabs, missing-file locate and relink, backups on an interval or before critical operations with the offer after a crash. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
+| 5 | Managing Files and Sets | 43 | 38 % | partial | .suhina save/open, File > Open recent, .als import, templates, several projects in tabs, missing-file locate and relink, backups on an interval or before critical operations with the offer after a crash. Missing project folders/collect, unused files, packing, .asd, decoding cache, set merging, file-reference view, export audio/video. |
 | 6 | Arrangement View | 22 | 59 % | partial | Layout, zoom, transport, ruler/play start, play from the selected clip, clip drag+move, overlap replace/stack, fades and fade shapes, the control bar's grid value (bars to triplets, or none) drawn as lines that adapt to the zoom and snapping moves, drops, fades and ruler clicks (Alt for off the grid), nested groups folded and unfolded, tracks dragged into and out of groups, markers (locators: add, move, rename, delete, jump; imported from Live Sets), the arrangement loop brace (draw, resize, move, on/off with Ctrl+L; playback wraps sample-accurately; imported from Live Sets), split at the playhead or a clicked beat, consolidate (MIDI joined, audio rendered to a file), time-signature changes (commands; the ruler counts bars through them and marks them). A clip's loop range is read and drawn but no command sets it. Missing previous/next marker, punch in/out, editing signature changes on the ruler, time selections, crop, crossfades, linked-track editing, the time commands. |
-| 7 | Session View | 13 | 62 % | partial | Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over the view switch); scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature each. A launched clip is selected and the detail area shows its follow-action controls. Missing capture-and-insert scene, moving clips between slots, select-on-launch options. |
+| 7 | Session View | 13 | 66 % | partial | Slots, scenes, scene launch, stop buttons, track status, quantised launching, a mixer resized from its top edge with a channel strip per track that shows more as it grows (volume fader with meter and dB, pan, sends, name, device list), a double-click that makes a clip (a setting), selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over the view switch); scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature each. A launched clip is selected and the detail area shows its follow-action controls. Missing capture-and-insert scene, moving clips between slots, select-on-launch options. |
 | 8 | Clip View | 34 | 18 % | started | Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll (docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of tool icons with the note clipboard and a toolbar size, a MIDI tools column beside the notes, and the selection described in the clip column (count, span, pitch and velocity range); the editor keeps a least height with its notes in view and closes by its splitter, an x or View > Hide editor, opening again when a clip is selected. No loop or marker editing, no clip panels, no sample editor, no groove/scale panels. |
 | 9 | Audio Clips, Tempo, and Warping | 18 | 38 % | partial | Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, six warp modes in the model, tempo detect for the browser. One stretch algorithm serves every mode except Re-pitch, so the mode names are not yet different algorithms, and rates outside 0.25x-4x fall back to Re-pitch. Tempo changes over the song (steps and ramps, a tempo map every clip follows, read from a set's tempo envelope; a scene tempo overrides it until transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an automation envelope. |
-| 10 | Editing MIDI | 41 | 37 % | started | A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute tools (keys 1 to 6, the wheel with the right button held steps through them) and its own grid value, pulled up to the full height, copies, cuts, pastes and duplicates them, splits them at a drawn cut line (note.split splits every note the line crosses), plays keys through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is never played, in the model, the project file and an imported Live Set), quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, through note.* commands with undo; a duplicated clip's notes are its own once edited. An empty MIDI clip is made with a double-click on a slot or a lane (clip.create). No fold, scales, chords, probability or MPE lanes. |
+| 10 | Editing MIDI | 41 | 44 % | started | A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute tools (keys 1 to 6, the wheel with the right button held steps through them) and its own grid value (one grid menu: snap on or off, adaptive widths that follow the zoom, fixed values, finer and coarser, triplets, Ctrl+1 to Ctrl+4), pulled up to the full height, copies, cuts, pastes and duplicates them, splits them at a drawn cut line (note.split splits every note the line crosses), plays keys through the track's instrument, mutes and unmutes notes (a muted note keeps its place and is never played, in the model, the project file and an imported Live Set), quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, through note.* commands with undo; a duplicated clip's notes are its own once edited. A workflow menu in its toolbar switches between three presets and a Custom mix of the click, right-click, double-click and duplicate behaviours. The ruler shows the clip's loop and its start and end markers, dragged on the grid (clip.setLoop, clip.setStart, clip.setLength), zooms and scrolls time when dragged, and Z and Shift+Z zoom to the selection or the clip. A note's left edge moves its start, Ctrl+drag copies, Alt+drag sets velocity, a line drawn in the velocity lane sets many stems, the lane's height is dragged and an Audition button sounds drawn and moved notes. Ghost notes of the clips playing together, of the same track or of one picked clip are drawn faintly behind the notes. An empty MIDI clip is made with a double-click on a slot or a lane (clip.create). A clip has a scale (clip.setScale, a project default new clips take) whose keys the rows mark, and Fold and Fold to scale show only the keys with notes or in the scale. No chords, probability or MPE lanes. |
 | 11 | MIDI Tools | 37 | 12 % | started | A MIDI tools column runs quantise, transpose, humanise, fit to scale, invert, reverse, legato, x2 and /2 and the velocity randomise and ramp over the selection or the whole clip, each one note.* command with undo and a seed for the random ones. No chord/strum/arpeggiate tools, no generative or shape-based tools. |
 | 12 | Editing MPE | 10 | 0 % | absent | No MPE data, editing or MPE-aware devices. |
 | 13 | Converting Audio to MIDI | 5 | 5 % | planned | Spec written (docs/spec/audio-to-midi.md); slicing and the four detectors are roadmap. |
@@ -139,12 +144,12 @@ documented behaviour that exists today.
 | 15 | Using Tuning Systems | 9 | 0 % | absent | No .scl/.ascl tuning systems. |
 | 16 | Launching Clips | 12 | 77 % | partial | Launch quantisation (none, 8 bars..1/32, triplets), scenes (with their tempo and time signature), stop, loop, back to arrangement (the arrangement's dimmed lanes and the ruler's button), warped launched clips, follow actions (A/B by chance, linked or timed, jump to a slot; by command and in the detail area), samples looping in slots with or without a known tempo, a slot clip's loop switched on or off (clip.setLoop), launch modes (trigger, gate, toggle, repeat) with press and release, legato, per-clip launch quantisation, slots and scenes launched from computer keys. Missing velocity amount, clip offset/nudge, launching from live MIDI notes, follow-action multiplier and scene follow actions. |
 | 17 | Routing and I/O | 22 | 35 % | partial | Track output to main or a group (track.setOutput); MIDI controllers play the armed tracks, each track choosing its MIDI port and channel (track.setMidiInput); an audio input device with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No MIDI out, external instrument, resampling, sidechain, multi-timbral. |
-| 18 | Mixing | 18 | 57 % | partial | Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute through the levels), master, latency compensation, sends pre or post fader into return tracks that run their device chains (track.setSend, track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output on a second pair of the device (previews, per-track cue, cue volume); return tracks imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers. |
+| 18 | Mixing | 18 | 59 % | partial | Faders (vertical in the Session view's channel strips), pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute through the levels), master, latency compensation, sends pre or post fader into return tracks that run their device chains (track.setSend, track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level meters (peak, RMS, clip) per track, group, return and main, also over MCP, and a cue output on a second pair of the device (previews, per-track cue, cue volume); return tracks imported and drawn. Missing crossfader, track delay, send fields in the Arrangement headers. |
 | 19 | Recording New Clips | 13 | 0 % | absent | Arming and input monitoring exist (MIDI controllers, audio inputs); no audio or MIDI recording, no overdub, no count-in, no capture MIDI. |
 | 20 | Bounce to Audio | 6 | 15 % | partial | Whole-project offline render to 32-bit float WAV (CLI/MCP), from an open project with its running plug-ins' state as heard; no per-track or group bounce, no paste. |
 | 21 | Comping | 6 | 0 % | absent | No take lanes, no comping. |
 | 22 | Stem Separation | 8 | 0 % | planned | Roadmap item (Demucs candidate, weights unaudited). The pipeline around a model (chunking, resampling) exists in crates/separation with a test backend; no model and nothing a user can run yet. |
-| 23 | Working with Instruments and Effects (Device View) | 34 | 35 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, graphs and custom panels, and support explicit revision updates. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
+| 23 | Working with Instruments and Effects (Device View) | 34 | 36 % | partial | Device chains per track and bus, parameters through device.* commands and the detail area, the devices one click from a MIDI clip's editor (a Clip / Devices switch, Ctrl+Shift+D) and a double-click on a track header or channel strip that shows its devices, DX7 voices, stock-preset ADR, latency compensation, plug-in state in the panel. SDK-authored .sd effects and instruments load onto tracks, embed in projects, expose parameters, graphs and custom panels, and support explicit revision updates. Missing A/B, hot-swap, preset browser depth, defaults, device delay review. |
 | 24 | Using Plug-Ins | 12 | 64 % | partial | CLAP and VST3 hosted out of process, sandboxed, VST3 bundles on Windows, macOS and Linux, editors (Windows/X11), scans, latency compensation (followed when a plug-in changes its latency while it plays), saved state (a change in an editor counts as unsaved), VST2 read and matched to VST3, parameters set and automated from the engine. Missing AU, VST2 hosting, configure mode, VST preset banks, sidechain parameters. |
 | 25 | Instrument, Drum and Effect Racks | 20 | 3 % | absent | A track's device chain is a single serial chain. No parallel chains, macros, key/velocity/chain zones, drum pads or rack presets. |
 | 26 | Automation and Editing Envelopes | 22 | 45 % | partial | Envelopes for track volume, pan and mute, built-in device and plug-in parameters: breakpoints with curved segments and jumps, saved, played in playback and renders (64-frame steps, ramped mixer gains), a manual change turning a lane off until re-enabled. Lanes under each track in the Arrangement: a parameter chooser, points added, moved on the grid, selected and moved or deleted together, curves bent by dragging, re-enabled from the lane. Missing recording, drawing with a pencil, plug-in lanes in the view, send, master and tempo automation, locking, simplifying envelopes. |
@@ -172,10 +177,10 @@ documented behaviour that exists today.
 <!-- parity:begin area-table -->
 | Area | Manual pages | Covered |
 |---|---|---|
-| Views and editing (ch 6-10, 16) | 140 | 42 % |
+| Views and editing (ch 6-10, 16) | 140 | 44 % |
 | Browser, files, project (ch 4, 5) | 103 | 44 % |
 | Devices (ch 23-25, 29-31) | 338 | 15 % |
-| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 44 % |
+| Mixing, routing, I/O (ch 17, 18, 38) | 47 | 45 % |
 | Automation, envelopes (ch 26, 27) | 35 | 28 % |
 | Generative/transform (ch 11-15) | 67 | 7 % |
 | Recording, bounce, comp (ch 19-22) | 33 | 3 % |
@@ -346,11 +351,11 @@ or does something Live does not:
 |---|---|---|---|
 | Devices: effects and instruments | 338 (ch 23-25, 29-31) | 15 % | 35 more audio effects and 12 more instruments, or a decision to cover the common ones only |
 | Browser and file management depth | 103 (ch 4, 5) | 44 % | collections, tag editor, project folders, collect files, unused files, packs, cloud |
-| Views and clip editing | 140 (ch 6-10, 16) | 42 % | MIDI note editor, clip view panels, time selections |
+| Views and clip editing | 140 (ch 6-10, 16) | 44 % | MIDI note editor, clip view panels, time selections |
 | MIDI tools, MPE, grooves, tuning | 67 (ch 11-15) | 7 % | transformation and generative tools, MPE editing, groove pool, tuning systems |
 | Automation and clip envelopes | 35 (ch 26, 27) | 28 % | drawing and recording automation lanes, send and tempo automation, clip envelopes |
 | Recording, bounce, comping | 33 (ch 19-22) | 3 % | audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce |
-| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 44 % | crossfader, inputs and monitoring, resampling |
+| Mixing, routing, I/O | 47 (ch 17, 18, 38) | 45 % | crossfader, inputs and monitoring, resampling |
 | Outside a DAW's own scope | 175 (ch 28, 32-37, 41) | 2 % | video, Max for Live, Push 1 and 2, Link, accessibility - ADR 0016 leaves most of this out |
 <!-- parity:end -->
 
@@ -359,8 +364,8 @@ Two observations the numbers make plain:
 1. **The device catalogue is the single largest lever.** The device reference chapters are the
    biggest block of the manual and Suhina covers the smallest share of them. Nothing else moves the
    headline number as much.
-2. **Whole features, not thin features, dominate the rest.** Recording, automation, racks and MIDI
-   editing are each absent, not partial. They are also the areas where a DAW is judged by people
+2. **Whole features, not thin features, dominate the rest.** Racks, comping and MIDI effects are
+   each absent, not partial. They are also the areas where a DAW is judged by people
    coming from Live, because a missing channel is felt at once.
 
 ## 8. What the roadmap covers, and what nothing covers
@@ -431,8 +436,9 @@ and the build order into a decision; the milestone assignment itself is still op
 The manual is not in the repository, and neither are the numbers it was read for. Two ways to get
 this document and its figures:
 
-**From the numbers already recorded** (no manual needed; this is what a contributor who changed
-`score.py` or `devices.json` runs, and what CI checks):
+**From the numbers already recorded** (no manual needed; this is what the workflow on `main` runs
+after every merge, and what a contributor who changed `score.py` or `devices.json` may run to look
+at the result before leaving it out of the commit):
 
 ```sh
 python scripts/parity/score.py          # the roll-ups, printed
@@ -460,8 +466,8 @@ figures:
 
 **Keeping it current.** Every pull request that adds, changes or removes something a user can do
 updates the coverage it moves in `score.py` (and `devices.json` for a built-in effect or
-instrument) and runs `update_report.py`, in the same pull request; one that moves no coverage says
-`Parity: no change` and why in its description
+instrument), in the same pull request, and leaves the marked parts to `main`; one that moves no
+coverage says `Parity: no change` and why in its description
 ([AGENTS.md › Before you finish a task](../../AGENTS.md#4-before-you-finish-a-task)).
 `scripts/parity/pr_notice.py`, run by
 [`.github/workflows/parity-notice.yml`](../../.github/workflows/parity-notice.yml), warns on a pull

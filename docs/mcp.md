@@ -1,9 +1,9 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
+read_when: MCP, agents, audio output, MIDI input, arm, record, recording, count-in, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
 type: system
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -80,8 +80,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   the engine's block alone and `buffer_sizes` the engine's own sizes. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
   `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `live` (a track is
-  armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (the longest a
-  key on a MIDI controller takes to be heard), `underruns`, `failed` and `fallback` (it plays in
+  armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (what a key on a
+  MIDI controller takes to be heard: the measured latency and the fixed delay notes are placed
+  at, ADR 0017), `underruns`, `failed` and `fallback` (it plays in
   place of a chosen host or device that is not there), `channels` (opened) and `cue_pair`.
   Without `--audio`, `audio.devices` returns an error.
 
@@ -121,6 +122,18 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   before an engine plays; `project.tracks` says which tracks are `armed`. Without `--audio`,
   `midi.*` returns an error.
 
+- **Recording** ([spec](spec/recording.md)). With an engine playing (`--audio`), arm tracks with
+  `track.setArm`, then `clip.record {track, scene}` records into an empty slot from the next
+  launch boundary, and `clip.launch` on that slot ends the take at the next boundary and plays
+  it, looped; or `transport.record {on: true}` records every armed track into the arrangement
+  until `transport.record {on: false}` or `transport.stop`. A track with an audio input records
+  its input into a WAV file in `Recorded/` next to the project file (save the project first); a
+  track that plays notes records the MIDI controllers it hears. `transport.setCountIn {bars}`
+  (0, 1, 2 or 4) counts in when recording starts the transport. `record.state` lists the takes
+  running (`track`, `into`, `kind`, `start_beat`, `end_beat`, `notes`, `frames`, `file`),
+  `count_in_bars`, `count_in_left` and `notices`. A take becomes a clip, one undo step, once its
+  end has passed; the server looks around every command, so call `record.state` to collect it.
+
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`
   moves the marker to that arrangement clip's start and plays from there. `transport.stop` returns the playhead to the
@@ -157,15 +170,23 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   {track, start, end}` turns a range of one track into one clip (audio is rendered to a file next
   to the project, which must have been saved).
 
-- **Slot loops.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot: on,
-  it repeats its whole length; off, it plays once. A file placed in a slot with `clip.addFiles`
-  loops, a sample with no known tempo too ([clip launching](spec/clip-launching.md) › Suhina
-  decisions).
+- **Clip loops, lengths and start markers.** `clip.setLoop {track, scene, loop}` switches the
+  loop of the clip in a slot: on, it repeats its whole length; off, it plays once. A file placed
+  in a slot with `clip.addFiles` loops, a sample with no known tempo too
+  ([clip launching](spec/clip-launching.md) › Suhina decisions). It takes an arrangement clip by
+  `index` instead of `scene`, and `start` and `end` (content beats) to set the loop itself, which
+  turns it on. `clip.setLength {track, index | scene, length}` sets how long a clip plays (an
+  arrangement clip may not run into the next clip on its lane), and `clip.setStart {track, index
+  | scene, offset}` its start marker (a clip that does not loop keeps its end, so its length
+  changes by as much). These are what the piano roll's ruler runs when its loop handles and
+  markers are dragged ([clip editor](spec/ui-clip-editor.md) › Commands).
 
 - **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
   in beats, key with 60 as C3, velocity 1 to 127, and `muted`); `note.add {..., notes: [{time, length, key,
   velocity?}]}` appends notes and returns their indices; `note.delete`, `note.move {beats?,
-  semitones?}`, `note.resize {length? | by?}` and `note.setVelocity {velocity? | by?}` take
+  semitones?}`, `note.resize {length? | by? | startBy?}` (`startBy` moves each start and keeps
+  each end) and `note.setVelocity {velocity? | by? | velocities?}` (`velocities`: one value per
+  entry of `notes`) take
   `notes`, a list of those indices. Edits keep the notes' order, so the indices of notes not
   deleted stay valid; each is one undo step and fails as a whole on a bad value
   ([clip editor spec](spec/ui-clip-editor.md) › Commands). An edit to a clip whose content
@@ -194,11 +215,22 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `seed`, so the same call gives the same result twice and a script can repeat it; the result says
   which seed it used when none was given. Each is one undo step and fails as a whole, and none of
   them changes a note's mute.
+- **Scales.** `clip.setScale {track, index | scene, root?, mode?, off?}` gives a MIDI clip a scale
+  (a root such as `"D"`, `"F#"` or 0 to 11, and a mode such as `major`, `minor`, `dorian` or
+  `blues`, the names `note.fitToScale` takes), keeping the part left out, or clears it with
+  `off: true`; the piano roll then marks the scale's keys. `clip.scale {track, index | scene}`
+  reads it back with the project's default, and `project.setDefaultScale {root?, mode?, off?}`
+  sets the scale new MIDI clips take (`clip.create`, recorded and dropped MIDI clips; clips that
+  exist keep theirs; `project.info` shows it as `default_scale`). A scale is the clip content's,
+  so a clip whose content others play gets its own copy first, as a note edit does; each is one
+  undo step and changes nothing on a bad root or mode. `note.fitToScale` with neither `root` nor
+  `scale` fits to the clip's own scale.
 - **Copying notes.** `note.copy {..., notes}` copies notes to the session's note clipboard (it
   changes nothing); `note.cut` copies and deletes them. `note.paste {track, index | scene, time?}`
   adds the copied notes to any MIDI clip with their spacing kept, the first at `time` (by default
-  right after the copied notes), and returns their indices; `note.duplicate {..., notes}` adds a
-  copy right after the notes' end. The note clipboard is apart from the clip clipboard.
+  right after the copied notes), and returns their indices; `note.duplicate {..., notes, beats?,
+  semitones?}` adds a copy right after the notes' end, or `beats` and `semitones` from them (the
+  piano roll's Ctrl+drag). The note clipboard is apart from the clip clipboard.
 - **Splitting notes.** `note.split {track, index | scene, notes, at}` splits each named note that
   spans the beat `at` into two at `at` (the first keeps the start, the second the end); a note
   that starts or ends exactly at `at` is left alone, so a second split at the same beat changes
@@ -224,8 +256,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `preview.setGain {gain}` changes the level of the one playing (in dB, gliding there without a
   click); `preview.stop` stops it; `launcher.state` reports `preview`. With no project open they still
   work, through an output of their own that closes before a project opens one (ADR 0011).
-  `preview.noteOn {track, key, velocity?}` plays one key through the track's instrument and
-  holds it, as the piano roll's key column does, until `preview.noteOff {track, key?}` lets that
+  `preview.noteOn {track, key | keys, velocity?}` plays one key (or the keys of `keys` together,
+  as the piano roll's audition does) through the track's instrument and holds it, as the piano
+  roll's key column does, until `preview.noteOff {track, key?}` lets that
   key go, or every held preview note when `key` is left out. Both are transport commands: the
   project, its undo history and the transport are untouched.
 

@@ -170,17 +170,10 @@ fn stopping_a_preview_releases_the_tracks_notes_it_holds() {
 #[test]
 fn audio_set_on_the_controller_is_heard_from_the_next_graph() {
     let region = AudioRegion {
-        file: "/samples/added.wav".into(),
-        absolute_file: None,
         sample_rate: Some(SR),
         channels: Some(1),
         duration_seconds: Some(1.0),
-        warped: false,
-        stretch: StretchMode::default(),
-        warp_markers: Vec::new(),
-        gain: 1.0,
-        transpose: 0.0,
-        stream: None,
+        ..AudioRegion::new("/samples/added.wav")
     };
     let mut audio_project = project(Vec::new(), 2.0, Vec::new());
     audio_project.tracks[0].content = ContentKinds { notes: false, audio: true };

@@ -129,6 +129,11 @@ selects it; it stacks when the MIDI stacking setting is on. A double-click on a 
 clip's own. In the Session view a double-click on an empty slot makes one there
 ([Session view](ui-session-view.md) › Clip slots).
 
+Both double-clicks follow one setting, Settings › Interface › **Double-click makes a clip** (On by
+default, saved as `double_click_clip`). Off, a double-click on an empty spot of a lane, or on an
+empty slot, does nothing: no clip, and the selection stays as the first click left it.
+`clip.create` sent any other way (the command line, MCP) is not affected.
+
 ## Copy, cut and paste
 
 `clip.copy {clips}` keeps a copy of the clips named in `clips` and what they play; `clip.cut` also
@@ -523,6 +528,12 @@ from its lower half), and a right-click opens the track's menu: name, colour, gr
 **Move into group** (a submenu of every other group it can go into), **Move out of group** (one
 level up, right after the group it leaves), delete. A group's header starts with a triangle that
 folds its tracks away (Folded groups). The Session view's column headers have the same menu.
+
+A **double-click on a header** (on its name or its background, not on one of its controls) also
+shows the track's devices in the detail area, opening the detail area if it was hidden; a clip
+selected on that track stays selected, with the detail area's switch on **Devices**, and a clip
+selected on another track is no longer selected ([clip editor](ui-clip-editor.md) › Where it
+opens). It is window state, not a command.
 
 ### Groups inside groups
 

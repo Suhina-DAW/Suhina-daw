@@ -249,6 +249,9 @@ pub struct ArrangementViewState {
     /// Moved clips stack on others instead of replacing them: audio clips, MIDI clips.
     pub stack_audio: bool,
     pub stack_midi: bool,
+    /// A double-click on an empty spot of a lane does nothing (Settings › Interface ›
+    /// Double-click makes a clip is off); by default it makes an empty MIDI clip.
+    pub double_click_does_nothing: bool,
     pub header_width: f32,
     heights: HashMap<TrackId, f32>,
     /// The selected clips, in the order they were picked, and the one clicked last: a Shift-click
@@ -294,6 +297,9 @@ pub struct ArrangementViewState {
     /// opens a clip editor closed by hand again (`docs/spec/ui-clip-editor.md` › Least height
     /// and closing).
     pub clip_clicked: bool,
+    /// A track header was double-clicked this frame: the window shows that track's devices
+    /// (`docs/spec/ui-clip-editor.md` › Where it opens).
+    pub open_devices: Option<TrackId>,
     /// Automation lanes under the tracks: which are shown, selected points, a drag.
     pub automation: LanesState,
     /// A marker being dragged: its index and where the pointer is, in beats before snapping.
@@ -316,6 +322,7 @@ impl Default for ArrangementViewState {
             headers_left: false,
             stack_audio: false,
             stack_midi: false,
+            double_click_does_nothing: false,
             header_width: HEADER_COLUMN,
             heights: HashMap::new(),
             selected: Vec::new(),
@@ -339,6 +346,7 @@ impl Default for ArrangementViewState {
             meters: Meters::default(),
             focus: None,
             clip_clicked: false,
+            open_devices: None,
             automation: LanesState::default(),
             marker_drag: None,
             marker_menu_beat: 0.0,
@@ -1162,6 +1170,7 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
             state.clear_selected_clip();
         }
         if lane.notes
+            && !state.double_click_does_nothing
             && body.double_clicked()
             && let Some(pointer) = body.interact_pointer_pos()
         {
@@ -2338,6 +2347,10 @@ fn track_header(
         state.targeted = Some(lane.track);
         let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
         state.pick_track(lane.track, shift, command, order.tracks);
+    }
+    // A double-click shows the track's devices in the detail area.
+    if body.double_clicked() {
+        state.open_devices = Some(lane.track);
     }
     if body.drag_started_by(egui::PointerButton::Primary) {
         state.track_drag = Some(lane.track);

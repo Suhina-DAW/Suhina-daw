@@ -1590,6 +1590,7 @@ fn project_with_audio() -> (suhina_engine::model::Project, suhina_ui::waveform::
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Audio(region) }],
         extensions: Extensions::default(),
+        scale: None,
     });
     let clip = Clip {
         content: ContentId(300),
@@ -1929,22 +1930,47 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
         Some(suhina_ui::settings::ToolbarSize::Larger)
     );
 
-    // The four mouse switches write to the keymap, which is handed out to be saved.
-    assert!(harness.query_by_label("Right click deletes a note: On").is_some(), "each switch is an Off/On row");
+    // The workflow settings write to the keymap, which is handed out to be saved. They are the
+    // page's last rows: the wheel scrolls them into view.
+    for _ in 0..20 {
+        harness.hover_at(egui::pos2(SIZE.0 / 2.0, SIZE.1 / 2.0));
+        harness.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -120.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run();
+    }
+    assert!(
+        harness.query_by_label("Right click on a note: Every tool").is_some(),
+        "each setting is a row of its short choices"
+    );
     assert!(!harness.state().keymap().mouse().right_deletes, "off until it is turned on");
     // Under the window's edge until the page is scrolled to it.
-    harness.get_by_label("Right click deletes a note: On").scroll_to_me();
+    harness.get_by_label("Right click on a note: Every tool").scroll_to_me();
     harness.run();
-    harness.get_by_label("Right click deletes a note: On").click();
+    harness.get_by_label("Right click on a note: Every tool").click();
     harness.run();
     assert!(harness.state().keymap().mouse().right_deletes);
     assert!(harness.state_mut().take_changed_keymap().is_some(), "the keymap is saved with it");
-    assert_eq!(harness.state().keymap().preset(), suhina_ui::keymap::Preset::SelectFirst, "the name stays");
-    // And back off again.
-    harness.get_by_label("Right click deletes a note: Off").click();
+    assert_eq!(harness.state().keymap().preset(), suhina_ui::keymap::Preset::Custom, "the mode is Custom");
+    // And back again.
+    harness.get_by_label("Right click on a note: Nothing").click();
     harness.run();
     assert!(!harness.state().keymap().mouse().right_deletes);
-    // A preset chosen on the Shortcuts page turns all four on.
+    // Every setting has its row.
+    for row in [
+        "Click on empty grid: Draws",
+        "Shift+right drag: Splits",
+        "Alt+right button: Plays",
+        "Duplicate key: Ctrl+B",
+        "Double-click on empty grid: Nothing",
+        "Double-click on a note: Nothing",
+    ] {
+        assert!(harness.query_by_label(row).is_some(), "{row}");
+    }
+    // A preset chosen on the Shortcuts page turns all four mouse switches on.
     harness.get_by_label("Settings page: Shortcuts").click();
     harness.run();
     harness.get_by_label("Preset: Mouse-first").click();
@@ -1954,9 +1980,10 @@ fn settings_set_the_toolbar_size_and_the_mouse_switches() {
         harness.state_mut().take_changed_keymap().map(|k| k.mouse()),
         Some(suhina_ui::keymap::MouseSettings::ALL_ON)
     );
+    assert!(harness.query_by_label("Preset: Custom").is_some(), "Custom is one of the modes there too");
     harness.get_by_label("Settings page: Clip editor").click();
     harness.run();
-    assert!(harness.query_by_label("Right click deletes a note: On").is_some());
+    assert!(harness.query_by_label("Right click on a note: Every tool").is_some());
     harness.get_by_label("Close settings").click();
     harness.run();
 }

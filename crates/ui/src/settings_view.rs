@@ -7,12 +7,13 @@
 
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 
-use crate::keymap::{Keymap, MouseSwitch, Preset, Shortcut, actions};
+use crate::keymap::{Keymap, Preset, Shortcut, actions};
 use crate::motion;
 use crate::pick::PickField;
 use crate::settings::{Graphics, Settings};
 use crate::theme::{self, PAD, Palette};
 use crate::widgets;
+use crate::workflow::Setting;
 
 const PAGE_WIDTH: f32 = 560.0;
 /// The list of pages on the left, and the gap between it and the page.
@@ -670,16 +671,17 @@ pub(crate) fn plugin_library(cx: &mut Cx<'_>, y: &mut f32) {
     cx.outcome.plugins = plugin_section(cx.ui, cx.painter, cx.page, y, bottom, cx.plugins);
 }
 
-/// Clip editor › Mouse: the four mouse switches of the Mouse-first preset, their own rows, kept
-/// in the keymap rather than in the settings, so they are saved beside the keys.
+/// Clip editor › Workflow: the workflow settings (the Mouse-first switches among them), their own
+/// rows, kept in the keymap rather than in the settings, so they are saved beside the keys.
 pub(crate) fn mouse_switches(cx: &mut Cx<'_>, y: &mut f32) {
-    for switch in MouseSwitch::ALL {
+    for setting in Setting::ALL {
         let r = setting_row(cx.page, y);
-        label(cx.painter, r, switch.name(), "");
-        let options = [("Off", false), ("On", true)];
-        let current = cx.keymap.mouse().get(switch);
-        if let Some(on) = segmented(cx.ui, cx.painter, control_rect(r, 2), switch.name(), &options, current) {
-            cx.keymap.set_mouse(switch, on);
+        label(cx.painter, r, setting.name(), setting.note());
+        let options: Vec<(&str, usize)> = setting.short_choices().iter().enumerate().map(|(i, c)| (*c, i)).collect();
+        let current = cx.keymap.workflow().get(setting);
+        let rect = control_rect(r, options.len());
+        if let Some(index) = segmented(cx.ui, cx.painter, rect, setting.name(), &options, current) {
+            cx.keymap.set_workflow(setting, index);
             cx.outcome.keymap_changed = true;
         }
     }
@@ -688,7 +690,7 @@ pub(crate) fn mouse_switches(cx: &mut Cx<'_>, y: &mut f32) {
         cx.painter,
         note,
         Align2::LEFT_CENTER,
-        "Kept in keymap.json with the keys; turning one off leaves the preset's name",
+        "Kept in keymap.json with the keys; changing one makes the workflow Custom",
         theme::ui_font(theme::TEXT_SMALL),
         theme::text_secondary(),
     );
@@ -913,9 +915,9 @@ fn shortcuts_page(
         changed = true;
     }
 
-    // The preset: three sets of keys, one for drawing notes first, one for selecting first and
-    // one for working with the mouse. A choice sets the keys and the switches it names; single
-    // keys can still be changed below.
+    // The workflow mode: three presets, one for drawing notes first, one for selecting first and
+    // one for working with the mouse, and Custom. A preset sets the keys and the workflow settings
+    // it names; single keys can still be changed below.
     let mut top = head.bottom() + 4.0;
     let preset_row = Rect::from_min_size(Pos2::new(page.left(), top), Vec2::new(page.width(), 24.0));
     let preset_label = Rect::from_min_size(preset_row.min, Vec2::new(LABEL_WIDTH, 20.0));
@@ -931,9 +933,9 @@ fn shortcuts_page(
     // 64 px a part, as the measurements give every segmented control in Settings.
     let control = Rect::from_min_size(
         Pos2::new(preset_row.left() + LABEL_WIDTH, preset_row.top()),
-        Vec2::new(64.0 * Preset::ALL.len() as f32, SEGMENT),
+        Vec2::new(64.0 * Preset::MODES.len() as f32, SEGMENT),
     );
-    let options: Vec<(&str, Preset)> = Preset::ALL.iter().map(|p| ((*p).name(), *p)).collect();
+    let options: Vec<(&str, Preset)> = Preset::MODES.iter().map(|p| ((*p).name(), *p)).collect();
     if let Some(picked) = preset_segmented(ui, painter, control, &options, current) {
         keymap.set_preset(picked);
         state.capture = None;

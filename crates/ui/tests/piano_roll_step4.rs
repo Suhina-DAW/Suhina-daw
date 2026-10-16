@@ -471,7 +471,7 @@ fn mouse_first_splits_with_shift_right_and_plays_with_alt_right() {
 }
 
 #[test]
-fn turning_a_switch_off_leaves_the_preset_name_and_the_other_switches() {
+fn turning_a_switch_off_makes_the_mode_custom_and_leaves_the_other_switches() {
     let mut renderer = engine();
     let mut h = piano_app(&mut renderer, Settings::default());
     mouse_first(&mut h);
@@ -480,13 +480,13 @@ fn turning_a_switch_off_leaves_the_preset_name_and_the_other_switches() {
     h.state_mut().set_keymap(keymap);
     h.run();
     let mouse = h.state().keymap().mouse();
-    assert_eq!(h.state().keymap().preset(), Preset::MouseFirst, "the preset's name stays");
+    assert_eq!(h.state().keymap().preset(), Preset::Custom, "a switch changed by hand is Custom");
     assert!(!mouse.right_deletes, "the switch is off");
     assert!(mouse.left_draws && mouse.shift_right_splits && mouse.alt_right_plays, "the rest stay on");
     // The file keeps both: the name and what the switches say.
     let (again, warnings) = Keymap::from_json(&h.state().keymap().to_json());
     assert_eq!(warnings.len(), 0);
-    assert_eq!(again.preset(), Preset::MouseFirst);
+    assert_eq!(again.preset(), Preset::Custom);
     assert_eq!(again.mouse(), mouse);
     // A right click deletes nothing with the switch off.
     let before = notes(&h);

@@ -44,6 +44,11 @@ impl Metronome {
         self.on
     }
 
+    /// The click's level, linear.
+    pub(crate) fn gain(&self) -> f32 {
+        self.gain
+    }
+
     /// Forgets the beat counted so far, so the next beat clicks (the transport started or stopped).
     pub(crate) fn reset(&mut self) {
         self.last_beat = None;

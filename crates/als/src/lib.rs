@@ -211,6 +211,7 @@ impl Reader {
             arrangement: Arrangement { lanes, markers: self.markers(live_set) },
             launcher: Launcher { scenes, columns, mappings: Vec::new() },
             extensions: Extensions::default(),
+            default_scale: None,
         };
         self.untangle_groups(&mut project);
         project
@@ -651,6 +652,7 @@ impl Reader {
             length: loop_end.max(out_marker).max(0.0),
             lanes: vec![ContentLane { target: None, data }],
             extensions: Extensions::default(),
+            scale: None,
         });
 
         let (offset, loop_range) = if loop_on && loop_end > loop_start {

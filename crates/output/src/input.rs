@@ -16,7 +16,7 @@ use cpal::{FromSample, Sample, SizedSample};
 use suhina_engine::MAX_INPUT_CHANNELS;
 use suhina_session::InputChoice;
 
-use crate::{MAX_DEVICE_FRAMES, devices};
+use crate::{MAX_DEVICE_FRAMES, Progress, devices};
 
 /// Device buffers' worth of input the ring holds.
 const RING_BUFFERS: usize = 8;
@@ -33,10 +33,12 @@ pub(crate) struct InputStream {
 
 /// Opens the input `choice` names on the host `host_name` at `sample_rate`, playing into a ring
 /// whose reading end is returned for the engine. `Ok(None)` when the choice is off.
+/// Its callback measures the device's own latency into `progress`.
 pub(crate) fn open(
     host_name: &str,
     choice: &InputChoice,
     sample_rate: u32,
+    progress: Arc<Progress>,
 ) -> Result<Option<(InputStream, rtrb::Consumer<f32>)>, String> {
     if *choice == InputChoice::Off {
         return Ok(None);
@@ -73,10 +75,10 @@ pub(crate) fn open(
     let (producer, consumer) = rtrb::RingBuffer::new(MAX_DEVICE_FRAMES * RING_BUFFERS * channels);
     let underruns = Arc::new(AtomicU64::new(0));
     let stream = match format {
-        cpal::SampleFormat::F32 => build::<f32>(&device, &config, producer),
-        cpal::SampleFormat::I16 => build::<i16>(&device, &config, producer),
-        cpal::SampleFormat::I32 => build::<i32>(&device, &config, producer),
-        cpal::SampleFormat::U16 => build::<u16>(&device, &config, producer),
+        cpal::SampleFormat::F32 => build::<f32>(&device, &config, producer, progress),
+        cpal::SampleFormat::I16 => build::<i16>(&device, &config, producer, progress),
+        cpal::SampleFormat::I32 => build::<i32>(&device, &config, producer, progress),
+        cpal::SampleFormat::U16 => build::<u16>(&device, &config, producer, progress),
         other => return Err(format!("audio input {name} uses sample format {other}, which is not supported yet")),
     }?;
     stream.play().map_err(|e| format!("could not start audio input {name}: {e}"))?;
@@ -87,22 +89,37 @@ fn build<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     mut ring: rtrb::Producer<f32>,
+    progress: Arc<Progress>,
 ) -> Result<cpal::Stream, String>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
     let device_channels = usize::from(config.channels).max(1);
+    let sample_rate = config.sample_rate;
     device
         .build_input_stream(
             *config,
-            move |data: &[T], _: &cpal::InputCallbackInfo| write_frames(data, device_channels, &mut ring),
+            move |data: &[T], info: &cpal::InputCallbackInfo| {
+                let stamp = info.timestamp();
+                let since_capture = stamp.callback.duration_since(stamp.capture);
+                progress.set_input_latency(input_latency(since_capture, data.len() / device_channels, sample_rate));
+                write_frames(data, device_channels, &mut ring);
+            },
             // A device unplugged ends its input; the output plays on, and the next reopen finds it
             // gone.
             |_: cpal::Error| {},
             None,
         )
         .map_err(|e| format!("could not open audio input {device}: {e}"))
+}
+
+/// The input device's own latency in frames: `since_capture` is the time from its buffer's
+/// first frame being captured to the callback, and the buffer's `frames` came in over that time,
+/// so the last frame waited for what is left of it.
+pub(crate) fn input_latency(since_capture: std::time::Duration, frames: usize, sample_rate: u32) -> usize {
+    let waited = since_capture.as_secs_f64() * f64::from(sample_rate);
+    (waited - frames as f64).max(0.0).round() as usize
 }
 
 /// Writes whole frames of `data` (`device_channels` interleaved) into `ring` as `f32`, the first
@@ -156,9 +173,20 @@ mod tests {
     /// audio at all, in CI) is an error, not a crash.
     #[test]
     fn an_input_off_or_missing_opens_nothing() {
-        assert!(open("anything", &InputChoice::Off, 48_000).is_ok_and(|o| o.is_none()));
-        let missing = open(cpal::default_host().id().name(), &InputChoice::Named("No Such Input".into()), 48_000);
+        let progress = || Arc::new(Progress::default());
+        assert!(open("anything", &InputChoice::Off, 48_000, progress()).is_ok_and(|o| o.is_none()));
+        let missing =
+            open(cpal::default_host().id().name(), &InputChoice::Named("No Such Input".into()), 48_000, progress());
         assert!(missing.is_err());
-        assert!(open("No Such Host", &InputChoice::Default, 48_000).is_err());
+        assert!(open("No Such Host", &InputChoice::Default, 48_000, progress()).is_err());
+    }
+
+    #[test]
+    fn the_input_latency_is_how_long_the_last_frame_waited() {
+        let ms = std::time::Duration::from_millis;
+        // A 480-frame buffer called back 15 ms after its first frame: its last frame waited 5 ms.
+        assert_eq!(input_latency(ms(15), 480, 48_000), 240);
+        assert_eq!(input_latency(ms(5), 480, 48_000), 0, "a stamp that is too early says nothing");
+        assert_eq!(input_latency(ms(0), 0, 0), 0);
     }
 }

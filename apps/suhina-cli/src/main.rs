@@ -888,6 +888,7 @@ fn demo_project() -> Project {
         length: 4.0,
         lanes: vec![ContentLane { target: None, data: LaneData::Notes(notes) }],
         extensions: Extensions::default(),
+        scale: None,
     };
     let clip = |content: u32, start: f64| Clip {
         content: ContentId(content),
