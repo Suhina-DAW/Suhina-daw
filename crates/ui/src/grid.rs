@@ -99,6 +99,8 @@ pub struct Column {
     pub depth: usize,
     /// The group the track is directly in.
     pub parent: Option<TrackId>,
+    /// The group track this track plays into; `None` is the main output (`track.setOutput`).
+    pub output: Option<TrackId>,
     /// -1 is full left, 1 full right.
     pub pan: f64,
     /// One per return track, in their order, for a track or group column; empty for a return.
@@ -271,6 +273,10 @@ impl Grid {
                 position: index,
                 depth: crate::timeline::depth(project, track.parent),
                 parent: track.parent,
+                output: channel
+                    .and_then(|c| c.output)
+                    .and_then(|id| project.tracks.iter().find(|t| t.channel == Some(id)))
+                    .map(|t| t.id),
                 pan: channel.map_or(0.0, |c| c.pan),
                 sends: match (kind, channel) {
                     (ColumnKind::Return, _) | (_, None) => Vec::new(),

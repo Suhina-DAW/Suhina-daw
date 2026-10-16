@@ -174,7 +174,7 @@ moves it, a double-click gives 166 px back.
 
 **Height steps.** Each part appears once the mixer is at least as tall as its step, and goes
 again below it. Top to bottom, the strip at its tallest: name, device list, sends row, pan row,
-volume readout, fader with the meter, toggles.
+volume readout, fader with the meter, toggles. Between the name and the device list: the output.
 
 | Mixer height | Adds | Size |
 |---|---|---|
@@ -183,7 +183,8 @@ volume readout, fader with the meter, toggles.
 | 122 px | Pan row | 22 px and 4 px under it |
 | 148 px | Sends row | 22 px and 4 px under it (the pre dot sits in the gap) |
 | 166 px (default) | Name row, at the top | 16 px and 2 px under it |
-| 240 px | Device list, under the name | at least four 16 px rows and 4 px under it; the fader takes the height up to 140 px, the list the rest |
+| 192 px | Output row, under the name | 16 px and 4 px under it |
+| 260 px | Device list, under the output | at least four 16 px rows and 4 px under it; the fader takes the height up to 140 px, the list the rest |
 
 | Part | Spec |
 |---|---|
@@ -194,6 +195,7 @@ volume readout, fader with the meter, toggles.
 | Pan row | The pan knob (22 px) at the left, its value right of it, 6 px apart, 10 px mono `text.secondary` ("C", "15L"). While a send is dragged, its letter and level stand there instead ("A -12.0") |
 | Sends row | One send knob per return, 4 px apart from the left, as many as fit (four in a track column) |
 | Name | 16 px: the track's name in 11 px `text.primary` (`text.hint` while the track is off), at the left, cut off at the strip's edge |
+| Output | 16 px across the strip: "→" (14 px, 10 px `text.hint`) and the output dropdown the rest of the row ("Main" or a group track, as the Arrangement header's; `track.setOutput`). Its menu lists Main and every group track but the track itself |
 | Device list | 16 px rows, one per device in chain order: its name in 10 px `text.secondary` 4 px in (`text.hint` while the device is off), "plug-in" right in 9 px `text.hint` for a plug-in; `control.hoverBackground` hovered, `control.activeBackground` for the row clicked last. The wheel scrolls it. "No devices" in 10 px `text.hint` when the chain is empty. A click selects the track and opens the detail area on its devices |
 | Send knob | A knob with the return's letter in its centre (8 px mono `text.hint`), pointer `text.value` (`text.primary` hovered); −70 dB … +6 dB over the travel. A 1.5 px `text.value` dot under it when the send is before the fader |
 | Knob | 22 px; circle r 9, `control.background` fill, 1 px `text.hint` stroke; pointer 1.5 px from centre to r 8; travel −135° … +135°; pan pointer `text.primary`, sends `#C9C4BB` |

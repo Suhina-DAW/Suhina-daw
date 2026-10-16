@@ -466,7 +466,7 @@ fn draw_column(
     column_body(ui, &painter.with_clip_rect(body_clip), body_clip, span, bands, column, progress, id, state, actions);
     let mixer_rect = Rect::from_x_y_ranges(span, bands.mixer.y_range());
     let mixer_painter = painter.with_clip_rect(bands.mixer.intersect(clip));
-    crate::mixer_strip::show(ui, &mixer_painter, mixer_rect, column, track_number, state, id, actions);
+    crate::mixer_strip::show(ui, &mixer_painter, mixer_rect, column, &bands.groups, track_number, state, id, actions);
     // Column separator through header, grid and mixer.
     let full = egui::Rangef::new(bands.header.top(), bands.mixer.bottom());
     painter.with_clip_rect(clip).vline(span.max + 0.5, full, theme::hairline(theme::border_strong()));

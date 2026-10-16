@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The Session view's channel strip in the window: what each mixer height shows, resizing it from
-//! its top edge, the fader (one undo step, a double-click for 0 dB) and the device list
+//! its top edge, the fader (one undo step, a double-click for 0 dB), the output dropdown and the
+//! device list
 //! (`docs/spec/ui-session-view.md` › Mixer); the detail area's two layouts; and the setting that
 //! turns off making a clip with a double-click.
 
@@ -14,7 +15,7 @@ use egui_kittest::kittest::Queryable;
 use suhina_engine::model::{Device, DeviceKind, Extensions};
 use suhina_session::Session;
 use suhina_ui::demo::demo_project;
-use suhina_ui::mixer_strip::{DEVICES_AT, FADER_AT, NAME_AT, PAN_AT, SENDS_AT};
+use suhina_ui::mixer_strip::{DEVICES_AT, FADER_AT, NAME_AT, OUTPUT_AT, PAN_AT, SENDS_AT};
 use suhina_ui::settings::Settings;
 use suhina_ui::view_settings::{DetailLayout, MIXER_HEIGHTS};
 use suhina_ui::{App, theme};
@@ -67,6 +68,9 @@ fn parts(harness: &Harness<'static, App>) -> Vec<&'static str> {
     if harness.query_by_label("Drums strip").is_some() {
         shown.push("name");
     }
+    if harness.query_by_label_contains("Drums strip output:").is_some() {
+        shown.push("output");
+    }
     if harness.query_by_label("Show Utility on Drums").is_some() {
         shown.push("devices");
     }
@@ -91,14 +95,15 @@ fn volume(harness: &Harness<'static, App>) -> f64 {
 #[test]
 fn each_mixer_height_shows_its_parts_and_the_toggles_are_always_there() {
     let least = MIXER_HEIGHTS.0 as f32;
-    let steps: [(f32, &[&str]); 7] = [
+    let steps: [(f32, &[&str]); 8] = [
         (least, &["compact"]),
         (FADER_AT - 1.0, &["compact"]),
         (FADER_AT, &["fader", "meter"]),
         (PAN_AT, &["pan", "fader", "meter"]),
         (SENDS_AT, &["sends", "pan", "fader", "meter"]),
         (NAME_AT, &["name", "sends", "pan", "fader", "meter"]),
-        (DEVICES_AT, &["name", "devices", "sends", "pan", "fader", "meter"]),
+        (OUTPUT_AT, &["name", "output", "sends", "pan", "fader", "meter"]),
+        (DEVICES_AT, &["name", "output", "devices", "sends", "pan", "fader", "meter"]),
     ];
     for (height, expected) in steps {
         let harness = window_at(height);
@@ -216,6 +221,52 @@ fn a_fader_drag_is_one_undo_step_and_a_double_click_resets_it_to_0_db() {
     }
     harness.run();
     assert!((volume(&harness) - 1.0).abs() < 1e-9, "{}", volume(&harness));
+}
+
+#[test]
+fn the_output_dropdown_routes_the_track_into_a_group_as_one_undo_step() {
+    let mut harness = window_at(OUTPUT_AT);
+    harness
+        .state_mut()
+        .projects_mut()
+        .execute("track.group", &serde_json::json!({ "tracks": ["Keys"], "name": "Synths" }))
+        .unwrap();
+    harness.run();
+    let channel_of = |h: &Harness<'static, App>, name: &str| {
+        let p = h.state().session().unwrap().project();
+        p.tracks.iter().find(|t| t.name == name).and_then(|t| t.channel)
+    };
+    let output = |h: &Harness<'static, App>| {
+        let p = h.state().session().unwrap().project();
+        p.channels.iter().find(|c| Some(c.id) == channel_of(h, "Drums")).and_then(|c| c.output)
+    };
+    let synths = channel_of(&harness, "Synths");
+    assert!(synths.is_some());
+    // Drums plays into the main channel.
+    let main = output(&harness);
+    assert_ne!(main, synths);
+
+    harness.get_by_label("Drums strip output: Main").click();
+    harness.run();
+    // The menu offers Main and every group but the track itself.
+    assert!(harness.query_by_label("Main").is_some());
+    harness.get_by_label("Synths").click();
+    harness.run();
+    assert_eq!(output(&harness), synths);
+    assert!(harness.query_by_label("Drums strip output: Synths").is_some(), "the dropdown names the group");
+    // A group is not offered as its own output.
+    let named = harness.query_all_by_label("Synths").count();
+    harness.get_by_label("Synths strip output: Main").click();
+    harness.run();
+    assert!(harness.query_by_label("Main").is_some());
+    assert_eq!(harness.query_all_by_label("Synths").count(), named);
+    harness.key_press(Key::Escape);
+    harness.run();
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(output(&harness), main, "one undo takes the route back");
+    assert!(harness.query_by_label("Drums strip output: Main").is_some());
 }
 
 #[test]

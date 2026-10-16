@@ -276,14 +276,20 @@ vertical channel strip under its slots, and the strip shows more the taller the 
   the least height the volume is a compact value across the strip, dragged up or down.
 - **As it grows**, it adds in this order: a vertical **volume fader** with the track's level meter
   beside it and its dB value over it (the fader replaces the compact value); the **pan** knob
-  with its value; the **send** knobs; the track's **name** at the top; and at the tallest heights
-  a scrollable list of the track's **devices and plug-ins**. Shrinking drops them in the reverse
+  with its value; the **send** knobs; the track's **name** at the top; under it the track's
+  **output**; and at the tallest heights a scrollable list of the track's **devices and
+  plug-ins**. Shrinking drops them in the reverse
   order. Height the strip has beyond what its parts need goes to the fader, and once the device
   list shows, to the list after the fader is tall enough. A strip without sends (a return, or no
   returns in the project) gives that row to the fader.
 - **The fader** is dragged up or down (Shift for finer), and the wheel over it moves it a dB at
   a time; every frame of a drag is heard, and the drag is one undo step (`track.setVolume` with
   `tracks` and `continue`). A double-click sets it back to 0 dB, as the Arrangement headers do.
+- **The output** reads "→ Main" or "→" and the group the track plays into. A click opens a menu
+  of Main and the project's group tracks (a group does not list itself); picking one routes the
+  track there (`track.setOutput`, one undo step). A route that would make a loop is refused with a
+  message and changes nothing. The Arrangement view's track headers have the same dropdown.
+  Choosing an input and monitoring here is planned with the I/O section.
 - **The device list.** One row per device in chain order, its name dimmed while it is off; the
   wheel scrolls it when it holds more than fits. A click selects the track and shows its devices
   in the detail area, opening the detail area if it was hidden; the clicked row stays lit.
