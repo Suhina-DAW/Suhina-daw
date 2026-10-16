@@ -35,6 +35,7 @@ pub mod piano_roll_ruler;
 pub mod piano_roll_scale;
 pub mod pick;
 pub mod project_dialog;
+pub mod record_controls;
 pub mod sample_map;
 mod sample_map_crowd;
 pub mod sample_map_panel;

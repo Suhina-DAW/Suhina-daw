@@ -120,7 +120,7 @@ def headline(devices) -> str:
         f"({len(devices['audio_effects'])} audio effects, {len(devices['midi_effects'])} MIDI effects, "
         f"{len(devices['instruments'])} instruments) |",
         f"| Commands | **{score.COMMANDS}**, every one reachable from the UI, the CLI and MCP |",
-        "| Still absent as whole features | MPE, Grooves, Tuning, Recording, Comping, "
+        "| Still absent as whole features | MPE, Grooves, Tuning, Comping, "
         "Racks, Clip Envelopes, MIDI effects, Push, Link, video, accessibility |",
     ]
     return block("\n".join(lines))
@@ -182,7 +182,7 @@ GAPS = [
     ("Automation and clip envelopes", "Automation, envelopes (ch 26, 27)",
      "drawing and recording automation lanes, send and tempo automation, clip envelopes"),
     ("Recording, bounce, comping", "Recording, bounce, comp (ch 19-22)",
-     "audio and MIDI recording, arming, overdub, count-in, take lanes, per-track bounce"),
+     "overdub, punch in and out, take lanes, comping, per-track bounce"),
     ("Mixing, routing, I/O", "Mixing, routing, I/O (ch 17, 18, 38)",
      "crossfader, inputs and monitoring, resampling"),
     ("Outside a DAW's own scope", "Outside scope (ch 28, 32-37, 41)",

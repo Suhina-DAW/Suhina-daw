@@ -364,8 +364,8 @@ Two observations the numbers make plain:
 1. **The device catalogue is the single largest lever.** The device reference chapters are the
    biggest block of the manual and Suhina covers the smallest share of them. Nothing else moves the
    headline number as much.
-2. **Whole features, not thin features, dominate the rest.** Recording, automation, racks and MIDI
-   editing are each absent, not partial. They are also the areas where a DAW is judged by people
+2. **Whole features, not thin features, dominate the rest.** Racks, comping and MIDI effects are
+   each absent, not partial. They are also the areas where a DAW is judged by people
    coming from Live, because a missing channel is felt at once.
 
 ## 8. What the roadmap covers, and what nothing covers

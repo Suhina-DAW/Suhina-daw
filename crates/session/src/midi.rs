@@ -46,7 +46,15 @@ impl LiveInput {
     /// Sends `event` from `source` (a port and channel) to the engine that plays now; the armed
     /// tracks whose MIDI input takes the source play it. Returns false when it went nowhere.
     pub fn send_from(&self, source: LiveSource, event: LiveEvent) -> bool {
-        self.lock().as_mut().is_some_and(|sender| sender.send_from(source, event))
+        self.send_at(source, event, 0)
+    }
+
+    /// Sends `event` from `source`, played at `time` on the live clock
+    /// ([`suhina_engine::live_now`]; 0 for no time), to the engine that plays now: it sounds a
+    /// fixed delay after that time, so notes keep their spacing (#269). Returns false when it
+    /// went nowhere.
+    pub fn send_at(&self, source: LiveSource, event: LiveEvent, time: u64) -> bool {
+        self.lock().as_mut().is_some_and(|sender| sender.send_at(source, event, time))
     }
 
     /// Notes go to `sender` from now on.

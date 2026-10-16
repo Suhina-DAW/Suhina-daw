@@ -126,11 +126,10 @@ fn advance(renderer: &mut Renderer, frames: usize) {
 fn transport_commands_need_a_player() {
     let mut session = Session::new(project());
     // The quantisation is kept by the session until a player is attached (tested below). Arming
-    // is kept by the session and told to each new player, so it needs none either (ADR 0017).
-    for spec in commands()
-        .iter()
-        .filter(|c| c.kind == CommandKind::Transport && c.id != "launcher.setQuantization" && c.id != "track.setArm")
-    {
+    // is kept by the session and told to each new player, so it needs none either (ADR 0017);
+    // nor do the count-in and what records (docs/spec/recording.md).
+    let without = ["launcher.setQuantization", "track.setArm", "transport.setCountIn", "record.state"];
+    for spec in commands().iter().filter(|c| c.kind == CommandKind::Transport && !without.contains(&c.id)) {
         let params = json!({ "track": "Drums", "scene": 1, "value": "1 bar", "on": true, "beats": 4.0, "key": 60 });
         let params: Value = params
             .as_object()

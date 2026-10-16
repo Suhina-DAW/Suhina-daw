@@ -86,6 +86,8 @@ pub struct Column {
     /// whether it is: the session knows, not the project, so [`Grid::build`] leaves it false.
     pub armable: bool,
     pub armed: bool,
+    /// The scene whose slot records a take now (`docs/spec/recording.md`); set by the app.
+    pub recording: Option<usize>,
     /// What the track hears while armed.
     pub midi_input: suhina_engine::model::MidiInput,
     /// The track plays notes, or audio: which of its inputs it has.
@@ -263,6 +265,7 @@ impl Grid {
                 cue: channel.is_some_and(|c| c.cue),
                 armable: kind == ColumnKind::Track && (track.content.notes || track.content.audio),
                 armed: false,
+                recording: None,
                 midi_input: track.midi_input.clone(),
                 plays_notes: kind == ColumnKind::Track && track.content.notes,
                 plays_audio: kind == ColumnKind::Track && track.content.audio,

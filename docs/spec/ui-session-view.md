@@ -45,6 +45,9 @@ From top to bottom:
      from the selected Arrangement clip as Settings › General › Play from says, and stop
      returns to it or stays, as Settings › General › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
+   - **Suhina:** record, right of stop, records the armed tracks into the arrangement, and a
+     Count-in menu right of the launch quantisation; an armed track's empty slots show a record
+     button ([recording](recording.md) › In the window)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
       reports it as `cpu`; the rest is not). Left of the CPU load, the program's own RAM

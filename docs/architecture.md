@@ -5,6 +5,7 @@ type: system
 status: current
 last_verified: 2026-10-16
 covers:
+  - crates/session/src/record_writer.rs
   - Cargo.toml
   - crates/*/Cargo.toml
   - devices/*/Cargo.toml
@@ -168,6 +169,7 @@ gesture id grouping both XY axes into one undo step. See [ADR 0021](decisions/00
 | Device watch | While the output plays in place of a chosen device that was not there (`OutputInfo::fallback`), `Projects::check_output` asks every 3 s whether it is back (`AudioSystem::chosen_present`); `output` looks on a short-lived `suhina-device-watch` thread (the chosen host's output devices, names only) and keeps the answer for the next ask, so the frame never waits for the device list. When it is back the output is opened on it again, as `audio.setOutput` does. | yes |
 | MIDI input | `midir`'s own thread per open port (the ALSA sequencer's, WinMM's or CoreMIDI's callback): parses each message and sends its note through the session's `LiveInput` (a mutex around the playing engine's live-note sender) into the engine's lock-free queue ([ADR 0017](decisions/0017-inputs-and-latency.md)). Ports are opened, closed and looked at again on the main thread. | yes, but never the audio thread's locks: it only pushes into the queue |
 | Audio input | The input device's callback (cpal's thread, on the output's host), when an input device is chosen: converts every channel, up to 64, to `f32` and writes whole frames into a lock-free ring that the render thread reads a block at a time ([ADR 0017](decisions/0017-inputs-and-latency.md)). | **no** (AGENTS.md rule 3) |
+| Recording | One thread per engine in `session` (`suhina-record`), started when a player is attached: empties the engine's recording rings as they fill (the notes the armed tracks play, their input in chunks), hands the notes to the session and writes each audio take into its WAV file in `Recorded/`, so neither the render thread nor the window waits for a disk ([spec](spec/recording.md)). It ends when its engine is gone and nothing is left to write. | yes |
 | Decode workers | Scoped threads in `media` while a project loads; in the window, a thread per drop (`suhina-drop`) that decodes its samples before `clip.addFiles` runs (ADR 0011). | yes |
 | Missing files and plug-in scans | In the window, `suhina-find-files` searches the index and folders for a project's missing files, and `suhina-plugin-scan` runs a plug-in scan, so the frame never waits. | yes |
 | Library | One thread in `library` (`suhina-library`): checks the browser's folders against their saved indexes, reads the ones that changed, and takes the file-system watcher's events (`notify`, its own threads) or polls (ADR 0012). Started by the desktop app and the MCP server only. | yes |
@@ -186,8 +188,10 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
   `Arc<AudioData>`, a MIDI preview's notes with its fallback instrument, stop), and what it let
   go of back, to be freed on the main thread (ADR 0011). Live notes from MIDI controllers come
   over a queue of their own, from the MIDI driver's thread rather than the main one; the main
-  thread arms tracks with a `LaunchCommand` (ADR 0017). The input device's frames come over a
-  ring from its own callback (`Renderer::set_audio_input`).
+  thread arms tracks with a `LaunchCommand` (ADR 0017). Live notes carry the time they were
+  played, and the render thread tells the renderer before each block when it renders it
+  (`Renderer::set_live_clock`), so each note lands a fixed delay after it was played. The input
+  device's frames come over a ring from its own callback (`Renderer::set_audio_input`).
 - **From the audio thread:** a `LauncherMonitor` of atomics (running, beat, tempo, what each
   column plays and has queued, the playhead and the play start marker, stretch underruns), read by the `launcher.state`
   command and by `Controller::update` to pick the frame a new graph takes over at; a
@@ -197,7 +201,10 @@ The main thread and the audio thread share nothing mutable. They talk in two dir
   `launcher.state` reports too — the control bar draws the CPU load from it; and a
   `MeterMonitor` (each track's and the main output's peak and RMS level per side and clip
   indicator, measured every block by the `meters` module and stored as atomics; read by
-  `mixer.levels` and the window's meters, [spec](spec/level-meters.md)).
+  `mixer.levels` and the window's meters, [spec](spec/level-meters.md)). While recording, two
+  rings carry what the armed tracks play out (`Controller::take_recorder`), each piece stamped
+  with the beat that was heard when it was played; the recording thread empties them
+  ([spec](spec/recording.md)).
 
 ## Commands
 
@@ -290,8 +297,8 @@ renderer without a deadline.
   so far); a VST3 editor that follows automation; editors on Wayland and macOS (ADR 0006).
 - **UI:** the detail area (device chain, the rest of the clip editor) (M8). The browser's open
   questions are in its spec › Not decided yet.
-- **Inputs:** audio inputs, monitoring, MIDI and audio recording, and a shallower render queue
-  for live playing ([ADR 0017](decisions/0017-inputs-and-latency.md) › Planned, #263).
+- **Recording:** overdubbing into a clip that exists, punch in and out, and recording
+  automation ([spec](spec/recording.md) › Not yet).
 
 SDK parameter edits can expand conditional peer links into several parameter messages.
 The session stores and validates the complete command, records one undo gesture, then sends

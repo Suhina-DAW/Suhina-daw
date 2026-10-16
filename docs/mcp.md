@@ -1,6 +1,6 @@
 ---
 description: The MCP server for agents: tools, file roots, errors and how to run it
-read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
+read_when: MCP, agents, audio output, MIDI input, arm, record, recording, count-in, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
 type: system
 status: current
 last_verified: 2026-10-16
@@ -80,8 +80,9 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   the engine's block alone and `buffer_sizes` the engine's own sizes. `audio.info` says what plays
   now: `host`, `device`, `sample_rate`, `buffer_frames` (the device's, measured),
   `engine_block`, `exclusive`, `latency_ms` (engine to speaker, measured), `live` (a track is
-  armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (the longest a
-  key on a MIDI controller takes to be heard), `underruns`, `failed` and `fallback` (it plays in
+  armed, so the engine keeps one block ahead instead of two), `live_latency_ms` (what a key on a
+  MIDI controller takes to be heard: the measured latency and the fixed delay notes are placed
+  at, ADR 0017), `underruns`, `failed` and `fallback` (it plays in
   place of a chosen host or device that is not there), `channels` (opened) and `cue_pair`.
   Without `--audio`, `audio.devices` returns an error.
 
@@ -120,6 +121,18 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   `audio.info` adds `input`, `input_channels` and `input_underruns`. Arming is not an edit (no undo step, not saved) and works
   before an engine plays; `project.tracks` says which tracks are `armed`. Without `--audio`,
   `midi.*` returns an error.
+
+- **Recording** ([spec](spec/recording.md)). With an engine playing (`--audio`), arm tracks with
+  `track.setArm`, then `clip.record {track, scene}` records into an empty slot from the next
+  launch boundary, and `clip.launch` on that slot ends the take at the next boundary and plays
+  it, looped; or `transport.record {on: true}` records every armed track into the arrangement
+  until `transport.record {on: false}` or `transport.stop`. A track with an audio input records
+  its input into a WAV file in `Recorded/` next to the project file (save the project first); a
+  track that plays notes records the MIDI controllers it hears. `transport.setCountIn {bars}`
+  (0, 1, 2 or 4) counts in when recording starts the transport. `record.state` lists the takes
+  running (`track`, `into`, `kind`, `start_beat`, `end_beat`, `notes`, `frames`, `file`),
+  `count_in_bars`, `count_in_left` and `notices`. A take becomes a clip, one undo step, once its
+  end has passed; the server looks around every command, so call `record.state` to collect it.
 
 - **Play position.** `transport.setPosition {beats}` moves the play start marker, where
   `transport.play` starts (a jump while playing). `transport.play {from: "clip", track, index}`

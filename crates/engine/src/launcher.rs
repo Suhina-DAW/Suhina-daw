@@ -157,6 +157,19 @@ pub enum LaunchCommand {
         armed: bool,
         input: crate::live::LiveFilter,
     },
+    /// Turns recording on or off: while on and the transport runs, what the armed tracks play
+    /// goes out through the recording rings ([`Controller::take_recorder`],
+    /// `docs/spec/recording.md`).
+    SetRecording {
+        on: bool,
+    },
+    /// With the transport stopped, counts `beats` beats (up to 64, bars of `bar_beats`) with
+    /// the metronome's click, then starts the transport; with nothing to count, starts it at
+    /// once. Ignored while running. A stop cancels the count and leaves the transport stopped.
+    CountIn {
+        beats: f64,
+        bar_beats: f64,
+    },
 }
 
 /// The bars playing, as [`LauncherMonitor::meter`] reports them: the project's meter while the
@@ -307,6 +320,10 @@ pub struct LauncherMonitor {
     bars_before: AtomicU64,
     /// The clock follows the tempo map (no scene has taken it off).
     follows_map: AtomicBool,
+    /// The beat a launch issued now happens at, on the global grid (f64 bits).
+    launch_beat: AtomicU64,
+    /// Beats the count-in still counts before the transport starts (f64 bits); 0 when none.
+    pub(crate) count_in: AtomicU64,
 }
 
 impl LauncherMonitor {
@@ -331,7 +348,20 @@ impl LauncherMonitor {
             bar_origin: AtomicU64::new(0f64.to_bits()),
             bars_before: AtomicU64::new(0f64.to_bits()),
             follows_map: AtomicBool::new(true),
+            launch_beat: AtomicU64::new(0f64.to_bits()),
+            count_in: AtomicU64::new(0f64.to_bits()),
         }
+    }
+
+    /// The beat a launch issued now would happen at, on the global launch grid, as of the start
+    /// of the last block: where a recording into a slot starts or ends.
+    pub fn launch_beat(&self) -> f64 {
+        f64::from_bits(self.launch_beat.load(Ordering::Relaxed))
+    }
+
+    /// Beats the count-in still counts before the transport starts; 0 when none counts.
+    pub fn count_in_beats(&self) -> f64 {
+        f64::from_bits(self.count_in.load(Ordering::Relaxed))
     }
 
     /// Whether the transport is running.
@@ -409,9 +439,17 @@ pub struct Controller {
     pub(crate) meter_monitor: Arc<crate::meters::MeterMonitor>,
     /// The live-note queue's sending end, until taken for the MIDI input (ADR 0017).
     live: Option<crate::live::LiveSender>,
+    /// The recording rings' reading end, until taken (`docs/spec/recording.md`).
+    recorder: Option<crate::record::RecordReceiver>,
 }
 
 impl Controller {
+    /// The reading end of what the renderer records ([`LaunchCommand::SetRecording`]); `None`
+    /// once taken.
+    pub fn take_recorder(&mut self) -> Option<crate::record::RecordReceiver> {
+        self.recorder.take()
+    }
+
     /// The sending end of the renderer's live-note queue, for the thread a MIDI driver calls
     /// back on; `None` once taken.
     pub fn take_live_input(&mut self) -> Option<crate::live::LiveSender> {
@@ -1078,6 +1116,7 @@ impl Renderer {
             cpu_monitor: Arc::clone(&self.cpu.monitor),
             meter_monitor: Arc::clone(&self.meters.monitor),
             live: Some(self.live.sender()),
+            recorder: Some(self.recorder.receiver()),
         }
     }
 
@@ -1104,8 +1143,13 @@ impl Renderer {
                     self.start_transport();
                 }
             }
+            // A stop during the count-in only ends the count: the transport never started, so
+            // the play start marker stays where it is.
+            LaunchCommand::Stop | LaunchCommand::StopHere if self.count_in.is_some() => self.cancel_count_in(),
             LaunchCommand::Stop => self.stop_transport(false),
             LaunchCommand::StopHere => self.stop_transport(true),
+            LaunchCommand::SetRecording { on } => self.recorder.set(on),
+            LaunchCommand::CountIn { beats, bar_beats } => self.start_count_in(beats, bar_beats),
             LaunchCommand::SetPosition { beat } => self.set_position(beat),
             LaunchCommand::Locate { beat } => {
                 if self.running && beat.is_finite() {
@@ -1235,8 +1279,9 @@ impl Renderer {
         }
     }
 
-    fn start_transport(&mut self) {
+    pub(crate) fn start_transport(&mut self) {
         self.running = true;
+        self.count_in = None;
         // A start plays the arrangement's tempo and bars again; a scene launched with it takes
         // the clock off the map again at its launch beat.
         self.graph.launcher.follow_map();
@@ -1487,6 +1532,7 @@ impl Renderer {
         let launcher = &self.graph.launcher;
         let monitor = &launcher.monitor;
         monitor.beat.store(launcher.beat.to_bits(), Ordering::Relaxed);
+        monitor.launch_beat.store(launcher.launch_beat().to_bits(), Ordering::Relaxed);
         monitor.tempo.store(launcher.tempo_bpm.to_bits(), Ordering::Relaxed);
         for (column, elapsed) in launcher.columns.iter().zip(&monitor.elapsed) {
             if let Some(playing) = column.playing {

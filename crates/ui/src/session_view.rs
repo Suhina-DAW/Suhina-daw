@@ -702,6 +702,21 @@ fn column_body(
         }
         let selected = state.selected_slot == Some(key);
         slot_cell(painter, rect, column, slot, hover, pulse, progress, selectable && selected);
+        if column.armed && !has_clip && column.kind == ColumnKind::Track {
+            let recording = column.recording == Some(scene);
+            let (track, name) = (column.track.0, column.name.as_str());
+            crate::record_controls::slot_record(
+                ui,
+                painter,
+                rect.intersect(clip),
+                LAUNCH_WIDTH,
+                track,
+                name,
+                number,
+                recording,
+                actions,
+            );
+        }
         if selected && !selectable {
             painter.rect_stroke(rect, 0.0, theme::hairline(theme::text_primary()), StrokeKind::Inside);
         }
