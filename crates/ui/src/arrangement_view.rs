@@ -290,6 +290,10 @@ pub struct ArrangementViewState {
     /// The piano roll is pulled to the top: the view shows only this track, highlighted, and
     /// no return tracks or main track (`docs/spec/ui-clip-editor.md` › Pulled to the top).
     pub focus: Option<TrackId>,
+    /// A clip was clicked this frame (picked, even when it was selected already): the window
+    /// opens a clip editor closed by hand again (`docs/spec/ui-clip-editor.md` › Least height
+    /// and closing).
+    pub clip_clicked: bool,
     /// Automation lanes under the tracks: which are shown, selected points, a drag.
     pub automation: LanesState,
     /// A marker being dragged: its index and where the pointer is, in beats before snapping.
@@ -334,6 +338,7 @@ impl Default for ArrangementViewState {
             drop: None,
             meters: Meters::default(),
             focus: None,
+            clip_clicked: false,
             automation: LanesState::default(),
             marker_drag: None,
             marker_menu_beat: 0.0,
@@ -538,9 +543,10 @@ impl ArrangementViewState {
         self.heights.get(&track).copied().unwrap_or(DEFAULT_LANE)
     }
 
-    /// How tall the view is when it shows only `track` ([`Self::focus`]): the ruler and its lane.
+    /// How tall the view is when it shows only `track` ([`Self::focus`]): the ruler, the loop
+    /// brace and marker rows under it, and the whole lane.
     pub fn focus_height(&self, track: TrackId) -> f32 {
-        RULER + 1.0 + self.lane_height(track) + 1.0
+        RULER + 1.0 + LOOP_ROW + 1.0 + MARKER_ROW + 1.0 + self.lane_height(track) + 1.0
     }
 }
 
@@ -1145,31 +1151,29 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
         if lane_rect.bottom() + below < lanes_area.top() || lane_rect.top() > lanes_area.bottom() {
             continue;
         }
-        // A double-click on an empty spot of a lane that plays notes makes a MIDI clip a bar
-        // long in the grid cell under the pointer (Alt: where the pointer is). The clips are
-        // laid over it, so a double-click on one is the clip's.
-        if lane.notes {
-            let body = ui.interact(
-                row.clip.intersect(lanes_area),
-                Id::new(("arrangement-lane", lane.track.0)),
-                Sense::click(),
-            );
-            body.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Lane {}", lane.name))
-            });
-            if body.double_clicked()
-                && let Some(pointer) = body.interact_pointer_pos()
-            {
-                let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
-                let grid = Grid::new(state.grid, state.beat_width, bar_beats);
-                let start = if ui.input(|i| i.modifiers.alt) || !grid.snaps {
-                    raw
-                } else {
-                    ((raw / grid.step).floor() * grid.step).max(0.0)
-                };
-                let params = json!({ "track": lane.track.0, "start": start, "stack": state.stack_midi });
-                actions.push(Action::new("clip.create", params));
-            }
+        // A click on an empty spot of a lane clears the clip selection (arrangement-editing ›
+        // Selecting clips). A double-click on an empty spot of a lane that plays notes makes a
+        // MIDI clip a bar long in the grid cell under the pointer (Alt: where the pointer is). The
+        // clips are laid over it, so a click or a double-click on one is the clip's.
+        let body =
+            ui.interact(row.clip.intersect(lanes_area), Id::new(("arrangement-lane", lane.track.0)), Sense::click());
+        body.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Lane {}", lane.name)));
+        if body.clicked() {
+            state.clear_selected_clip();
+        }
+        if lane.notes
+            && body.double_clicked()
+            && let Some(pointer) = body.interact_pointer_pos()
+        {
+            let raw = f64::from((pointer.x - time.left() + state.scroll.x) / state.beat_width).max(0.0);
+            let grid = Grid::new(state.grid, state.beat_width, bar_beats);
+            let start = if ui.input(|i| i.modifiers.alt) || !grid.snaps {
+                raw
+            } else {
+                ((raw / grid.step).floor() * grid.step).max(0.0)
+            };
+            let params = json!({ "track": lane.track.0, "start": start, "stack": state.stack_midi });
+            actions.push(Action::new("clip.create", params));
         }
         // The track the piano roll edits, alone in the view: lit, so it is clear which it is.
         if focus == Some(lane.track) {
@@ -1325,6 +1329,11 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
     // the browser drops there, at the beat under the pointer.
     let empty =
         Rect::from_min_max(Pos2::new(area.left(), tracks_bottom + 1.0), Pos2::new(area.right(), lanes_area.bottom()));
+    let empty_time = Rect::from_x_y_ranges(time.x_range(), empty.y_range());
+    if empty_time.is_positive() && ui.interact(empty_time, Id::new("arrangement-empty-space"), Sense::click()).clicked()
+    {
+        state.clear_selected_clip();
+    }
     if empty.height() > theme::ROW + 4.0 {
         let buttons = Rect::from_x_y_ranges(time.x_range(), empty.y_range());
         crate::session_view::empty_space(ui, &painter, buttons, actions);
@@ -1733,6 +1742,7 @@ fn clip_box<'a>(
     let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
     if response.clicked() {
         state.pick_clip(key, shift, command, clip_order);
+        state.clip_clicked = true;
     } else if response.drag_started_by(egui::PointerButton::Primary) && !state.is_selected(key) {
         // Pressing a clip that is already selected keeps the selection, so a drag can start there.
         state.pick_clip(key, shift, command, clip_order);

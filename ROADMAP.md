@@ -655,6 +655,12 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   Settings › Shortcuts gains the **Mouse-first** preset, which gives the mouse the four jobs
   (left draws, right deletes, Shift+right slices, Alt+right plays from the point) as switches of
   their own, kept in `keymap.json`.
+- **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
+  ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
+  view as the height changes until the rows are scrolled by hand; it closes by dragging the
+  splitter down, by the **×** at the end of its toolbar or by **View › Hide editor**
+  (Ctrl+Shift+E), and selecting a clip opens it again. A click on an empty spot of the Arrangement
+  view clears the clip selection, and a lane pulled up with the piano roll shows its clip's notes.
 - A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.

@@ -1,9 +1,9 @@
 ---
 description: How arrangement clips behave when moved (along a lane, to another track, over other clips), how audio clips fade in and out, how a group's tracks fold away, where playback starts and stops (the play start marker), how clips are split and consolidated, and named markers on the timeline
-read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers, fold, folded group, unfold, group triangle, group lane, volume, pan, mute, solo, mixer controls, knob, the wheel over a value
+read_when: start marker, clip offset, loop start, moving clips, clip.move, overlapping clips, clip stacking, trimming, splitting, clip.split, split at playhead, cut a clip, consolidate, clip.consolidate, join clips, render a range, bounce, allow sample stacking, allow MIDI stacking, fades, fade-in, fade-out, clip.setFades, fade handles, fade shape, fade curve, curve handle, inShape, outShape, inCurve, outCurve, linear, equal_power, fast, slow, s_curve, FadeShape, FadeCurve, play position, play start marker, ruler click, transport.setPosition, stop returns, playhead, grid, grid lines, snapping, snap to grid, launcher.setQuantization, quantisation, Alt, off the grid, markers, locators, marker row, marker.add, marker.move, marker.rename, marker.delete, marker.jump, project.markers, fold, folded group, unfold, group triangle, group lane, volume, pan, mute, solo, mixer controls, knob, the wheel over a value, deselect, click on empty space, clip note preview, short lane
 type: spec
 status: draft
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/session/src/commands.rs
   - crates/ui/src/timeline.rs
@@ -80,6 +80,15 @@ lanes draw them (top lane first, clips in their lane from left to right). Ctrl+A
 in the arrangement. Pressing a clip that is part of the selection keeps the selection, so a drag can
 start there; pressing one that is not selects that clip and only it moves, since moving a whole
 selection is not built yet (see Open).
+
+A click on an empty spot of a lane, or on the empty space under the tracks, clears the clip
+selection (a double-click there still makes a MIDI clip, › Making an empty MIDI clip). The track
+selection stays, so the detail area shows the selected track's devices (or its hint); it does not
+close or hide the detail area ([clip editor](ui-clip-editor.md) › Least height and closing).
+
+A clip shows what it holds at every lane height, down to the lane's least 20 px: a MIDI clip draws
+a line per note in the strip it has under its name, and from below 30 px over the name's row; an
+audio clip its waveform the same way ([components](../design/components.md) › MIDI marks).
 
 In the track headers the same keys work on tracks: a click selects one, Ctrl adds or takes one out,
 Shift takes the run of headers between the last one clicked and this one. Ctrl+G groups those.
@@ -534,8 +543,9 @@ drop is a `track.move`; into another group, or out to the top level, it is a `tr
 After a folded group is after everything inside it.
 
 While the piano roll is pulled to the top with **Edited track** (Settings › General › Piano roll),
-the view shows only its ruler and the edited track's lane, lit, with no return tracks and no main
-track, and is not scrolled; its scroll position is back when the view is whole again
+the view shows only its ruler, loop brace and marker rows and the edited track's lane, whole and
+lit (the view is as tall as those rows and the lane, so the lane's notes show as they do
+elsewhere), with no return tracks and no main track, and is not scrolled; its scroll position is back when the view is whole again
 ([clip editor](ui-clip-editor.md) › Pulled to the top).
 
 ## Volume, pan, mute and solo

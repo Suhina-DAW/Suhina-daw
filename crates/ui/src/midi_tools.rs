@@ -183,7 +183,14 @@ pub fn show(ui: &mut Ui, area: Rect, tools: &Tools<'_>, state: &mut PianoRollSta
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &count_text));
 
     let body = Rect::from_min_max(Pos2::new(column.left(), count.bottom() + PAD), column.max);
+    // In a short column the tools have no room under the head: they are left out, not squeezed.
+    let body_fits = body.height() >= PARAM_ROW;
     ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+        if !body_fits {
+            return;
+        }
+        // A button or field too narrow for its text shortens it; nothing wraps onto more lines.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         egui::ScrollArea::vertical().id_salt("piano-roll-midi-tools").show(ui, |ui| {
             if state.quantize_open {
                 quantise_block(ui, tools, state, actions);

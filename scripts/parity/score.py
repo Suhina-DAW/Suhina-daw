@@ -85,7 +85,9 @@ CHAPTERS = [
      "Detail area shows clip properties and, for a MIDI clip in the Arrangement, a first piano roll "
      "(docs/spec/ui-clip-editor.md): keys, ruler, note grid, velocity lane, zoom and scroll, a toolbar of "
      "tool icons with the note clipboard and a toolbar size, a MIDI tools column beside the notes, "
-     "and the selection described in the clip column (count, span, pitch and velocity range). No loop "
+     "and the selection described in the clip column (count, span, pitch and velocity range); the "
+     "editor keeps a least height with its notes in view and closes by its splitter, an x or View > "
+     "Hide editor, opening again when a clip is selected. No loop "
      "or marker editing, no clip panels, no sample editor, no groove/scale panels."),
     (9, "Audio Clips, Tempo, and Warping", 18, 0.38, "partial",
      "Real-time time-stretching along warp markers read from Live Sets, clip gain, transpose, "
