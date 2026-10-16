@@ -299,8 +299,11 @@ so a rate limit is waited out.
 *Suhina GitHub*), it is a Cloudflare Worker in its own repository,
 [suhina-daw/suhina-bot](https://github.com/suhina-daw/suhina-bot), that Discord calls for each
 command and that writes to GitHub as the App `suhina-bot` (`suhina-bot[bot]`). It never reads
-messages on its own. Its commands, settings, secrets and deployment are in that repository's
-README; the plan is suhina-daw/suhina-bot#3. The scripts above keep using the bot token for marking threads.
+messages on its own. Its commands are listed in
+[docs/commands.md](https://github.com/suhina-daw/suhina-bot/blob/main/docs/commands.md), its
+settings, secrets and deployment in
+[docs/operations.md](https://github.com/suhina-daw/suhina-bot/blob/main/docs/operations.md); the
+plan is suhina-daw/suhina-bot#3. The scripts above keep using the bot token for marking threads.
 
 ## Packages
 
