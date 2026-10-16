@@ -16,7 +16,8 @@ tests look like.
    (`Touches: crates/ui/src/detail, crates/session`). The bot answers with overlapping work;
    never start a second PR for the same thing.
 3. **Branch** `<kind>/<short-description>` from latest `main` — `feature/`, `fix/`, `docs/`,
-   `chore/`. From a fork, PRs use `--head claysmith:<branch>` on `suhina-daw/suhina-daw`; a PR
+   `chore/`. From a fork, PRs use `--head <fork-owner>:<branch>` on `suhina-daw/suhina-daw` (the
+   fork's copy of the branch must be pushed); a PR
    that builds on an unmerged one branches from that PR's head and says `Depends on #N`.
 4. **Code**: user-visible behaviour is a **command** in the engine/session (id, params, tests);
    views turn gestures into `Action::new("command", json!({...}))` and never change the project
