@@ -421,7 +421,7 @@ pub(crate) fn menu(ui: &mut Ui, rect: Rect, ghosts: &Ghosts, source: &mut GhostS
         // The button is short, so it fits beside the workflow menu; it is dimmed while nothing
         // shows, and its tooltip and accessible label name what does.
         let color = if *source == GhostSource::None { theme::text_hint() } else { theme::text_value() };
-        let text = egui::RichText::new("Ghosts \u{25be}").font(font.clone()).color(color);
+        let text = egui::RichText::new("Ghosts   ").font(font.clone()).color(color);
         let menu = ui.menu_button(text, |ui| {
             let mut entry = |ui: &mut Ui, choice: GhostSource, shown: &str, label: &str| {
                 let on = *source == choice;
@@ -455,6 +455,7 @@ pub(crate) fn menu(ui: &mut Ui, rect: Rect, ghosts: &Ghosts, source: &mut GhostS
             });
         });
         let label = format!("Ghost notes {}", source.name(ghosts));
+        crate::piano_roll::menu_arrow(ui, menu.response.rect, color);
         menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
         menu.response.on_hover_text(format!(
             "Ghost notes: {}. Notes of other clips drawn faintly behind this clip's notes",

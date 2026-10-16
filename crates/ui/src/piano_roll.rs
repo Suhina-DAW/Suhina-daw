@@ -1910,7 +1910,7 @@ fn grid_menu(ui: &mut Ui, rect: Rect, clip: &PianoClip, keymap: &crate::keymap::
     let shown = grid.label();
     let mut picked = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-        let text = egui::RichText::new(format!("{shown} \u{25be}")).font(mono.clone()).color(theme::text_value());
+        let text = egui::RichText::new(format!("{shown}   ")).font(mono.clone()).color(theme::text_value());
         let menu = ui.menu_button(text, |ui| {
             // One entry: its text, the key its action has, ticked when `ticked` says so.
             let mut entry = |ui: &mut Ui, name: &str, action: Option<&str>, ticked: Option<bool>, result: PianoGrid| {
@@ -1958,10 +1958,22 @@ fn grid_menu(ui: &mut Ui, rect: Rect, clip: &PianoClip, keymap: &crate::keymap::
             entry(ui, "Triplet grid", Some("pianoRoll.gridTriplet"), Some(grid.triplet), grid.toggle_triplet());
         });
         let label = format!("Grid value {shown}");
+        menu_arrow(ui, menu.response.rect, theme::text_value());
         menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
         menu.response.on_hover_text("The grid: snapping, adaptive or fixed lines, triplets");
     });
     picked.filter(|p| *p != grid)
+}
+
+/// The small triangle at the right end of a toolbar menu's button, drawn as a shape: the UI font
+/// has no glyph for it.
+pub(crate) fn menu_arrow(ui: &Ui, button: Rect, color: Color32) {
+    let c = Pos2::new(button.right() - 7.0, button.center().y);
+    ui.painter().add(egui::Shape::convex_polygon(
+        vec![c + Vec2::new(-3.0, -1.5), c + Vec2::new(3.0, -1.5), c + Vec2::new(0.0, 2.0)],
+        color,
+        Stroke::NONE,
+    ));
 }
 
 /// How wide the toolbar's workflow menu is, in points.
@@ -1978,8 +1990,7 @@ fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state:
     let font = theme::ui_font(theme::TEXT_SMALL);
     let mut picked = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-        let text =
-            egui::RichText::new(format!("{} \u{25be}", mode.name())).font(font.clone()).color(theme::text_value());
+        let text = egui::RichText::new(format!("{}   ", mode.name())).font(font.clone()).color(theme::text_value());
         let menu = ui.menu_button(text, |ui| {
             for choice in Preset::MODES {
                 let response =
@@ -2015,6 +2026,7 @@ fn workflow_menu(ui: &mut Ui, rect: Rect, keymap: &crate::keymap::Keymap, state:
             }
         });
         let label = format!("Workflow {}", mode.name());
+        menu_arrow(ui, menu.response.rect, theme::text_value());
         menu.response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
         menu.response.on_hover_text("How clicks, right-clicks and double-clicks work: a preset, or Custom");
     });

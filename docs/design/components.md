@@ -503,11 +503,11 @@ sliders, `control.activeBackground` while the column shows), which shows and hid
 and the **Audition** icon (headphones: a 1.1 px band over two filled 3 × 5 px cups,
 `control.activeBackground` with a `text.primary` shape while on, off at start; accessible label
 "Audition"), which makes drawn and moved notes sound once.
-4 px after it the 96 px **workflow menu**: the mode's name and a ▾ in 10 px `text.value`, its menu
+4 px after it the 96 px **workflow menu**: the mode's name in 10 px `text.value`, its menu
 the four modes as selectable rows, a divider, and one row per workflow setting ("Double-click on a
 note: Deletes it") opening a submenu of its choices, the chosen one highlighted; it is left out when
 the toolbar is too narrow for it and the grid menu.
-After it the 64 px **ghost menu**: "Ghosts" and a ▾ in 10 px `text.value` (`text.hint` while it
+After it the 64 px **ghost menu**: "Ghosts" in 10 px `text.value` (`text.hint` while it
 shows none), its accessible label and tooltip naming what it shows ("Ghost notes Playing
 together"); its menu the rows None, Playing together and This track, the chosen one highlighted, a
 divider, and **Clip…** opening a submenu of every other MIDI clip ("Walk on Bass at bar 17"),
@@ -515,9 +515,10 @@ scrolling past 320 px. It is left out, before the workflow menu, when the toolba
 it and the grid menu. **Ghost notes** are plain rectangles in their own track's colour at 0.25,
 under the clip's notes, with no name, edge or velocity stem
 ([clip editor spec](../spec/ui-clip-editor.md) › Ghost notes).
+Each toolbar menu's button ends in a small filled triangle, 6 px wide, drawn as a shape 7 px from
+its right edge in the button's text colour.
 At the right end
-"Grid" in 10 px `text.hint` and a 76 px grid menu button (its value in 10 px mono `text.value` and
-a ▾). Its menu lists, in 10 px text and separated by dividers: **Snap to grid**; the heading
+"Grid" in 10 px `text.hint` and a 76 px grid menu button (its value in 10 px mono `text.value`). Its menu lists, in 10 px text and separated by dividers: **Snap to grid**; the heading
 "Adaptive grid" in `text.hint` and the five widths; the heading "Fixed grid" and the nine values;
 **Narrow grid** and **Widen grid**; **Triplet grid**. Each entry's key is right-aligned in 10 px
 mono `text.hint`; the chosen entries are highlighted as selected, and an entry the control bar
