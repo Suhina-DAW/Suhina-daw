@@ -79,15 +79,16 @@ fn double_click_at(harness: &mut Harness<'static, App>, at: Pos2) {
     harness.run();
 }
 
-/// A spot of a header's own background, clear of its controls: its bottom-left corner.
+/// A spot of a header's own background, clear of its controls and of the
+/// splitter at its left edge: 10 px in, halfway down.
 fn header_spot(harness: &Harness<'static, App>, track: &str) -> Pos2 {
-    harness.get_by_label(&format!("Track {track}")).rect().left_bottom() + vec2(3.0, -2.0)
+    harness.get_by_label(&format!("Track {track}")).rect().left_center() + vec2(10.0, 0.0)
 }
 
 /// What the detail area shows: the piano roll (its toolbar's ×), a named device, the Clip / Devices
 /// switch.
 fn piano(harness: &Harness<'static, App>) -> bool {
-    harness.query_by_label("Hide editor").is_some()
+    harness.query_by_label_contains("Piano roll,").is_some()
 }
 
 fn shows_device(harness: &Harness<'static, App>, name: &str) -> bool {
@@ -122,7 +123,7 @@ fn the_switch_goes_from_the_clip_to_its_tracks_devices_and_back() {
     assert!(!piano(&harness), "the devices take the piano roll's place");
     assert!(shows_device(&harness, "Utility"), "Drums' chain shows");
     assert!(switch(&harness), "the clip column stays, with the switch to go back");
-    assert!(harness.query_by_label_contains("Clip Beat B").is_some());
+    assert!(harness.query_by_label("Clip Beat B, start 17.1").is_some());
 
     harness.get_by_label("Show Clip").click();
     harness.run();
