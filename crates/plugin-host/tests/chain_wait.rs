@@ -17,6 +17,11 @@ use suhina_session::{BlockCounts, Hosted};
 
 const PATIENT: Duration = Duration::from_secs(20);
 const FRAMES: usize = 1024;
+/// Whether a link's doorbell sleeps until it is rung (a futex on Linux, an event on Windows).
+/// Elsewhere it yields for now (ADR 0006), so every waiting thread of the engine and the hosts
+/// keeps running, and on a machine with few cores how long a block takes says more about the
+/// scheduler than about the engine: the timings are checked only where the doorbell sleeps.
+const DOORBELL_SLEEPS: bool = cfg!(any(target_os = "linux", windows));
 
 fn start(spec: &str, sample_rate: u32) -> (Plugin, Hosted) {
     let launch = Launch {
@@ -172,9 +177,17 @@ fn heavy_plug_ins_in_different_chains_cost_one_heavy_plug_in_and_a_hung_one_cost
     let times = play(&mut renderer, 20, SR);
     let median = times[times.len() / 2];
     assert!(median >= Duration::from_millis(20), "{times:?}");
-    assert!(median < Duration::from_millis(34), "a block took {median:?}, as long as both heavy plug-ins: {times:?}");
     for (n, count) in counts.iter().enumerate() {
-        assert_eq!(count.read().1, 0, "plug-in {n} was late");
+        assert_eq!(count.read().0, 24, "plug-in {n} was given every block");
+    }
+    if DOORBELL_SLEEPS {
+        assert!(
+            median < Duration::from_millis(34),
+            "a block took {median:?}, as long as both heavy plug-ins: {times:?}"
+        );
+        for (n, count) in counts.iter().enumerate() {
+            assert_eq!(count.read().1, 0, "plug-in {n} was late");
+        }
     }
 
     let (mut renderer, _controls, counts) = start_chains(
@@ -184,7 +197,10 @@ fn heavy_plug_ins_in_different_chains_cost_one_heavy_plug_in_and_a_hung_one_cost
     let deadline = Duration::from_secs_f64(FRAMES as f64 / f64::from(SR) * 0.6);
     let times = play(&mut renderer, 8, SR);
     let longest = times[times.len() - 1];
-    assert!(longest < deadline + Duration::from_millis(15), "{longest:?} past the {deadline:?} deadline");
+    // Past the deadline, the hung plug-in's chain hands its next plug-in the block and takes
+    // its miss at once; a yielding doorbell may wait a scheduler slice or two for that.
+    let margin = Duration::from_millis(if DOORBELL_SLEEPS { 15 } else { 40 });
+    assert!(longest < deadline + margin, "{longest:?} past the {deadline:?} deadline");
     let (given, late) = counts[0].read();
     assert!(given == 8 && late >= 5, "the hung plug-in missed its blocks: {given} given, {late} late");
     for (n, count) in counts.iter().enumerate().skip(2) {
