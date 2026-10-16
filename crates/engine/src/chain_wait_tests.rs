@@ -51,9 +51,12 @@ impl Timed {
     }
 }
 
+/// Waits until `at`, yielding rather than sleeping: a short sleep ends on the system timer's
+/// tick on some systems (up to 15.6 ms late on Windows), much later than the engine's 50 µs
+/// look at a plug-in. A link's doorbell waits this way too near its deadline.
 fn sleep_until(at: Instant) {
-    if let Some(left) = at.checked_duration_since(Instant::now()) {
-        std::thread::sleep(left);
+    while Instant::now() < at {
+        std::thread::yield_now();
     }
 }
 
