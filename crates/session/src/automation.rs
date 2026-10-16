@@ -120,20 +120,7 @@ impl Target {
             Kind::Sd { min, max, control } => {
                 let value =
                     if value.is_finite() { value.clamp(min, max) } else { return Err("value must be finite".into()) };
-                Ok(
-                    if matches!(
-                        control,
-                        suhina_device_sdk::ParameterControl::Integer
-                            | suhina_device_sdk::ParameterControl::Toggle
-                            | suhina_device_sdk::ParameterControl::Button
-                            | suhina_device_sdk::ParameterControl::Choice
-                            | suhina_device_sdk::ParameterControl::Radio
-                    ) {
-                        value.round().clamp(min, max)
-                    } else {
-                        value
-                    },
-                )
+                Ok(if control.is_stepped() { value.round().clamp(min, max) } else { value })
             }
             Kind::Plugin(id) => plugin_value(session, self.track, self.device.unwrap_or(0), id, value),
         }

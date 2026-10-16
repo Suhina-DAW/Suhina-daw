@@ -141,7 +141,7 @@ impl Scale {
         match self {
             Self::Mute => true,
             Self::Device(info) => matches!(info.kind, ParamKind::Toggle | ParamKind::Choice(_)),
-            Self::Sd { control, .. } => sd_stepped(*control),
+            Self::Sd { control, .. } => control.is_stepped(),
             Self::Volume | Self::Pan => false,
         }
     }
@@ -184,20 +184,9 @@ impl Scale {
     }
 }
 
-fn sd_stepped(control: suhina_device_sdk::ParameterControl) -> bool {
-    matches!(
-        control,
-        suhina_device_sdk::ParameterControl::Integer
-            | suhina_device_sdk::ParameterControl::Toggle
-            | suhina_device_sdk::ParameterControl::Button
-            | suhina_device_sdk::ParameterControl::Choice
-            | suhina_device_sdk::ParameterControl::Radio
-    )
-}
-
 fn sd_clamp(value: f64, min: f64, max: f64, control: suhina_device_sdk::ParameterControl) -> f64 {
     let value = if value.is_finite() { value.clamp(min, max) } else { min };
-    if sd_stepped(control) { value.round().clamp(min, max) } else { value }
+    if control.is_stepped() { value.round().clamp(min, max) } else { value }
 }
 
 fn sd_position(value: f64, min: f64, max: f64, control: suhina_device_sdk::ParameterControl) -> f64 {

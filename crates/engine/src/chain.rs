@@ -274,9 +274,9 @@ impl Chain {
             sends: Vec::new(),
             scratch: Vec::new(),
             buffer: vec![0.0; MAX_BLOCK * 2],
-            pending: Vec::with_capacity(MAX_PENDING),
-            span_events: Vec::with_capacity(MAX_PENDING),
-            midi_scratch: Vec::with_capacity(MAX_PENDING),
+            pending: Vec::with_capacity(MAX_PENDING * 2),
+            span_events: Vec::with_capacity(MAX_PENDING * 2),
+            midi_scratch: Vec::with_capacity(MAX_PENDING * 2),
             deadline: None,
             context: ProcessContext::default(),
             done: 0,
@@ -1188,7 +1188,7 @@ fn run_sd_midi(
 ) {
     input.clear();
     input.extend_from_slice(events);
-    output.resize(input.len(), (0, NoteEvent::AllNotesOff));
+    output.resize(input.len().saturating_mul(2).min(output.capacity()), (0, NoteEvent::AllNotesOff));
     let mut written = 0;
     let mut changes = lanes.changes(slot, run.from, run.to).peekable();
     for event in input.iter() {

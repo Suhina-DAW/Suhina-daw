@@ -105,6 +105,16 @@ pub enum ParameterControl {
     Radio,
 }
 
+impl ParameterControl {
+    /// Whether values advance in whole steps rather than continuously.
+    pub fn is_stepped(self) -> bool {
+        match self {
+            Self::Integer | Self::Toggle | Self::Button | Self::Choice | Self::Radio => true,
+            Self::Slider | Self::LogSlider | Self::Knob | Self::LogKnob | Self::Number | Self::VerticalSlider => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LabelPosition {
@@ -331,14 +341,7 @@ impl DeviceGraph {
                     parameter.id
                 )));
             }
-            let discrete = matches!(
-                parameter.control,
-                ParameterControl::Integer
-                    | ParameterControl::Toggle
-                    | ParameterControl::Button
-                    | ParameterControl::Choice
-                    | ParameterControl::Radio
-            );
+            let discrete = parameter.control.is_stepped();
             if (discrete && [parameter.min, parameter.max, parameter.default].iter().any(|v| v.fract() != 0.0))
                 || (matches!(parameter.control, ParameterControl::Toggle | ParameterControl::Button)
                     && (parameter.min != 0.0 || parameter.max != 1.0))
@@ -574,14 +577,7 @@ impl Parameter {
     /// Clamp hostile values and preserve discrete parameter semantics.
     pub fn clamp(&self, value: f64) -> f64 {
         let value = if value.is_finite() { value.clamp(self.min, self.max) } else { self.default };
-        match self.control {
-            ParameterControl::Toggle
-            | ParameterControl::Integer
-            | ParameterControl::Button
-            | ParameterControl::Choice
-            | ParameterControl::Radio => value.round().clamp(self.min, self.max),
-            _ => value,
-        }
+        if self.control.is_stepped() { value.round().clamp(self.min, self.max) } else { value }
     }
 
     pub fn new(id: impl Into<String>, name: impl Into<String>, range: (f64, f64), default: f64) -> Self {

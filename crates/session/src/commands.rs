@@ -1411,7 +1411,7 @@ static COMMANDS: &[CommandSpec] = &[
             param(
                 "param",
                 ParamType::Text,
-                "parameter id: a built-in effect or instrument's from devices.list, a plug-in's (a number) from device.pluginParams",
+                "parameter id: a built-in effect or instrument's from devices.list, an .sd device's stable id, or a plug-in's number from device.pluginParams",
             ),
             param(
                 "points",

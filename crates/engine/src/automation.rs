@@ -220,16 +220,7 @@ impl DeviceLanes {
             if self.lanes.len() >= MAX_DEVICE_LANES || self.lanes.iter().any(|l| l.slot == slot && l.param == param) {
                 continue;
             }
-            let stepped = parameters.get(param).is_some_and(|p| {
-                matches!(
-                    p.control,
-                    suhina_device_sdk::ParameterControl::Integer
-                        | suhina_device_sdk::ParameterControl::Toggle
-                        | suhina_device_sdk::ParameterControl::Button
-                        | suhina_device_sdk::ParameterControl::Choice
-                        | suhina_device_sdk::ParameterControl::Radio
-                )
-            });
+            let stepped = parameters.get(param).is_some_and(|p| p.control.is_stepped());
             if let Some(envelope) = Envelope::new(lane, frames_per_beat, stepped) {
                 self.lanes.push(DeviceLane { slot, param, envelope, last: f64::NAN });
             }

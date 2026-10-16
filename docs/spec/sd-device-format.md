@@ -63,7 +63,8 @@ MIDI events as control inputs. `midi_effect` graphs use one `midi_input` and one
 a single chain; `midi_transpose` changes note-on/off keys and drops keys outside 0..127, preserving
 each event's sample offset.
 Note-off events retain the output key of their note-on even when transpose automation changes
-while a note is held; a note-on discarded outside the MIDI key range has no matching output note-off.
+while a note is held. A repeated note-on releases its previous mapped key first; a zero-velocity
+note-on releases the held mapping. Processing needs room for up to two output events per input; a note-on discarded outside the MIDI key range has no matching output note-off.
 Exactly one role-appropriate input/output is required, and every node must contribute to the output.
 Missing references, duplicate ids, invalid ports,
 missing required inputs and cycles are rejected with node/port diagnostics. Only the `in` port

@@ -54,12 +54,15 @@ impl PreparedMidiEffect {
     }
 
     /// Transforms events in order. Returns the number written; if the output is too small,
-    /// processing stops without writing beyond it. Caller should size for the input event cap.
+    /// processing stops without writing beyond it. Caller should size for twice the input event cap.
     pub fn process(&mut self, input: &[(usize, NoteEvent)], output: &mut [(usize, NoteEvent)]) -> usize {
         let mut written = 0;
         'events: for &(frame, mut event) in input {
             if written >= output.len() {
                 break;
+            }
+            if let NoteEvent::On { key, velocity: 0.0 } = event {
+                event = NoteEvent::Off { key, velocity: 0.0 };
             }
             if let NoteEvent::Off { key, velocity } = event {
                 let Some(mapped) = self.held.get_mut(usize::from(key)).and_then(Option::take) else { continue };
@@ -72,7 +75,13 @@ impl PreparedMidiEffect {
             let original = match event {
                 NoteEvent::On { key, .. } => {
                     if let Some(held) = self.held.get_mut(usize::from(key)) {
-                        *held = None;
+                        if held.is_some() && output.len().saturating_sub(written) < 2 {
+                            break;
+                        }
+                        if let Some(mapped) = held.take() {
+                            output[written] = (frame, NoteEvent::Off { key: mapped, velocity: 0.0 });
+                            written += 1;
+                        }
                     }
                     Some(key)
                 }
