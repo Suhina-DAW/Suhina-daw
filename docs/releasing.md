@@ -269,6 +269,13 @@ cannot be reopened, so a marked thread gets no more builds. No thread, a missing
 Discord error is logged and fails nothing. Discord allows two renames of a thread in ten minutes,
 so a rate limit is waited out.
 
+**Commands.** The same Discord application also answers commands: renamed **Suhina** (it was
+*Suhina GitHub*), it is a Cloudflare Worker in its own repository,
+[suhina-daw/suhina-bot](https://github.com/suhina-daw/suhina-bot), that Discord calls for each
+command and that writes to GitHub as the App `suhina-bot` (`suhina-bot[bot]`). It never reads
+messages on its own. Its commands, settings, secrets and deployment are in that repository's
+README; the plan is epic #537. The scripts above keep using the bot token for marking threads.
+
 ## Packages
 
 | Package | Built on | Contents |
