@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 TEMPLATE = Path(__file__).resolve().parent.parent / ".github" / "pull_request_template.md"
-HEADING = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+HEADING = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 
 
 def sections(template: str) -> list[str]:

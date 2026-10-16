@@ -26,6 +26,7 @@ def run() -> int:
             missing(FULL.replace("## How I tested it", "How I tested it"), WANTED) == ["How I tested it"],
         ),
         ("case, spacing and CRLF do not matter", missing(FULL.lower().replace("\n", "\r\n").replace("## ", "##  "), WANTED) == []),
+        ("a heading takes no text from the next line", missing(FULL.replace("## Checklist", "##\nChecklist"), WANTED) == ["Checklist"]),
         ("a ### heading is not a section", missing(FULL.replace("## Checklist", "### Checklist"), WANTED) == ["Checklist"]),
     ]
     failed = 0
