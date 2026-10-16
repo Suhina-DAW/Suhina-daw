@@ -70,8 +70,10 @@ lane, the grid and zoom, and the `note.*` commands.
   Session channel strip's own background ([Session view](ui-session-view.md) › Mixer). The track
   is selected (the first click of the two already does that), the detail area opens if it was
   hidden (Shift+Tab, View › Hide detail area, or the splitter), and it shows that track's device
-  chain. A device's panel answers a right-click with its menu: **Remove device** takes it off
-  the track, settings and all (`device.remove`), one undo putting it back. On an Arrangement
+  chain. A device's panel answers a click with its selection (a 1 px `text.primary` outline,
+  one device at a time) and a right-click with its menu: **Remove device** takes it off
+  the track, settings and all (`device.remove`), one undo putting it back; the Delete key
+  removes the selected device while the chain shows. On an Arrangement
   header or a channel strip, a clip selected on that track stays
   selected and the switch goes to **Devices**, and a clip selected on another track is no longer
   selected; a click on a Session column's name clears the slot selection already, so there the

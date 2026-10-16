@@ -110,6 +110,7 @@ type DecodedDrop = (PathBuf, Option<u16>, std::sync::Arc<suhina_engine::AudioDat
 struct Stash {
     view: SessionViewState,
     arrangement: Option<ArrangementViewState>,
+    selected_device: Option<(TrackId, usize)>,
     revision: u64,
     timeline: Option<(u64, Folds, Timeline)>,
     waveforms: std::sync::Arc<crate::kit::waveform::Waveforms>,
@@ -217,6 +218,9 @@ pub struct App {
     /// The detail area's Clip / Devices switch: for a clip with an editor, the editor or its
     /// track's devices (`docs/spec/ui-clip-editor.md` › Where it opens). Window state.
     detail_showing: detail_view::Showing,
+    /// The device selected in the detail area (its panel's click): the track and the device's
+    /// index, for the Delete key to take off the track. Window state.
+    selected_device: Option<(TrackId, usize)>,
     /// The detail area is showing, and its height (in a row) or width (stacked).
     detail_open: bool,
     detail_height: f32,
@@ -335,6 +339,7 @@ impl App {
             keymap: Keymap::default(),
             keymap_changed: false,
             detail_showing: detail_view::Showing::Clip,
+            selected_device: None,
             detail_open: true,
             detail_height: DETAIL_HEIGHT,
             detail_max: false,
@@ -464,6 +469,7 @@ impl App {
         let stash = Stash {
             view: std::mem::take(&mut self.view),
             arrangement: Some(std::mem::take(&mut self.arrangement)),
+            selected_device: self.selected_device.take(),
             revision: self.revision,
             timeline: self.timeline.take(),
             waveforms: std::mem::take(&mut self.waveforms),
@@ -479,6 +485,7 @@ impl App {
         self.arrangement = stash.arrangement.unwrap_or_default();
         self.arrangement.headers_left = headers_left;
         self.arrangement.header_width = header_width;
+        self.selected_device = stash.selected_device;
         self.revision = stash.revision.wrapping_add(1);
         self.timeline = stash.timeline;
         self.waveforms = stash.waveforms;
@@ -1551,6 +1558,14 @@ impl App {
                 continue;
             }
             self.run(action);
+            // A removed device takes its selection with it, whichever way it was removed.
+            if action.id == "device.remove"
+                && let Some(track) = action.params["track"].as_u64()
+                && let Some(index) = action.params["device"].as_u64()
+                && self.selected_device == Some((TrackId(track as u32), index as usize))
+            {
+                self.selected_device = None;
+            }
             // The window gets Ctrl+V only as a paste of the system clipboard's text, which it
             // does not send while the clipboard holds no text: copying puts a line there, so
             // Ctrl+V reaches the keymap after a copy in Suhina (`Keymap::pressed`).
@@ -1845,6 +1860,7 @@ impl App {
         let picked = ui.scope_builder(egui::UiBuilder::new().max_rect(detail), |ui| {
             if let (Some(piano), detail_view::Detail::Clip(info, _)) = (&piano, &shown) {
                 let (mut rest, picked) = detail_view::show_clip_column(ui, info, stacked);
+                let picked = detail_view::Picked { showing: picked.showing, ..detail_view::Picked::default() };
                 // The MIDI tools column, between the clip's properties and the note grid. With the
                 // detail area stacked there is no room beside the notes, so it is not drawn there
                 // (the quantise settings and Ctrl+U still work: › Other note tools).
@@ -1861,13 +1877,16 @@ impl App {
                 piano_roll::show(ui, rest, piano, piano_roll, cx, actions);
                 picked
             } else if stacked {
-                detail_view::show_stack(ui, &shown, actions, &mut places)
+                detail_view::show_stack(ui, &shown, self.selected_device, actions, &mut places)
             } else {
-                detail_view::show_row(ui, &shown, actions, &mut places)
+                detail_view::show_row(ui, &shown, self.selected_device, actions, &mut places)
             }
         });
-        if let Some(showing) = picked.inner {
+        if let Some(showing) = picked.inner.showing {
             self.detail_showing = showing;
+        }
+        if picked.inner.clicked.is_some() {
+            self.selected_device = picked.inner.clicked;
         }
         self.place_editors(&places);
         // The toolbar's × hides the editor.
@@ -1984,6 +2003,16 @@ impl App {
             View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
         };
         self.piano_clip(clip).map(|c| c.address)
+    }
+
+    /// Whether the detail area shows a track's device chain — not a clip's properties and
+    /// notes: the selected device's Delete key applies only while its panel is on show.
+    fn detail_shows_devices(&self) -> bool {
+        let clip = match self.shown {
+            View::Session => self.view.selected_slot.map(|(t, s)| detail_view::ClipRef::Slot(t, s)),
+            View::Arrangement => self.arrangement.selected_clip().map(|(t, i)| detail_view::ClipRef::Arrangement(t, i)),
+        };
+        clip.is_none() || self.detail_showing == detail_view::Showing::Devices
     }
 
     /// What a key does in the piano roll, when it shows a clip and has the keyboard.
@@ -2833,6 +2862,24 @@ impl App {
                     && let Some(delete) = self.arrangement.automation.delete_selected()
                 {
                     actions.push(delete);
+                    return;
+                }
+                // A device selected in the detail area (its panel's click) is deleted before any
+                // clip, while the detail shows the chain.
+                if action == "selection.delete"
+                    && self.detail_shows_devices()
+                    && let Some((track, index)) = self.selected_device
+                    && self.session().is_some_and(|s| {
+                        let p = s.project();
+                        p.tracks
+                            .iter()
+                            .find(|t| t.id == track)
+                            .and_then(|t| t.channel)
+                            .is_some_and(|c| p.channels.iter().any(|ch| ch.id == c && ch.devices.get(index).is_some()))
+                    })
+                {
+                    self.selected_device = None;
+                    actions.push(Action::new("device.remove", json!({ "track": track.0, "device": index })));
                     return;
                 }
                 // The Session view: Delete takes the selected slot's clip off its slot, and the

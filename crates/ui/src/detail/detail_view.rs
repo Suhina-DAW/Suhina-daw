@@ -210,6 +210,15 @@ pub enum Showing {
     Devices,
 }
 
+/// What the detail area's frame picked: the Clip / Devices switch's value, and a device panel
+/// clicked (to select it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Picked {
+    pub showing: Option<Showing>,
+    /// A device panel was clicked: the track and the device's index, to select.
+    pub clicked: Option<(TrackId, usize)>,
+}
+
 /// What the piano roll has selected in the clip the detail area shows: how many notes, how many
 /// of them are muted, the span in bars and beats, and the range of keys and velocities (1 to 127).
 /// Empty when nothing is selected, so the column shows no rows for it.
@@ -472,27 +481,28 @@ fn format_value(value: f64) -> String {
 pub fn show_row(
     ui: &mut Ui,
     detail: &Detail,
+    selected: Option<(TrackId, usize)>,
     actions: &mut Vec<Action>,
     places: &mut Vec<EditorPlace>,
-) -> Option<Showing> {
+) -> Picked {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip to see it here"),
-        Detail::Devices(chain) => chain_row(ui, &painter, area, chain, actions, places),
+        Detail::Devices(chain) => return chain_row(ui, &painter, area, chain, selected, actions, places),
         Detail::Clip(info, chain) => {
             let (column, picked) = clip_properties(ui, &painter, area, info, false);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max);
             if rest.width() > 0.0 {
-                chain_row(ui, &painter, rest, chain, actions, places);
+                chain_row(ui, &painter, rest, chain, selected, actions, places);
             }
-            return picked;
+            return Picked { showing: picked, ..Picked::default() };
         }
     }
-    None
+    Picked::default()
 }
 
 /// A chain's devices side by side in `area`; one with an embedded editor is as wide as it.
@@ -501,14 +511,16 @@ fn chain_row(
     painter: &egui::Painter,
     area: Rect,
     chain: &Chain,
+    selected: Option<(TrackId, usize)>,
     actions: &mut Vec<Action>,
     places: &mut Vec<EditorPlace>,
-) {
+) -> Picked {
     if chain.devices.is_empty() {
         hint(painter, area, &format!("No devices on {} yet", chain.name));
-        return;
+        return Picked::default();
     }
     let scale = ui.ctx().pixels_per_point();
+    let mut picked = Picked::default();
     let mut x = area.left();
     for device in &chain.devices {
         let editor = device.plugin.as_ref().and_then(|p| p.editor_size(scale));
@@ -531,12 +543,22 @@ fn chain_row(
         if rect.left() > area.right() {
             break;
         }
-        device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
+        let clicked = device_panel(
+            ui,
+            &painter.with_clip_rect(area),
+            rect,
+            chain.track,
+            device,
+            selected == Some((chain.track, device.index)),
+            actions,
+        );
+        picked.clicked = clicked.then_some((chain.track, device.index));
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
         }
     }
+    picked
 }
 
 fn sdk_viewport(device: &DeviceBox) -> Option<[f32; 2]> {
@@ -548,27 +570,28 @@ fn sdk_viewport(device: &DeviceBox) -> Option<[f32; 2]> {
 pub fn show_stack(
     ui: &mut Ui,
     detail: &Detail,
+    selected: Option<(TrackId, usize)>,
     actions: &mut Vec<Action>,
     places: &mut Vec<EditorPlace>,
-) -> Option<Showing> {
+) -> Picked {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0.0, theme::window_background());
     match detail {
         Detail::Nothing => hint(&painter, area, "Select a track or a clip"),
-        Detail::Devices(chain) => chain_stack(ui, &painter, area, chain, actions, places),
+        Detail::Devices(chain) => return chain_stack(ui, &painter, area, chain, selected, actions, places),
         Detail::Clip(info, chain) => {
             let (column, picked) = clip_properties(ui, &painter, area, info, true);
             clip_for_readers(ui, column, info);
             let rest = Rect::from_min_max(Pos2::new(area.left(), column.bottom() + 1.0), area.max);
             if rest.height() > 0.0 {
-                chain_stack(ui, &painter, rest, chain, actions, places);
+                chain_stack(ui, &painter, rest, chain, selected, actions, places);
             }
-            return picked;
+            return Picked { showing: picked, ..Picked::default() };
         }
     }
-    None
+    Picked::default()
 }
 
 /// The clip's properties column for a clip whose editor fills the rest of the detail area (the
@@ -576,7 +599,7 @@ pub fn show_stack(
 /// controls and the MIDI tools live in the column beside this one
 /// (› Other note tools in `docs/spec/ui-clip-editor.md`). With it, the part the Clip / Devices
 /// switch was clicked to, if it was.
-pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> (Rect, Option<Showing>) {
+pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> (Rect, Picked) {
     let area = ui.available_rect_before_wrap();
     ui.allocate_rect(area, Sense::hover());
     let painter = ui.painter_at(area);
@@ -588,7 +611,7 @@ pub fn show_clip_column(ui: &mut Ui, info: &ClipInfo, stacked: bool) -> (Rect, O
     } else {
         Rect::from_min_max(Pos2::new(column.right() + 1.0, area.top()), area.max)
     };
-    (rest, picked)
+    (rest, Picked { showing: picked, ..Picked::default() })
 }
 
 /// A chain's devices one under another in `area`; one with an embedded editor is as tall as
@@ -598,14 +621,16 @@ fn chain_stack(
     painter: &egui::Painter,
     area: Rect,
     chain: &Chain,
+    selected: Option<(TrackId, usize)>,
     actions: &mut Vec<Action>,
     places: &mut Vec<EditorPlace>,
-) {
+) -> Picked {
     if chain.devices.is_empty() {
         hint(painter, area, &format!("No devices on {} yet", chain.name));
-        return;
+        return Picked::default();
     }
     let scale = ui.ctx().pixels_per_point();
+    let mut picked = Picked::default();
     let mut y = area.top();
     for device in &chain.devices {
         let editor = device.plugin.as_ref().and_then(|p| p.editor_size(scale));
@@ -637,12 +662,22 @@ fn chain_stack(
         if rect.top() > area.bottom() {
             break;
         }
-        device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
+        let clicked = device_panel(
+            ui,
+            &painter.with_clip_rect(area),
+            rect,
+            chain.track,
+            device,
+            selected == Some((chain.track, device.index)),
+            actions,
+        );
+        picked.clicked = clicked.then_some((chain.track, device.index));
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
         }
     }
+    picked
 }
 
 /// Where a plug-in's embedded editor of `editor` points goes under its line and button in the
@@ -724,20 +759,27 @@ fn hint(painter: &egui::Painter, area: Rect, text: &str) {
 }
 
 /// One device: a header with its on switch and name, then its parameters, one per row.
+#[allow(clippy::too_many_arguments)]
 fn device_panel(
     ui: &mut Ui,
     painter: &egui::Painter,
     rect: Rect,
     track: TrackId,
     device: &DeviceBox,
+    selected: bool,
     actions: &mut Vec<Action>,
-) {
+) -> bool {
     // The panel answers a right-click with its menu (the device's remove); its label is the
-    // screen-reader and test name the chain drew for it before.
+    // screen-reader and test name the chain drew for it before. A click selects the device, so
+    // the Delete key takes it off the track.
     let panel = ui
         .interact(rect, Id::new(("device-panel", track.0, device.index)), Sense::click())
         .on_hover_text("Right-click for the device's menu");
     panel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Device {}", device.name)));
+    if selected {
+        painter.rect_stroke(rect, 1.0, theme::hairline(theme::text_primary()), egui::StrokeKind::Inside);
+    }
+    let clicked = panel.clicked();
     panel.context_menu(|ui| menus::device_menu(ui, track, device.index, actions));
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
@@ -788,7 +830,7 @@ fn device_panel(
             theme::ui_font(theme::TEXT_SMALL),
             color,
         );
-        return;
+        return clicked;
     }
     if device.params.is_empty() && device.graph.is_none() {
         let text = if device.kind.starts_with("Not supported") {
@@ -804,7 +846,7 @@ fn device_panel(
             theme::ui_font(theme::TEXT_SMALL),
             theme::text_hint(),
         );
-        return;
+        return clicked;
     }
     if let Some(graph) = &device.graph {
         ui.scope_builder(egui::UiBuilder::new().max_rect(body.intersect(ui.clip_rect())), |ui| {
@@ -1074,7 +1116,7 @@ fn device_panel(
         }
             });
         });
-        return;
+        return clicked;
     }
     for (index, (id, value)) in device.params.iter().enumerate() {
         let row = Rect::from_min_size(
@@ -1101,6 +1143,7 @@ fn device_panel(
             theme::text_value(),
         );
     }
+    clicked
 }
 
 /// The selected clip: its name and where it is, how long, and what it plays. In a row it takes
@@ -1445,7 +1488,7 @@ mod tests {
             let ctx = egui::Context::default();
             theme::install(&ctx);
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                show_stack(ui, &detail, None, &mut Vec::new(), &mut Vec::new());
             });
             assert!(!output.shapes.is_empty(), "{control:?}");
             output.textures_delta.clear();
@@ -1495,7 +1538,7 @@ mod tests {
         let mut harness =
             egui_kittest::Harness::builder().with_size((1180.0, 180.0)).with_pixels_per_point(1.0).wgpu().build_ui(
                 |ui| {
-                    show_row(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                    show_row(ui, &detail, None, &mut Vec::new(), &mut Vec::new());
                 },
             );
         theme::install(&harness.ctx);
@@ -1519,7 +1562,7 @@ mod tests {
         let mut harness =
             egui_kittest::Harness::builder().with_size((660.0, 340.0)).with_pixels_per_point(1.0).wgpu().build_ui(
                 |ui| {
-                    show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                    show_stack(ui, &detail, None, &mut Vec::new(), &mut Vec::new());
                 },
             );
         theme::install(&harness.ctx);
@@ -1548,7 +1591,7 @@ mod tests {
         let mut harness =
             egui_kittest::Harness::builder().with_size((660.0, 340.0)).with_pixels_per_point(1.0).wgpu().build_ui(
                 |ui| {
-                    show_stack(ui, &detail, &mut Vec::new(), &mut Vec::new());
+                    show_stack(ui, &detail, None, &mut Vec::new(), &mut Vec::new());
                 },
             );
         theme::install(&harness.ctx);
@@ -1629,9 +1672,9 @@ mod tests {
                     places.clear();
                     let mut actions = Vec::new();
                     if stacked {
-                        show_stack(ui, &detail, &mut actions, places);
+                        show_stack(ui, &detail, None, &mut actions, places);
                     } else {
-                        show_row(ui, &detail, &mut actions, places);
+                        show_row(ui, &detail, None, &mut actions, places);
                     }
                 },
                 Vec::new(),
@@ -1654,7 +1697,7 @@ mod tests {
             let mut probe = Harness::builder().with_size(egui::vec2(600.0, 300.0)).build_ui_state(
                 |ui, places: &mut Vec<EditorPlace>| {
                     places.clear();
-                    show_row(ui, &detail, &mut Vec::new(), places);
+                    show_row(ui, &detail, None, &mut Vec::new(), places);
                 },
                 Vec::new(),
             );
@@ -1665,7 +1708,7 @@ mod tests {
             Harness::builder().with_size(egui::vec2(600.0, EDITOR_TOP + 50.0 + margin * 2.0)).build_ui_state(
                 |ui, places: &mut Vec<EditorPlace>| {
                     places.clear();
-                    show_row(ui, &detail, &mut Vec::new(), places);
+                    show_row(ui, &detail, None, &mut Vec::new(), places);
                 },
                 Vec::new(),
             );
@@ -1674,7 +1717,7 @@ mod tests {
         let mut none = Harness::builder().with_size(egui::vec2(600.0, EDITOR_TOP - 1.0 + margin * 2.0)).build_ui_state(
             |ui, places: &mut Vec<EditorPlace>| {
                 places.clear();
-                show_row(ui, &detail, &mut Vec::new(), places);
+                show_row(ui, &detail, None, &mut Vec::new(), places);
             },
             Vec::new(),
         );
@@ -1698,9 +1741,9 @@ mod tests {
                 |ui, actions: &mut Vec<Action>| {
                     let mut places = Vec::new();
                     if stacked {
-                        show_stack(ui, &detail, actions, &mut places);
+                        show_stack(ui, &detail, None, actions, &mut places);
                     } else {
-                        show_row(ui, &detail, actions, &mut places);
+                        show_row(ui, &detail, None, actions, &mut places);
                     }
                     assert!(places.is_empty());
                 },

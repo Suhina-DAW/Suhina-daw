@@ -2084,6 +2084,16 @@ fn a_devices_menu_removes_it_and_undo_brings_it_back() {
     harness.run();
     assert_eq!(device_count(&harness), 1, "the device is back");
     assert!(harness.query_by_label("Device Utility").is_some());
+    // A click selects the device, and the Delete key takes it off the track the same way.
+    harness.get_by_label("Device Utility").click();
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(device_count(&harness), 0, "the selected device is gone");
+    assert!(harness.query_by_label("Device Utility").is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(device_count(&harness), 1, "the device is back");
 }
 
 #[test]
