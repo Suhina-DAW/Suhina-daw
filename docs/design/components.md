@@ -7,6 +7,8 @@ last_verified: 2026-10-16
 covers:
   - crates/ui/src/theme.rs
   - crates/ui/src/session_view.rs
+  - crates/ui/src/mixer_strip.rs
+  - crates/ui/src/view_settings.rs
   - crates/ui/src/widgets.rs
   - crates/ui/src/arrangement_view.rs
   - crates/ui/src/timeline.rs
@@ -99,7 +101,7 @@ the view with the detail area, status bar.
 | Drop overlay | While a project file is dragged over the window: `window.background` at 45 % over the view and "Drop to open" in 13 px `text.primary`, fading in and out with the animations |
 | Browser | 300 px wide by default, dragged from 200 px to half the window by a 4 px handle at its inner edge (`border`, `border.strong` under the pointer); left of the view, or right (Settings › Interface › Browser); Ctrl+B and View › Show browser hide and show it. See Browser below |
 | Detail splitter | 6 px, `control.background`, a 32 × 2 grip in `text.hint` in the middle; the cursor shows which way it moves |
-| Detail area | Under the view, 200 px by default, resizable from 80 px (120 px while it shows the piano roll) to all but 160 px of the view; dragged below half that it collapses to the splitter along the bottom, which is dragged up to open it again ([clip editor](../spec/ui-clip-editor.md) › Least height and closing), and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; `AudioEffect` panels show visible signal-flow nodes and fitted parameter sliders; a selected clip (on the arrangement, or in a slot) shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable), as Settings › Interface › Detail area sets. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
+| Detail area | Under the view (and under the browser too with Settings › Interface › Detail area › Layout on Full width, the browser then ending above it), 200 px by default, resizable from 80 px (120 px while it shows the piano roll) to all but 160 px of the view; dragged below half that it collapses to the splitter along the bottom, which is dragged up to open it again ([clip editor](../spec/ui-clip-editor.md) › Least height and closing), and at least as tall as the tallest open embedded plug-in editor; Shift+Tab hides and shows it. Shows the selected track's device chain; `AudioEffect` panels show visible signal-flow nodes and fitted parameter sliders; a selected clip (on the arrangement, or in a slot) shows its properties and, beside them, the chain of the track it is on: in a row (220 px per device), or stacked in a column beside the view (260 px by default, resizable), as Settings › Interface › Detail area sets. With nothing selected: "Select a track or a clip to see it here" in `text.hint` ("Select a track or a clip" in the stacked column) |
 | Status bar | 20 px, `panel.background`: the last message on the left (10 px, `text.secondary`, errors in the recording red), "N tracks · M scenes" on the right (10 px, `text.hint`), followed by " · backed up 14:05" once the active project has been backed up in this run. There is no separate info view |
 
 ## Browser
@@ -162,21 +164,44 @@ dragged ([Session view](../spec/ui-session-view.md) › Between the views).
 
 ### Mixer strip (Session)
 
-72 px high, `panel.background`, 6 px padding, under every track and return column; the scene column's
-part is empty (the main track's strip is planned). From top to bottom:
+A channel strip under every track and return column, `panel.background`, 6 px padding; the
+scene column's part holds the main meter only (the main track's strip is planned). The mixer's
+height is the strip's: 166 px by default, from 46 px up to just under the stop row (at least to
+166 px whatever the scene count). Its top edge, the 1 px `border.strong` line under the slots,
+takes the pointer 3 px either side (a vertical resize cursor, labelled "Mixer height"); a drag
+moves it, a double-click gives 166 px back.
+
+**Height steps.** Each part appears once the mixer is at least as tall as its step, and goes
+again below it. Top to bottom, the strip at its tallest: name, device list, sends row, pan row,
+volume readout, fader with the meter, toggles.
+
+| Mixer height | Adds | Size |
+|---|---|---|
+| 46 px (least) | Toggles; the compact volume above them | toggles 18 px; volume 12 px, 4 px above the toggles |
+| 96 px | The fader, the meter beside it and the dB readout over it, in place of the compact volume | readout 12 px, 2 px gap, fader at least 48 px, 4 px above the toggles |
+| 122 px | Pan row | 22 px and 4 px under it |
+| 148 px | Sends row | 22 px and 4 px under it (the pre dot sits in the gap) |
+| 166 px (default) | Name row, at the top | 16 px and 2 px under it |
+| 240 px | Device list, under the name | at least four 16 px rows and 4 px under it; the fader takes the height up to 140 px, the list the rest |
 
 | Part | Spec |
 |---|---|
-| Knob row | 22 px: the pan knob at the left, then one send knob per return, 4 px apart, as many as fit (three in a track column, none in a return column). The volume is dragged from its value then, not from the right half of the strip |
-| Send knob | A knob with the return's letter in its centre (8 px mono `text.hint`), pointer `text.value` (`text.primary` hovered); −70 dB … +6 dB over the travel. A 1.5 px `text.value` dot under it when the send is before the fader. While it is dragged, the values row's left value is the letter and the level ("A -12.0") |
+| Compact volume | 12 px across the strip, as the Arrangement's volume field: `control.background` (`control.hoverBackground` hovered), filled up to the level in `control.playingBackground` with 0 dB at 85 %, the value right in 10 px mono `text.primary`. With Mixer controls on Knob, a 12 px knob at the left and the value right of it. Dragged up or down, the wheel, double-click for 0 dB |
+| Fader | A 22 px column at the strip's left: a 4 px `control.background` track centred in it, filled from the bottom up to the level in `control.playingBackground` (0 dB at 85 % of the travel, as the volume field), a 1 px `text.hint` tick 5 px either side of the track at 0 dB, and an 18 × 7 px cap in `text.value` (`text.primary` hovered or dragged) centred on the level, a 1 px `window.background` line across its middle. The column, readout included, takes the drag, the wheel and the double-click |
+| Readout | Over the fader, 12 px: the volume in 10 px mono `text.value` (`text.primary` hovered), "-inf" below −70 dB, centred over the fader column |
+| Meter | Two 4 px bars, as below, standing 6 px right of the fader column, from the top of the fader to its bottom; at the least height, where there is no fader, it is not drawn |
+| Pan row | The pan knob (22 px) at the left, its value right of it, 6 px apart, 10 px mono `text.secondary` ("C", "15L"). While a send is dragged, its letter and level stand there instead ("A -12.0") |
+| Sends row | One send knob per return, 4 px apart from the left, as many as fit (four in a track column) |
+| Name | 16 px: the track's name in 11 px `text.primary` (`text.hint` while the track is off), at the left, cut off at the strip's edge |
+| Device list | 16 px rows, one per device in chain order: its name in 10 px `text.secondary` 4 px in (`text.hint` while the device is off), "plug-in" right in 9 px `text.hint` for a plug-in; `control.hoverBackground` hovered, `control.activeBackground` for the row clicked last. The wheel scrolls it. "No devices" in 10 px `text.hint` when the chain is empty. A click selects the track and opens the detail area on its devices |
+| Send knob | A knob with the return's letter in its centre (8 px mono `text.hint`), pointer `text.value` (`text.primary` hovered); −70 dB … +6 dB over the travel. A 1.5 px `text.value` dot under it when the send is before the fader |
 | Knob | 22 px; circle r 9, `control.background` fill, 1 px `text.hint` stroke; pointer 1.5 px from centre to r 8; travel −135° … +135°; pan pointer `text.primary`, sends `#C9C4BB` |
-| Values row | 12 px, 4 px under the knobs: pan left (10 px mono `text.secondary`, "C", "15L"), volume right (10 px mono `#C9C4BB`, dragged up or down) |
-| Toggles | 18 px at the bottom: track on (the track number, or the return's letter, in 10 px mono) and, 2 px apart, solo ("S" in 10 px) and cue ("C" in 10 px), a quarter each; on a track that plays notes or audio, solo, cue and arm take a fifth each and track on the rest |
+| Toggles | 18 px at the bottom, at every height: track on (the track number, or the return's letter, in 10 px mono) and, 2 px apart, solo ("S" in 10 px) and cue ("C" in 10 px), a quarter each; on a track that plays notes or audio, solo, cue and arm take a fifth each and track on the rest |
 | Track on | On: `#C9C4BB` with `window.background` text. Off: `control.background` with `text.hint` |
 | Solo | On: `accent` with `window.background` text; off: `control.background`, `text.secondary`. A click solos the track alone; Ctrl (Cmd) adds it to the tracks soloed already |
 | Cue | Coloured as track on: on, `#C9C4BB` with `window.background` text; off, `control.background` with `text.hint`. A click turns the track's cue on or off (`track.setCue`): it is also heard on the cue output ([spec](../spec/cue-output.md)) |
 | Arm | Off: a 1.2 px `text.secondary` ring on `control.background` (hover `control.hoverBackground`). On: `recording.background`, the ring filled in `recording`. A click arms the track alone (`track.setArm`, exclusive); Ctrl (Cmd) adds it to the tracks armed already. Tracks that play notes or audio have one: an armed note track plays the MIDI controllers, an armed audio track hears its audio input |
-| Meter | Two 4 px bars (left, right), 2 px apart, on `window.background`, standing 6 px right of the pan knob from the top of the knob row to the bottom of the values row; the main strip's at the same place. The scale is the volume's, −70 … +6 dB, linear in dB; the peak at 45 % opacity, the RMS level over it in full, `meter.normal`, the top 12 % `meter.hot` (above −3 dB); the held peak (1.5 s) a 1 px line; a 3 px clip light on top, 1 px above the bars, `recording` while lit; a click on the meter turns the light off (`mixer.resetClip`; [spec](../spec/level-meters.md)) |
+| Meter bars | Two 4 px bars (left, right), 2 px apart, on `window.background`; the main strip's at the same place as a track's. The scale is the volume's, −70 … +6 dB, linear in dB; the peak at 45 % opacity, the RMS level over it in full, `meter.normal`, the top 12 % `meter.hot` (above −3 dB); the held peak (1.5 s) a 1 px line; a 3 px clip light on top, 1 px above the bars, `recording` while lit; a click on the meter turns the light off (`mixer.resetClip`; [spec](../spec/level-meters.md)) |
 
 ## Arrangement view
 
@@ -290,11 +315,13 @@ the list; each setting is a 34 px row with its name (11 px `text.primary`), a no
 | General › Piano roll | Left click draws, Right click deletes a note, Shift+right click splits, Alt+right plays from the point: the four mouse switches of the **Mouse-first** preset, each on or off on its own, kept in `keymap.json` ([shortcuts](../shortcuts.md) › Presets) |
 | Interface | Animations | On (default), Off |
 | Interface | Zoom | Three parts: −, the value ("100 %", a click goes back to 100 %), +; 50–200 % in 10 % steps, the size of the whole window ([spec](../spec/window-zoom.md)) |
+| Interface | Double-click makes a clip | On (default): a double-click on an empty slot (Session view) or an empty spot of a lane (Arrangement view) of a track that plays notes makes an empty MIDI clip (`clip.create`); Off: it does nothing ([spec](../spec/ui-session-view.md) › Clip slots) |
 | Interface › Arrangement | Track headers | Left, Right (default) |
 | Interface › Arrangement | Allow sample stacking, Allow MIDI stacking | On, Off (default): moved clips stack instead of replacing ([spec](../spec/arrangement-editing.md)) |
 | Interface › Arrangement | Mixer controls | Field (default): the volume bar and the pan centre bar; Knob: a knob with its value beside it, in the Arrangement headers and the Session mixer ([spec](../spec/arrangement-editing.md) › Volume, pan, mute and solo) |
 | Interface › Detail area | Device chain | Row (default), Stack |
 | Interface › Detail area | Select on launch | On (default), Off: launching a clip in the Session view selects it, so the detail area shows it ([spec](../spec/ui-session-view.md)) |
+| Interface › Detail area | Layout | Beside (default): the detail area starts right of the browser, which runs down to the status bar; Full width: it spans the whole window, under the browser too. Not used while the device chain is stacked ([spec](../spec/ui-session-view.md) › Window regions) |
 | Interface › Browser | Side | Left (default), Right |
 | Interface › Browser | Auto-play | On (default), Off: selecting a sample or MIDI file previews it |
 | Interface › Browser | Preview volume | −18, −12, −6 (default), 0 dB |
