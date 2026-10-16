@@ -6,12 +6,17 @@
 //! instance whose editor is open; what happened to each (asked to close, its size) is kept by
 //! its id in a list on the main thread.
 //!
-//! Windows (Win32) and Linux (X11, through `x11rb`); elsewhere opening one is an error for now
-//! (ADR 0006).
+//! Windows (Win32) and Linux (X11, through `x11rb`); macOS (AppKit, through `objc2-app-kit`):
+//! one `NSWindow` per open editor, its content view the plug-in's view attaches into, the
+//! application an accessory (no Dock icon of its own) whose events the main loop pumps.
+//! Cross-process embedding does not exist there (a view of the host's process cannot attach
+//! to another process's window), so an embedded editor opens in a window of its own instead.
+//! On any other system opening one is an error for now (ADR 0006).
 //!
 //! An editor's window is owned by the engine's window when the engine names it
 //! ([`set_owner`]): it floats above Suhina, has no taskbar entry of its own and is minimised
-//! with it (Win32 owner window; X11 `WM_TRANSIENT_FOR`).
+//! with it (Win32 owner window; X11 `WM_TRANSIENT_FOR`). macOS has no cross-process window
+//! ownership either, so there the editor is a plain window of the host's process.
 //!
 //! An embedded editor ([`Window::open_embedded`]) is instead a child inside the engine's
 //! window, where its device panel shows it: two windows, a *clip* the size of the panel's
@@ -783,51 +788,195 @@ mod imp {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 mod imp {
+    use std::cell::{Cell, RefCell};
     use std::ffi::c_void;
+
+    use objc2::MainThreadOnly;
+    use objc2::rc::Retained;
+    use objc2_app_kit::{
+        NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSEventMask, NSView, NSWindow,
+        NSWindowStyleMask,
+    };
+    use objc2_foundation::{MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSPoint, NSRect, NSSize, NSString};
 
     use super::{Placement, Size, WindowId};
 
-    pub(crate) struct Window;
+    /// One open window: its AppKit objects, and what happened to it.
+    struct State {
+        id: WindowId,
+        window: Retained<NSWindow>,
+        /// The content view the plug-in's view attaches into.
+        view: Retained<NSView>,
+        /// The user asked the window to close.
+        close_requested: bool,
+        /// The window's inside size as the system last reported it.
+        size: Size,
+    }
+
+    /// A window of this host's own, with a content view for the plug-in's editor to attach to.
+    pub(crate) struct Window {
+        id: WindowId,
+    }
+
+    thread_local! {
+        // The editors' windows live on the host's main thread, like the plug-ins' views.
+        static OPEN: RefCell<Vec<State>> = const { RefCell::new(Vec::new()) };
+        /// `pump` runs AppKit calls that can reach back into this code (an event's handler
+        /// opening or closing a window); a nested call from inside one does nothing rather than
+        /// running the loop twice.
+        static PUMPING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// The shared application, set once to run as an accessory: the editors' windows belong to
+    /// this process, which has no Dock icon of its own and never becomes the active app on its
+    /// own — a window takes the focus when it opens. `None` off the main thread, where windows
+    /// cannot live; the host's message loop runs on the main thread.
+    fn app() -> Option<Retained<NSApplication>> {
+        let marker = MainThreadMarker::new()?;
+        let app = NSApplication::sharedApplication(marker);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+        Some(app)
+    }
 
     impl Window {
-        pub(crate) fn open(_title: &str, _size: Size, _resizable: bool) -> Result<Self, String> {
-            Err("plug-in editors are not supported on this system yet".into())
+        /// Opens a window `title` with an inside of `size`; the user may resize it when
+        /// `resizable`.
+        pub(crate) fn open(title: &str, size: Size, resizable: bool) -> Result<Self, String> {
+            let Some(app) = app() else { return Err("the editor's window wants the main thread".into()) };
+            let mut style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Miniaturizable;
+            if resizable {
+                style |= NSWindowStyleMask::Resizable;
+            }
+            let content = NSSize::new(f64::from(size.width), f64::from(size.height));
+            // SAFETY: this is the host's main thread, where AppKit wants its calls.
+            let allocated = unsafe { NSWindow::alloc(MainThreadMarker::new_unchecked()) };
+            // SAFETY: on the main thread; the window joins the OPEN list before this returns.
+            let window: Retained<NSWindow> = unsafe {
+                NSWindow::initWithContentRect_styleMask_backing_defer(
+                    allocated,
+                    NSRect::new(NSPoint::ZERO, content),
+                    style,
+                    NSBackingStoreType::Buffered,
+                    false,
+                )
+            };
+            // SAFETY: on the main thread; the window just made.
+            unsafe { window.setReleasedWhenClosed(false) };
+            window.setTitle(&NSString::from_str(title));
+            let Some(view) = window.contentView() else {
+                return Err("could not open the editor's window".into());
+            };
+            let id = WindowId(Retained::as_ptr(&view) as usize);
+            let state = State { id, view: view.clone(), close_requested: false, size, window: window.clone() };
+            if !OPEN.with(|open| open.try_borrow_mut().map(|mut open| open.push(state)).is_ok()) {
+                return Err("could not keep the editor's window".into());
+            }
+            // The window takes the keyboard: this process is never the active app on its own,
+            // so it asks to come forward when the user opens an editor.
+            window.makeKeyAndOrderFront(None);
+            app.activate();
+            Ok(Self { id })
         }
 
+        /// An editor cannot open inside another process's window here: a view of this process
+        /// cannot attach to one of another's, so the engine opens a window of its own instead.
         pub(crate) fn open_embedded(_parent: u64, _size: Size) -> Result<Self, String> {
-            Err("plug-in editors are not supported on this system yet".into())
+            Err("a plug-in's editor opens in a window of its own on this system".into())
         }
 
+        /// The content view's pointer, for the plug-in to attach its view to.
         pub(crate) fn handle(&self) -> *mut c_void {
-            std::ptr::null_mut()
+            self.id.0 as *mut c_void
         }
 
         pub(crate) fn id(&self) -> WindowId {
-            WindowId(0)
+            self.id
         }
     }
 
     impl Drop for Window {
-        /// Nothing to close here; the editors that drop it explicitly do the same everywhere.
-        fn drop(&mut self) {}
+        fn drop(&mut self) {
+            // The window goes away; a user-closed one is already out of sight. The plug-in has
+            // let go of its view before this (the editors close their views first).
+            OPEN.with(|open| {
+                if let Ok(mut open) = open.try_borrow_mut() {
+                    open.retain(|s| s.id != self.id);
+                }
+            });
+            with_state(self.id, |s| {
+                if s.window.isVisible() {
+                    s.window.orderOut(None);
+                }
+            });
+        }
     }
 
-    pub(crate) fn resize(_id: WindowId, _size: Size) {}
+    /// Runs `f` on the state of open window `id`, if it is still open.
+    fn with_state<R>(id: WindowId, f: impl FnOnce(&mut State) -> R) -> Option<R> {
+        OPEN.with(|open| {
+            let mut open = open.try_borrow_mut().ok()?;
+            open.iter_mut().find(|s| s.id == id).map(f)
+        })
+    }
 
+    /// Puts an embedded window at `placement`: there are no embedded windows here
+    /// ([`Window::open_embedded`]), so nothing to do.
     pub(crate) fn place(_id: WindowId, _placement: Placement) {}
 
-    pub(crate) fn take_close_request(_id: WindowId) -> bool {
-        false
+    /// Resizes window `id` so its inside is `size` (a plug-in asked for it).
+    pub(crate) fn resize(id: WindowId, size: Size) {
+        with_state(id, |s| {
+            s.window.setContentSize(NSSize::new(f64::from(size.width), f64::from(size.height)));
+            s.size = size;
+        });
     }
 
-    pub(crate) fn client_size(_id: WindowId) -> Size {
-        Size { width: 0, height: 0 }
+    /// Whether the user asked window `id` to close since the last call: its close button made
+    /// it leave the screen.
+    pub(crate) fn take_close_request(id: WindowId) -> bool {
+        with_state(id, |s| {
+            s.close_requested |= !s.window.isVisible();
+            std::mem::take(&mut s.close_requested)
+        })
+        .unwrap_or(true)
     }
 
-    pub(crate) fn pump() {}
+    /// Window `id`'s inside size as the system last reported it.
+    pub(crate) fn client_size(id: WindowId) -> Size {
+        with_state(id, |s| {
+            let frame = s.view.frame();
+            Size { width: frame.size.width.round() as u32, height: frame.size.height.round() as u32 }
+        })
+        .unwrap_or(Size { width: 0, height: 0 })
+    }
+
+    /// Handles the events waiting for this application's windows (the editors' and the
+    /// plug-ins' own): input, painting, moving, closing. Called from the host's main loop.
+    pub(crate) fn pump() {
+        // A nested pump (an event's handler asked here again) would run the loop twice; the
+        // outer one is already draining everything there is.
+        if PUMPING.with(|p| p.replace(true)) {
+            return;
+        }
+        if let Some(app) = app() {
+            // SAFETY: on the main thread; the application and its windows.
+            unsafe {
+                let past = NSDate::distantPast();
+                while let Some(event) = app.nextEventMatchingMask_untilDate_inMode_dequeue(
+                    NSEventMask::Any,
+                    Some(&past),
+                    NSDefaultRunLoopMode,
+                    true,
+                ) {
+                    app.sendEvent(&event);
+                }
+            }
+        }
+        PUMPING.with(|p| p.set(false));
+    }
 
     pub(crate) fn any_open() -> bool {
-        false
+        OPEN.with(|open| open.try_borrow().map(|open| !open.is_empty()).unwrap_or(false))
     }
 }
 
