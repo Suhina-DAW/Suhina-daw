@@ -552,7 +552,10 @@ fn chain_row(
             selected == Some((chain.track, device.index)),
             actions,
         );
-        picked.clicked = clicked.then_some((chain.track, device.index));
+        // Keep a device an earlier iteration clicked: the later panels were not clicked.
+        if clicked {
+            picked.clicked = Some((chain.track, device.index));
+        }
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));
@@ -671,7 +674,10 @@ fn chain_stack(
             selected == Some((chain.track, device.index)),
             actions,
         );
-        picked.clicked = clicked.then_some((chain.track, device.index));
+        // Keep a device an earlier iteration clicked: the later panels were not clicked.
+        if clicked {
+            picked.clicked = Some((chain.track, device.index));
+        }
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
             places.push(editor_place(ui, area, rect, editor, chain.track, device));

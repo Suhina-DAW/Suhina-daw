@@ -2079,7 +2079,6 @@ fn a_devices_menu_removes_it_and_undo_brings_it_back() {
     harness.run();
     assert_eq!(device_count(&harness), 0, "the device is gone");
     assert!(harness.query_by_label("Device Utility").is_none());
-    // One undo puts it back, settings and all.
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     assert_eq!(device_count(&harness), 1, "the device is back");
@@ -2094,6 +2093,49 @@ fn a_devices_menu_removes_it_and_undo_brings_it_back() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     assert_eq!(device_count(&harness), 1, "the device is back");
+}
+
+#[test]
+fn clicking_a_second_device_moves_the_selection_so_delete_takes_it() {
+    use suhina_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
+    let mut project = project_with_a_device();
+    project.channels[0].devices.push(Device {
+        name: "Utility 2".into(),
+        kind: DeviceKind::Builtin("utility".into()),
+        enabled: true,
+        state: None,
+        params: vec![DeviceParam::new("gain", -3.5)],
+        automation: Vec::new(),
+        extensions: Extensions::default(),
+    });
+    let mut app = App::new();
+    app.set_session(Session::new(project), &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    // Click the FIRST device, then the second: the selection moves to the second, so the
+    // Delete key takes the second off the track and the first stays.
+    harness.get_by_label("Device Utility").click();
+    harness.run();
+    harness.get_by_label("Device Utility 2").click();
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    let devices = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().channels[0].devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    assert_eq!(devices(&harness), ["Utility"], "the SECOND device went, not the first");
+    // And clicking the first again moves the selection back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    harness.get_by_label("Device Utility").click();
+    harness.run();
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(devices(&harness), ["Utility 2"], "now the first went");
 }
 
 #[test]
