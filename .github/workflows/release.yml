@@ -2,7 +2,7 @@ name: Release
 
 # Builds the release binaries. A `v*` tag builds them and attaches them to a draft GitHub Release:
 # `v0.1.0-rc.1` for a release candidate, `v0.1.0` for the release. Every night main is built as the
-# nightly, a release under the tag `nightly` that each new one replaces, so people can try the
+# nightly (and again 12 hours later), a release under the tag `nightly` that each new one replaces, so people can try the
 # current state, and kept for NIGHTLY_KEEP_DAYS as its own pre-release `nightly-YYYYMMDD`, so a
 # tester can go back to an earlier night; a night with no new commit on main builds nothing. Running the workflow by hand
 # only builds the packages, as workflow artifacts, or with "nightly" publishes the nightly from main
@@ -14,7 +14,9 @@ on:
   push:
     tags: ["v*"]
   schedule:
+    # The nightly every 12 hours: 02:17 and 14:17 UTC (05:17 and 17:17 in Finland in summer).
     - cron: "17 2 * * *"
+    - cron: "17 14 * * *"
   workflow_dispatch:
     inputs:
       nightly:
@@ -87,8 +89,16 @@ jobs:
             # build metadata, so a hash with a leading zero is still a valid version.
             day=$(date -u +%Y%m%d)
             version="${version%%-*}-nightly.$day+${GITHUB_SHA::7}"
-            # The night's own release, kept after `nightly` has moved on.
+            # The night's own release, kept after `nightly` has moved on. A day's second scheduled
+            # build (the afternoon's) is kept beside its first as nightly-YYYYMMDD-2, and so on; a
+            # run by hand replaces the day's first one, as before.
             dated="nightly-$day"
+            n=2
+            while [ -n "$(git ls-remote origin "refs/tags/$dated" | cut -f1)" ] \
+              && [ "$GITHUB_EVENT_NAME" = "schedule" ]; do
+              dated="nightly-$day-$n"
+              n=$((n + 1))
+            done
             # A scheduled night with nothing new on main builds nothing.
             built=$(git ls-remote origin refs/tags/nightly | cut -f1)
             if [ "$GITHUB_EVENT_NAME" = "schedule" ] && [ "$built" = "$GITHUB_SHA" ]; then
@@ -380,7 +390,8 @@ jobs:
             --title "Suhina nightly $VERSION" \
             --notes "$notes"
           # The same packages under the night's own tag, a pre-release that is never the latest.
-          # A second nightly on the same day (one run by hand) replaces that day's.
+          # A second scheduled nightly on the same day has a tag of its own (nightly-YYYYMMDD-2);
+          # one run by hand replaces the day's first.
           gh release delete "$DATED" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
           gh release create "$DATED" dist/* \
             --repo "$GITHUB_REPOSITORY" \
@@ -389,7 +400,7 @@ jobs:
             --title "Suhina nightly $VERSION" \
             --notes "$notes"
       # Deletes the dated nightlies older than NIGHTLY_KEEP_DAYS, with their tags, so the list of
-      # releases stays readable. Only tags `nightly-YYYYMMDD` are touched; a failure here leaves
+      # releases stays readable. Only tags `nightly-YYYYMMDD` and `nightly-YYYYMMDD-N` are touched; a failure here leaves
       # the new nightly published.
       - name: Delete old dated nightlies
         continue-on-error: true
@@ -399,9 +410,11 @@ jobs:
           cutoff=$(date -u -d "$NIGHTLY_KEEP_DAYS days ago" +%Y%m%d)
           echo "Keeping the dated nightlies from $cutoff on"
           gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' \
-            | { grep -E '^nightly-[0-9]{8}$' || true; } \
+            | { grep -E '^nightly-[0-9]{8}(-[0-9]+)?$' || true; } \
             | while read -r tag; do
-                if [ "${tag#nightly-}" -lt "$cutoff" ]; then
+                day=${tag#nightly-}
+                day=${day%%-*}
+                if [ "$day" -lt "$cutoff" ]; then
                   echo "Deleting $tag"
                   gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
                 fi

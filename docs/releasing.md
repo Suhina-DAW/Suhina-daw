@@ -60,10 +60,10 @@ workflow artifacts without creating a release, to test the pipeline.
 ## Nightly
 
 The nightly is how people try the current state between releases: a build of `main`, not a
-release. Every night (02:17 UTC) the workflow builds `main` and publishes it as the release
+release. Every 12 hours (02:17 and 14:17 UTC) the workflow builds `main` and publishes it as the release
 **`nightly`**, replacing the previous one: its release and tag are deleted and made again on the
-new commit, published at once without a draft. A night with no new commit on `main` builds
-nothing. Running the workflow by hand from `main` with **nightly** checked publishes one now.
+new commit, published at once without a draft. A run with no new commit on `main` since
+the last nightly builds nothing. Running the workflow by hand from `main` with **nightly** checked publishes one now.
 
 The nightly's version is the workspace version without a pre-release suffix, the date and the
 commit: `0.0.1-nightly.20261013+a15ad35`. The workflow writes it into `Cargo.toml` and
@@ -78,8 +78,8 @@ https://github.com/suhina-daw/suhina-daw/releases/download/nightly/suhina-nightl
 Each night is also kept as a pre-release of its own under the tag **`nightly-YYYYMMDD`**
 (`nightly-20261013`), with the same packages and notes, published on the same commit and never
 the latest. A tester can go back to an earlier night to check when something broke, or return
-to a build that opens their project. A second nightly on the same day, one run by hand, replaces
-that day's. The nightly job deletes the dated nightlies older than `NIGHTLY_KEEP_DAYS` (30) with
+to a build that opens their project. The day's second scheduled build is kept as
+**`nightly-YYYYMMDD-2`** beside the first; one run by hand replaces the day's first. The nightly job deletes the dated nightlies older than `NIGHTLY_KEEP_DAYS` (30) with
 their tags; it touches no other release, and a failure there leaves the new nightly published.
 
 Each new nightly is posted to Discord's releases channel (see [Discord](#discord)): the version,
