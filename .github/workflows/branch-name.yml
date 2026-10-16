@@ -1,0 +1,24 @@
+name: Branch name
+
+# A pull request's branch is named `feature/`, `fix/`, `docs/` or `chore/` and two to five
+# lowercase words joined by hyphens (AGENTS.md › Tasks › Branch names). This workflow reminds a
+# pull request whose branch does not follow the rule with a warning annotation; it never fails, so
+# a branch opened before the rule can still merge.
+on:
+  pull_request:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  notice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The branch name goes through an environment variable, never into the script's text, so
+      # nothing in it runs as shell.
+      - name: The branch follows the naming rule
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: python3 scripts/branch_name.py "$BRANCH"

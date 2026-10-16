@@ -99,6 +99,12 @@ a new session of your own as well. When that pull request has stalled, ask its a
 no answer in three days, you may take the work over in that pull request, or in one that replaces
 it, names it and is linked from it.
 
+**Name the branch for its kind of work.** `feature/`, `fix/`, `docs/` or `chore/`, then two to
+five lowercase words joined by hyphens: `feature/piano-roll-workflow`, `fix/short-panes`,
+`docs/latency-readout`, `chore/branch-names`. Agents create such a branch before their first push,
+never opening a pull request from a `claude/...` branch (`AGENTS.md` › Tasks › Branch names). The
+*Branch name* check warns about other names; it never fails.
+
 **Build on overlapping work, do not repeat it.** Before you write code, look at the open pull
 requests that touch the same code (the claim bot lists them for your `Touches:` line). When one
 already builds what you need, build on it: stack on its branch when both are in this repository, or

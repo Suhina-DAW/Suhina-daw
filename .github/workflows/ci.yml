@@ -79,6 +79,8 @@ jobs:
       # The Depends on check decides what the merge queue may merge; run it the same way.
       - name: The Depends on check reads descriptions as intended
         run: python3 scripts/depends_on_test.py
+      - name: The branch name reminder reads names as intended
+        run: python3 scripts/branch_name_test.py
       # Warnings only: documents that describe code this pull request changes, left unchanged.
       - name: Documents that describe the changed code
         if: github.event_name == 'pull_request'
