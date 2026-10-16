@@ -17,8 +17,11 @@ use suhina_plugins::{Launch, Plugin};
 use suhina_session::{BlockCounts, Hosted};
 
 const PATIENT: Duration = Duration::from_secs(20);
-/// Whether a link's doorbell sleeps until it is rung (a futex on Linux, an event on Windows);
-/// elsewhere it yields, and timings say more about the scheduler than the engine.
+/// Whether a link's doorbell sleeps until it is rung (a futex on Linux, an event on Windows).
+/// Elsewhere it yields for now (ADR 0006), so every waiting thread of the engine and the hosts
+/// keeps running, and on a machine with few cores how late a block is says more about the
+/// scheduler than about the engine: the timings are checked only where the doorbell sleeps, as
+/// in `chain_wait.rs`.
 const DOORBELL_SLEEPS: bool = cfg!(any(target_os = "linux", windows));
 
 fn start(spec: &str, sample_rate: u32) -> (Plugin, Hosted) {
@@ -136,6 +139,8 @@ fn renderer(specs: &[&str], sample_rate: u32) -> (Renderer, Vec<Plugin>, Vec<Arc
 /// What playing with play and stop pressed every few blocks did.
 #[derive(Debug)]
 struct Run {
+    /// Per plug-in, blocks it was given.
+    given: Vec<u32>,
     /// Per plug-in, blocks it did not answer in time (sent late, or not sent).
     late: Vec<u32>,
     /// Blocks of the output that were silent: every instrument's sound dropped out.
@@ -168,7 +173,7 @@ fn toggle(
     let period = Duration::from_secs_f64(frames as f64 / f64::from(sample_rate));
     let mut block = vec![0.0f32; frames * 2];
     let mut times = Vec::with_capacity(blocks);
-    let late_before: Vec<u32> = counts.iter().map(|c| c.read().1).collect();
+    let before: Vec<(u32, u32)> = counts.iter().map(|c| c.read()).collect();
     let mut silent = 0;
     let mut playing = false;
     let mut next = Instant::now();
@@ -187,8 +192,10 @@ fn toggle(
         std::thread::sleep(next.saturating_duration_since(Instant::now()));
     }
     times.sort();
-    let late = counts.iter().zip(late_before).map(|(c, before)| c.read().1 - before).collect();
-    Run { late, silent, times }
+    let now: Vec<(u32, u32)> = counts.iter().map(|c| c.read()).collect();
+    let given = now.iter().zip(&before).map(|(now, before)| now.0 - before.0).collect();
+    let late = now.iter().zip(&before).map(|(now, before)| now.1 - before.1).collect();
+    Run { given, late, silent, times }
 }
 
 /// An instrument that takes longer than a whole block over every block with notes, with play
@@ -205,16 +212,19 @@ fn a_plug_in_late_with_a_start_or_a_stop_costs_that_block_only() {
     let (mut renderer, _controls, counts) = renderer(&["test:burst:140000"], SR);
     toggle(&mut renderer, &counts, FRAMES, SR, 3, 1000);
     let run = toggle(&mut renderer, &counts, FRAMES, SR, 18, 3);
-    // Every press brings notes (a start's note-on at beat 0, a stop's note-off and
-    // all-notes-off): six presses, one late block each.
-    assert!(run.late() <= 6, "a press cost more than its own block: {run:?}");
+    assert_eq!(run.given, [18], "the plug-in was given every block: {run:?}");
     assert!(run.silent <= run.late() as usize, "only a late block may be silent: {run:?}");
     if DOORBELL_SLEEPS {
+        // Every press brings notes (a start's note-on at beat 0, a stop's note-off and
+        // all-notes-off): six presses, one late block each.
+        assert!(run.late() <= 6, "a press cost more than its own block: {run:?}");
         assert!(run.late() >= 5, "the plug-in's bursts are past the deadline: {run:?}");
+        let deadline = Duration::from_secs_f64(FRAMES as f64 / f64::from(SR) * 0.6);
+        assert!(
+            run.percentile(1.0) < deadline + Duration::from_millis(15),
+            "a block waited past its deadline: {run:?}"
+        );
     }
-    let deadline = Duration::from_secs_f64(FRAMES as f64 / f64::from(SR) * 0.6);
-    let margin = Duration::from_millis(if DOORBELL_SLEEPS { 15 } else { 40 });
-    assert!(run.percentile(1.0) < deadline + margin, "a block waited past its deadline: {run:?}");
 }
 
 /// Two tracks whose instruments get their notes at the same frame: one takes longer than a
@@ -228,9 +238,10 @@ fn a_plug_in_catching_up_holds_up_no_other_track() {
     let (mut renderer, _controls, counts) = renderer(&["test:burst:140000", "test:burst:200"], SR);
     toggle(&mut renderer, &counts, FRAMES, SR, 3, 1000);
     let run = toggle(&mut renderer, &counts, FRAMES, SR, 18, 3);
-    assert!(run.late[0] <= 6, "a press cost the slow instrument more than its own block: {run:?}");
-    assert_eq!(run.silent, 0, "the other instrument sounds through every block: {run:?}");
+    assert_eq!(run.given, [18, 18], "both plug-ins were given every block: {run:?}");
     if DOORBELL_SLEEPS {
+        assert!(run.late[0] <= 6, "a press cost the slow instrument more than its own block: {run:?}");
+        assert_eq!(run.silent, 0, "the other instrument sounds through every block: {run:?}");
         assert_eq!(run.late[1], 0, "the other instrument was held up: {run:?}");
         let deadline = Duration::from_secs_f64(FRAMES as f64 / f64::from(SR) * 0.6);
         assert!(run.percentile(1.0) < deadline + Duration::from_millis(15), "{run:?}");
