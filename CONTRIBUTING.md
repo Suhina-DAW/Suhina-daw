@@ -42,6 +42,10 @@
   (`engine`, `ui`, `formats`, `browser`, `audio-io`, `plug-ins`, `devices`, `presets`, `tests`),
   plus `windows`, `macos` or `linux` when it concerns one platform. The forms set the type, and
   `.github/workflows/issue-labels.yml` adds area and platform labels from the form's answers.
+- **Pull request labels:** `.github/workflows/pr-labels.yml` adds them as `.github/labeler.yml` maps
+  them: the kind from the branch name (`feature/` `enhancement`, `fix/` `bug`, `docs/`
+  `documentation`, `chore/` `chore`; also `documentation` when every file changed is a document)
+  and the areas from the paths changed. It only adds labels; add a platform label by hand.
 
 ## Dependencies
 
