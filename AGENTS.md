@@ -155,6 +155,21 @@ CI runs `python scripts/rename_suhina.py --check`, which fails when the old name
 in the tree (links to the repository and lines marked `rename_suhina: keep` excepted). A branch started
 before the rename catches up as the script's docstring describes.
 
+### Licence header
+
+Every source file (`.rs`, `.py`, `.sh`, `.ps1`) starts with the licence header, after a `#!`
+line when there is one, then an empty line:
+
+```text
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+```
+
+(`#` instead of `//` in scripts). Run `python scripts/license_header.py` after adding a file; it
+adds the header where it is missing and nothing else, and CI runs it with `--check`. Ported code
+keeps its original notice and gets only the SPDX line of its own licence; the script's docstring
+lists those files and what else is left out (`third_party/`, fixtures, generated files).
+
 ## 3. Tasks
 
 Work is tracked in the GitHub project **Suhina**

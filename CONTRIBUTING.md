@@ -27,6 +27,9 @@
 - **Names:** packages are `suhina-<name>` (`suhina-device-<name>` for devices), used in code as
   `suhina_<name>`; directories have no prefix. `AGENTS.md` › *Crate names* says how a new crate
   is added; CI rejects the project's old name (`python scripts/rename_suhina.py --check`).
+- **Licence header:** every new source file starts with the licence header; run
+  `python scripts/license_header.py` to add it (`AGENTS.md` › *Licence header*). CI checks it
+  with `--check`.
 - **Commits:** small, focused, with a clear subject line, and signed off (see
   [Developer Certificate of Origin](#developer-certificate-of-origin)).
 - **Issues:** small and scoped, with acceptance criteria (the issue forms ask for them: Bug, Plug-in problem, Feature request, New effect or
