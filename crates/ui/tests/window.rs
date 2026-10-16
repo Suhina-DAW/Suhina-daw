@@ -3933,6 +3933,7 @@ fn launching_a_clip_greys_the_arrangement_until_back_to_arrangement() {
 }
 
 #[test]
+<<<<<<< HEAD
 fn a_device_selects_and_deletes_even_beside_a_shown_clip() {
     let devices =
         |h: &Harness<'static, App>| h.state().session().map(|s| s.project().channels[0].devices.len()).unwrap_or(0);
@@ -4007,4 +4008,28 @@ fn removing_a_device_below_the_selected_one_moves_the_selection_with_it() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     assert_eq!(devices(&harness), ["Utility", "Utility 2"], "the menu's removal undone too");
+}
+
+#[test]
+fn a_devices_switch_bypasses_it_and_a_click_again_enables_it() {
+    let enabled = |h: &Harness<'static, App>| {
+        h.state().session().map(|s| s.project().channels[0].devices[0].enabled).unwrap_or_default()
+    };
+    let mut app = App::new();
+    app.set_session(Session::new(project_with_a_device()), &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    // The switch bypasses: the device keeps its settings, the sound passes through.
+    harness.get_by_label("Bypass Utility").click();
+    harness.run();
+    assert!(!enabled(&harness), "the device is bypassed");
+    // A click again enables it.
+    harness.get_by_label("Enable Utility").click();
+    harness.run();
+    assert!(enabled(&harness), "the device is enabled again");
+    // One undo takes the enable off again; the bypass was an edit too.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(!enabled(&harness), "the undo undid the enable");
 }

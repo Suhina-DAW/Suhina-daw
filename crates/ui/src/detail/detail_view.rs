@@ -805,6 +805,24 @@ fn device_panel(
         Pos2::new(header.left() + PAD, header.center().y - ON_SWITCH / 2.0),
         Vec2::splat(ON_SWITCH),
     );
+    // The switch bypasses the device: off, the sound passes through untouched. It says which
+    // way a click goes, and answers for itself to screen readers and tests.
+    let bypass = ui.interact(switch, Id::new(("device-bypass", track.0, device.index)), Sense::click()).on_hover_text(
+        if device.enabled { format!("Bypass {}", device.name) } else { format!("Enable {}", device.name) },
+    );
+    bypass.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            if device.enabled { format!("Bypass {}", device.name) } else { format!("Enable {}", device.name) },
+        )
+    });
+    if bypass.clicked() {
+        actions.push(Action::new(
+            "device.setEnabled",
+            json!({ "track": track.0, "device": device.index, "enabled": !device.enabled }),
+        ));
+    }
     if device.enabled {
         painter.rect_filled(switch, 0.0, theme::text_primary());
     } else {
