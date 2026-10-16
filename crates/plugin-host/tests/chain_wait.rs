@@ -69,6 +69,7 @@ fn project(chains: &[usize]) -> Project {
                 }]),
             }],
             extensions: Extensions::default(),
+            scale: None,
         }],
         ..Project::default()
     };
