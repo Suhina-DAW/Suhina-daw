@@ -9,6 +9,11 @@ reviews:
   high_level_summary: true
   poem: false
   review_status: true
+  # A status on the pull request's head beside CI: pending while the review runs, green when it is
+  # done. Never red (a review that cannot run, e.g. at the free tier's limit, still passes) and not
+  # a required check: the required checks and the maintainer decide the merge.
+  commit_status: true
+  fail_commit_status: false
   collapse_walkthrough: true
   auto_review:
     enabled: true
