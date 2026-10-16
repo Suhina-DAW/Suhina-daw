@@ -320,3 +320,42 @@ fn a_double_click_makes_a_clip_only_while_the_setting_is_on() {
         assert_eq!(keys_clips(&harness), (slots + made, lane + made), "Arrangement view, setting on: {on}");
     }
 }
+
+/// Renders the Session view with a tall mixer to `target/ui-snapshots/mixer-strip.png`, for
+/// looking at: `cargo test -p suhina-ui --test mixer_strip -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_strip() {
+    for (height, file) in
+        [(MIXER_HEIGHTS.1, "mixer-strip.png"), (320, "mixer-strip-tall.png"), (70, "mixer-strip-least.png")]
+    {
+        let mut app = App::new();
+        app.set_browser_open(false);
+        app.set_session(Session::new(project()), &[]);
+        let mut harness = Harness::builder()
+            .with_size(SIZE)
+            .with_pixels_per_point(2.0)
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .wgpu()
+            .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        theme::install(&harness.ctx);
+        let mut settings = Settings::default();
+        settings.view.mixer_height = height;
+        let ctx = harness.ctx.clone();
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        harness
+            .state_mut()
+            .projects_mut()
+            .execute("track.setVolume", &serde_json::json!({ "tracks": [2], "db": -12.0 }))
+            .unwrap();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+        std::fs::create_dir_all(&out).unwrap_or_else(|e| panic!("{e}"));
+        image.save(out.join(file)).unwrap_or_else(|e| panic!("{e}"));
+    }
+}
