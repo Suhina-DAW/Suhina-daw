@@ -66,8 +66,8 @@ The RMS of several buckets is the root of their mean square, weighted by frames.
 - **Samples.** When a column covers less than one frame, the samples are joined by a line;
   samples six points apart or more get a dot each.
 - **Gain.** A clip's gain and fades scale each column, as the engine plays them.
-- **Scale.** Linear (full scale at the edges of a lane), or decibels (Settings › Interface ›
-  Arrangement › Waveform scale; `waveform_scale = linear|db` in `settings.txt`): full scale at
+- **Scale.** Linear (full scale at the edges of a lane), or decibels (Settings › Appearance ›
+  Waveforms › Waveform scale; `waveform_scale = linear|db` in `settings.txt`): full scale at
   the edges, 48 dB below it (`DB_RANGE`) and quieter in the middle, so quiet parts show. The
   setting applies to every waveform.
 - **Colours.** A clip uses its track's colour (paler while muted or disabled); the browser's

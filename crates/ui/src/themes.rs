@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The themes the user can pick from: those that come with Suhina and those read from theme
-//! files, and what Settings › Interface › Theme does with them. The app reads and writes the
+//! files, and what Settings › Appearance › Theme does with them. The app reads and writes the
 //! files; this keeps the list, says what to do with the files, and picks the colours to draw with.
 
 use std::path::PathBuf;

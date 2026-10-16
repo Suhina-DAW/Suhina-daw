@@ -93,7 +93,7 @@ bottom:
    for Erase (the shape of the eraser button, not the no-entry sign it used before), a text cursor
    for Slice, an arrow for Select and Mute.
 
-   **Toolbar size** is a setting, Settings › General › Piano roll › **Toolbar size**: **Normal**
+   **Toolbar size** is a setting, Settings › Clip editor › Piano roll › **Toolbar size**: **Normal**
    (100 %), **Large** (125 %, the default) and **Larger** (150 %). It scales the toolbar's height,
    every button's box and the icon strokes inside it together, so the icons stay 1.1 px at Normal
    and grow with the box; the rest of the editor (grid, notes, ruler) does not change with it. The
@@ -171,7 +171,7 @@ track's devices, or the hint.
 clip under the Arrangement view, its splitter can be dragged all the way up. Past the view's least
 height (160 px) the piano roll snaps to the top; dragged down again past that height, the view comes
 back at the height the drag reaches. A double-click on the splitter takes it to the top and back.
-What stays above it is a setting, Settings › General › Piano roll › **Pulled to the top**:
+What stays above it is a setting, Settings › Clip editor › Piano roll › **Pulled to the top**:
 
 - **Edited track** (default): the Arrangement view keeps its ruler and the lane of the track whose
   clip is edited, lit (a lighter lane, an accent edge, its header shown as selected); no other
@@ -181,7 +181,7 @@ What stays above it is a setting, Settings › General › Piano roll › **Pull
 
 It stays pulled up while MIDI clips are edited; selecting something else (an audio clip, a track,
 nothing), hiding the detail area (Shift+Tab) or the Session view shows the view as before. With the
-device chain as a column beside the view (Settings › Interface › Detail area) there is nothing to
+device chain as a column beside the view (Settings › Detail area) there is nothing to
 pull up.
 
 ## Grid and snapping
@@ -190,7 +190,7 @@ pull up.
   grid value, the menu at the right end of its toolbar (none, 8 bars to 1 bar, 1/2 to 1/32 and the
   triplets), 1/16 until another is picked; it lives in the window, not the project. The control
   bar's grid value (the launch quantisation, `launcher.setQuantization`) then applies to the
-  Arrangement view only. Settings › General › Piano roll › **Piano roll grid** set to **Control
+  Arrangement view only. Settings › Clip editor › Piano roll › **Piano roll grid** set to **Control
   bar** makes the piano roll use the control bar's value instead, and its menu then sets the
   control bar's. The same value draws the
   vertical lines and is the step that notes snap to. When lines would be closer than a few pixels,
@@ -625,7 +625,7 @@ selection), added to the keymap when built.
   | **Mouse-first** | the clicks of someone who works with the mouse: every switch below on, and the left button draws in the **Select** tool | duplicate is **Ctrl+D**; the four switches are on |
 
 - **Mouse-first gives the mouse the four jobs a pen and modifier keys would do**, each a switch of
-  its own under Settings › General › Piano roll, so any of them can be turned off and the rest
+  its own under Settings › Clip editor › Mouse, so any of them can be turned off and the rest
   kept:
   - **Left click draws** (on by default with Mouse-first): in the **Select** tool, a press on an
     empty spot of the grid draws a note there and dragging sets its length, as the Draw tool does,

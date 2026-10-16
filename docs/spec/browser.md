@@ -69,7 +69,7 @@ From top to bottom (sizes in components.md › Browser):
 4. **Preview strip** for the selected sample or MIDI file.
 5. **Footer:** the tags (dots that filter) and the count ("312 items", "3 selected").
 
-The panel is on the left of the main view, or on the right (Settings › Interface › Browser ›
+The panel is on the left of the main view, or on the right (Settings › Browser ›
 Side). Its width is dragged at its inner edge (from 200 px to half the window, default 300) and kept. Ctrl+B and
 View › Show browser show and hide it; hidden, it takes no space. Ctrl+F shows it if hidden and
 puts the cursor in the search field.
@@ -157,14 +157,14 @@ The preview strip shows the selected sample or MIDI file: a play button, the nam
 tempo (BPM) and key when known, and a waveform (a sample) or a strip of the notes (a MIDI file),
 with the part played so far brighter and a playhead.
 
-- **Auto-play** (Settings › Interface › Browser › Auto-play, on by default): selecting a sample
+- **Auto-play** (Settings › Browser › Auto-play, on by default): selecting a sample
   or MIDI file previews it. Off, previewing takes the play button or a click on the waveform.
 - **Clicking the waveform** previews from there. The waveform is drawn as
   [waveforms](waveforms.md) says: the whole file across the strip, both channels when there is
   room, the part played brighter.
 - A preview plays once, from the start or the clicked point, at the file's own speed. It is
   not synced to the project's tempo or beat. It plays whether the project is playing or not,
-  into the main output after the main channel, at the preview volume (Settings › Interface ›
+  into the main output after the main channel, at the preview volume (Settings ›
   Browser › Preview volume, −6 dB by default).
 - Selecting something else, Escape in the search field, the play button again, or dropping
   items from the browser into the project stops it. Dragging does not: a press held still
@@ -323,7 +323,7 @@ Tags have a name and a colour. There are seven at first: Red, Orange, Yellow, Gr
 Purple and Grey; a right-click on a tag's dot in the footer renames it (a field, Enter; clicks
 inside that menu do not close it),
 recolours it (a colour button) or removes it; new ones are added from a row's Tag menu, up to 64
-(Settings › Interface › Browser › Tag limit raises it, at most 1024). Any item can carry any
+(Settings › Browser › Tag limit raises it, at most 1024). Any item can carry any
 number of tags; a tag is a 6 px dot after the name. Clicking a tag's dot in the footer shows
 only items with that tag (several: items with any of them); clicking it again stops.
 

@@ -674,7 +674,7 @@ pub struct Options {
     /// A right-click on a note deletes it in the Draw and Paint tools: the Draw-first keymap
     /// preset (› Keymap presets in `docs/spec/ui-clip-editor.md`).
     pub right_click_deletes: bool,
-    /// How large the toolbar is drawn: Settings › General › Piano roll › Toolbar size.
+    /// How large the toolbar is drawn: Settings › Clip editor › Piano roll › Toolbar size.
     pub toolbar_size: ToolbarSize,
     /// The four jobs the Mouse-first preset gives the mouse buttons, each a switch of its own.
     pub mouse: MouseSettings,
@@ -1170,7 +1170,7 @@ pub fn show(
         state.selected.retain(|i| *i < clip.notes.len());
     }
     // The toolbar along the top; the editor under it. The toolbar's height follows Settings ›
-    // General › Piano roll › Toolbar size, and never takes more than the room the editor has.
+    // Clip editor › Piano roll › Toolbar size, and never takes more than the room the editor has.
     let band = (TOOLBAR * scale).min(area.height());
     let toolbar_rect = Rect::from_min_max(area.min, Pos2::new(area.right(), area.top() + band));
     let whole = area;

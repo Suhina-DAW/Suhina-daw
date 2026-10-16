@@ -37,8 +37,8 @@ From top to bottom:
    - key and scale
    - transport: arrangement position, play, stop, record, overdub, automation arm, loop region
      start, punch, loop, loop length. **Suhina:** play starts from the play start marker, or
-     from the selected Arrangement clip as Settings › General › Play from says, and stop
-     returns to it or stays, as Settings › General › Stop says
+     from the selected Arrangement clip as Settings › Transport › Play from says, and stop
+     returns to it or stays, as Settings › Transport › Stop says
      ([arrangement editing](arrangement-editing.md) › Play position)
     - draw mode, computer-keyboard MIDI, MIDI and audio activity, sample rate, CPU load
       (**Suhina:** the CPU load is built, left of the view switch; `launcher.state`
@@ -117,7 +117,7 @@ Shift-click and Ctrl-click add clips to the selection **(not built)**.
 **Suhina:** the launch control is the slot's mark and the padding around it (the first 18 px);
 the name selects. Selecting a clip selects its track too, and selecting a track by its header ends
 the clip's selection. The selected slot is drawn like a selected arrangement clip. The setting is
-Settings › Interface › Detail area › **Select on launch** (On by default, saved as
+Settings › Session and mixer › **Select on launch** (On by default, saved as
 `select_on_launch`). Enter is the action `selection.launch`; the arrows are `selection.up`,
 `selection.down`, `selection.left` and `selection.right` (all rebindable,
 [shortcuts](../shortcuts.md)); left and right move to the next track with clip slots (groups and
@@ -284,7 +284,7 @@ time or a chance is planned, as for every value field.
 
 The pan and the volume are dragged up or down, and the wheel over either changes it a step at a
 time (1 dB, or 0.02 of pan; Shift is finer) instead of scrolling the view. With Settings ›
-Interface › Arrangement › **Mixer controls** on Knob, the volume is drawn as a knob beside the pan
+Session and mixer › **Mixer controls** on Knob, the volume is drawn as a knob beside the pan
 knob, and its value stays beside them
 ([arrangement editing](arrangement-editing.md) › Volume, pan, mute and solo).
 

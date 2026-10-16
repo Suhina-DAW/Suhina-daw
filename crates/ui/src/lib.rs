@@ -34,6 +34,7 @@ mod sample_map_crowd;
 pub mod sample_map_panel;
 pub mod session_view;
 pub mod settings;
+mod settings_rows;
 pub mod settings_view;
 pub mod slot_launch;
 pub mod splash;

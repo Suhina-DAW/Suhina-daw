@@ -161,7 +161,7 @@ Suhina Dark (the default), Editor Dark (cool greys and blue, like a code editor)
 Light, High Contrast, and four popular open palettes mapped onto the tokens: Dracula, Nord,
 Catppuccin Mocha and Latte, Solarized Dark (all MIT, licences in `crates/ui/themes/licenses/`).
 
-Settings › Interface › Theme picks a theme and changes its colours (writing the file); the name
+Settings › Appearance › Theme picks a theme and changes its colours (writing the file); the name
 of a theme file is changed there too, and its file is renamed to match. Duplicate copies the
 theme in use, Reload reads the files again, Open folder shows the themes folder, Back up writes
 every theme file into `exports/suhina-themes-<date>.zip`, and Export template writes

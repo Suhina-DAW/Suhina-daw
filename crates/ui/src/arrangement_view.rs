@@ -272,7 +272,7 @@ pub struct ArrangementViewState {
     /// Where the volume, pan and gain fields were drawn last frame: the wheel over one changes its
     /// value instead of scrolling the view, which has to know before they draw themselves again.
     value_areas: Vec<Rect>,
-    /// Volume and pan as knobs instead of fields (Settings › Interface › Arrangement).
+    /// Volume and pan as knobs instead of fields (Settings › Session and mixer).
     pub knobs: bool,
     /// The track the user last worked on: the header they clicked, or the track of the clip they
     /// selected. A folded group shows that track while it is one of its own.
@@ -2622,7 +2622,7 @@ fn value_control(
     }
 }
 
-/// A volume as a small knob with its value beside it, for Settings › Interface › Arrangement ›
+/// A volume as a small knob with its value beside it, for Settings › Session and mixer ›
 /// Mixer controls: Knob.
 fn volume_knob(painter: &egui::Painter, rect: Rect, db: f64, hover: f32) {
     let size = rect.height().min(theme::KNOB);

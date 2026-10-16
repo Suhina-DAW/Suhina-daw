@@ -381,10 +381,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   [#313](https://github.com/suhina-daw/suhina-daw/issues/313)).
 - A click on the ruler sets where playback starts (`transport.setPosition`, on the clip grid,
   Alt for free), shown as a marker; while playing, playback jumps there. Stop returns to the
-  marker, or stays where it stopped (Settings › General › Stop); a second Stop goes to the
+  marker, or stays where it stopped (Settings › Transport › Stop); a second Stop goes to the
   beginning ([spec](docs/spec/arrangement-editing.md)).
 - **Play from the selected clip:** Shift+Space plays from the start of the clip selected in the
-  Arrangement view, and the setting Settings › General › Play from (**Marker** or **Selected
+  Arrangement view, and the setting Settings › Transport › Play from (**Marker** or **Selected
   clip**) makes Play and Space do the same; the marker moves to the clip's start, so Stop returns
   there (`transport.play {from: "clip", track, index}`, `play <track> <i>` in
   `suhina-cli play --launcher`; [spec](docs/spec/arrangement-editing.md) › Play position).
@@ -464,20 +464,22 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/sample-map.md) › Kinds and colours, #325).
 - A menu bar and a **Settings** dialog over the window (Options › Settings, Ctrl+,; Escape closes
   it) with its pages listed down the
-  left: General, Interface (with Theme, Arrangement, Detail area and Browser under it), Graphics, Audio,
-  Shortcuts, Plug-ins; animations, which side the track headers are on, the renderer (wgpu or
-  OpenGL); saved in `settings.txt`.
+  left: General, Audio, MIDI, Plug-ins, Arrangement, Session and mixer, Clip editor, Transport,
+  Detail area, Browser, Appearance and Shortcuts; saved in `settings.txt`.
+- Every Settings page scrolls (wheel, scroll bar, a control given the focus) at any window size,
+  groups its settings under headings by what the user is doing, and a **Search settings** field
+  shows the settings that match from every page ([spec](docs/spec/ui-settings.md)).
 - **Help › About Suhina** says which build this is: the version (a nightly's names its night and
   commit), the platform and the licence, and copies one line naming the build for a bug report
   ([spec](docs/spec/about.md)).
 - The whole window zooms from 50 % to 200 % (Ctrl and + or -, Cmd on macOS; Ctrl and 0 for
-  100 %; View › Zoom in and Settings › Interface › Zoom), and the zoom is kept for the next run
+  100 %; View › Zoom in and Settings › Appearance › Zoom), and the zoom is kept for the next run
   ([spec](docs/spec/window-zoom.md)).
 - **Themes**: every colour comes from the theme in use, a JSON file in the `themes` folder
   (`{ "name": …, "colors": { "accent": "#A6A3FF", … } }`); track colours and the sample map's
   kind colours are theme tokens too (`track.1`–`track.8`, `kind.*`). Nine come with Suhina (Suhina
   Dark and Light, Editor Dark, High Contrast, Dracula, Nord, Catppuccin Mocha and Latte, Solarized
-  Dark). Settings › Interface › Theme picks one, changes its colours, renames, duplicates, reads
+  Dark). Settings › Appearance › Theme picks one, changes its colours, renames, duplicates, reads
   the files again, backs every theme up into a zip and exports a template zip with a README an AI
   agent can make a theme from; a theme file or backup dropped on the window is added, and a file
   saved in an editor shows within a second.
@@ -501,7 +503,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `track.adjustPan` move each track by the same amount, keeping what is between them, and
   `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
   volume or pan moves every selected track with it, the wheel over a value changes it (1 dB a
-  tick) instead of scrolling, and Settings › Interface › Arrangement › Mixer controls draws the
+  tick) instead of scrolling, and Settings › Session and mixer › Mixer controls draws the
   volume and pan as fields or as knobs ([spec](docs/spec/arrangement-editing.md#volume-pan-mute-and-solo)).
 - A cue output for headphones: Settings › Audio › Cue puts browser previews and the tracks whose
   **C** button is on (`track.setCue`) on another output pair of the same device (outputs 3/4 and
@@ -540,7 +542,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   renderer ([spec](docs/spec/waveforms.md)): peaks at three resolutions with RMS, computed once
   when a file is decoded; a filled, smoothed shape with a brighter RMS band; left and right
   lanes in tall clips; the samples with dots when zoomed in past one sample per pixel; a linear
-  or dB scale (Settings › Interface › Arrangement).
+  or dB scale (Settings › Appearance › Waveforms).
 - Audio clips show their gain, which a drag changes (`clip.setGain`); the waveform follows it
   while it is dragged.
 - Audio clips on the arrangement fade in and out: handles at a clip's top corners set the fades
@@ -574,7 +576,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   transport running or stopped, and with the sustain pedal
   ([ADR 0017](docs/decisions/0017-inputs-and-latency.md)): an arm button in the Session mixer
   and the Arrangement headers (`track.setArm`; a click arms one track, Ctrl adds), every MIDI
-  input port opened and Settings › Audio › MIDI inputs to turn one off (`midi.inputs`,
+  input port opened and Settings › MIDI to turn one off (`midi.inputs`,
   `midi.setInput`); a controller plugged in later is found within seconds. The latency follows
   the buffer size. Still to do: recording
   ([#263](https://github.com/suhina-daw/suhina-daw/issues/263)).
@@ -627,7 +629,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   `.cut`, `.paste`, `.duplicate`), pasting after the selection or at the playhead.
 - **Piano roll, step 2** ([#442](https://github.com/suhina-daw/suhina-daw/issues/442)): its
   splitter pulls it all the way up (a double-click too), leaving only the edited track above it,
-  lit, or nothing (Settings › General › Piano roll); Alt+wheel zooms its key rows; a toolbar with
+  lit, or nothing (Settings › Clip editor › Piano roll); Alt+wheel zooms its key rows; a toolbar with
   the tools Select, Draw (B), Paint and Erase, each stroke one undo step; and its own grid value,
   so the control bar's sets the Arrangement view's only, unless Settings links the two.
 - **Piano roll, step 3** ([#443](https://github.com/suhina-daw/suhina-daw/issues/443)): the
@@ -643,7 +645,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   **Draw-first** (Ctrl+B duplicates, a right-click in Draw and Paint deletes), kept in
   `keymap.json`.
 - **Piano roll, step 4** ([#460](https://github.com/suhina-daw/suhina-daw/issues/460)): the toolbar
-  takes a size in Settings › General › Piano roll (Normal, Large, Larger, Large at first) and its
+  takes a size in Settings › Clip editor › Piano roll (Normal, Large, Larger, Large at first) and its
   six tool icons are drawn as outlines; the **Mute** tool (key 6) mutes and unmutes the notes a
   click or drag touches, and a muted note keeps its place in the clip, is drawn faded and is never
   played (`note.setMuted`, and `Note.muted` in the model, the `.suhina` file and a Live Set's
@@ -661,13 +663,13 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   splitter down, by the **×** at the end of its toolbar or by **View › Hide editor**
   (Ctrl+Shift+E), and selecting a clip opens it again. A click on an empty spot of the Arrangement
   view clears the clip selection, and a lane pulled up with the piano roll shows its clip's notes.
-- A **detail area** under the view (or a column beside it, Settings › Interface › Detail area) shows the selected
+- A **detail area** under the view (or a column beside it, Settings › Detail area) shows the selected
   clip's properties or the selected track's devices with their parameters, and each plug-in's
   state with a button that opens its editor or restarts it; Shift+Tab hides it.
   Every change from it is a device command (`device.add`, `device.remove`, `device.setParam`, …).
 - In the Session view a click on a clip's name selects it and its mark launches it; the detail area
   shows a slot's clip (scene, length, loop, gain, fades). Launching selects the clip too (Settings ›
-  Interface › Detail area › Select on launch), Enter launches the selected slot and the arrow keys
+  Session and mixer › Select on launch), Enter launches the selected slot and the arrow keys
   move through the slots ([spec](docs/spec/ui-session-view.md)).
 - Still to do: fades read from Live Sets ([#103](https://github.com/suhina-daw/suhina-daw/issues/103)),
   input routing, arm, level meters, device editing

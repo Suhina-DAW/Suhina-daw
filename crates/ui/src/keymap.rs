@@ -195,7 +195,7 @@ pub fn actions() -> Vec<Action> {
 }
 
 /// One of the four jobs the Mouse-first preset gives the mouse buttons, each a switch of its own
-/// (Settings › General › Piano roll, › Keymap presets in `docs/spec/ui-clip-editor.md`).
+/// (Settings › Clip editor › Mouse, › Keymap presets in `docs/spec/ui-clip-editor.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MouseSwitch {
     /// In the Select tool, a press on an empty spot of the grid draws a note there.

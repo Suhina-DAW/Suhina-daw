@@ -68,7 +68,7 @@ pub struct SessionViewState {
     /// changes its value instead of scrolling the view.
     value_areas: Vec<Rect>,
     /// The volume as a knob beside the pan knob instead of a plain value
-    /// (Settings › Interface › Arrangement › Mixer controls).
+    /// (Settings › Session and mixer › Mixer controls).
     pub knobs: bool,
     /// A drag from the browser over the window: the view says which target is under the
     /// pointer (`docs/spec/browser.md` › Dragging into the project).

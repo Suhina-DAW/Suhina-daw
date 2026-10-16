@@ -45,7 +45,7 @@ be changed afterwards, and **Reset all** goes back to the preset the keymap was 
 | **Draw-first** | drawing notes first | duplicate is **Ctrl+B**, and the browser gives it up for **Ctrl+Shift+B**; in the piano roll's Draw and Paint tools a right-click on a note deletes it |
 | **Mouse-first** | working with the mouse | the four mouse switches below are all on, so the left button draws in the Select tool, the right button deletes a note (a drag deletes the notes it passes over), Shift+right slices the notes under a short drag, and Alt (Option on macOS) with the right button held plays the clip from the point under the pointer; duplicate is **Ctrl+D** |
 
-The four mouse switches are Settings › General › Piano roll: **Left click draws**, **Right click
+The four mouse switches are Settings › Clip editor › Mouse: **Left click draws**, **Right click
 deletes a note**, **Shift+right click splits** and **Alt+right plays from the point**. Each is on or
 off on its own, and turning one off leaves the preset's name in `keymap.json`, so the switches say
 what the mouse does and the preset says where they started. They are kept in `keymap.json` as
@@ -83,7 +83,7 @@ Unknown actions, keys, presets and mouse entries are skipped with a warning in t
 
 | Action | Keys |
 |---|---|
-| Play or stop (`transport.toggle`; Play starts from the play start marker or the selected clip, as Settings › General › Play from says; Stop goes back to the marker or stays, as Settings › General › Stop says) | Space |
+| Play or stop (`transport.toggle`; Play starts from the play start marker or the selected clip, as Settings › Transport › Play from says; Stop goes back to the marker or stays, as Settings › Transport › Stop says) | Space |
 | Play from the start of the clip selected in the Arrangement view, whatever the setting (`transport.playFromSelection`; from the marker when no clip is selected) | Shift+Space |
 | Switch between Session and Arrangement (`view.toggle`) | Tab |
 | Show or hide the detail area (`view.detail`) | Shift+Tab |

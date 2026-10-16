@@ -41,7 +41,7 @@ fn piano_app(renderer: &mut suhina_engine::Renderer) -> Harness<'static, App> {
         .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
     theme::install(&harness.ctx);
     // These tests set the grid in the control bar, so the piano roll follows it (Settings ›
-    // General › Piano roll grid); its own grid value has tests of its own.
+    // Clip editor › Piano roll grid); its own grid value has tests of its own.
     let settings = Settings { piano_grid_follows: true, ..Settings::default() };
     let ctx = harness.ctx.clone();
     harness.state_mut().set_settings(&ctx, settings);
