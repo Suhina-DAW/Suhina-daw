@@ -533,6 +533,13 @@ static COMMANDS: &[CommandSpec] = &[
         run: delete_clips,
     },
     CommandSpec {
+        id: "clip.rename",
+        label: "Rename a clip: an arrangement clip by index, or a slot's clip by scene; a copy's content is its own, so the rename is the one clip's",
+        params: &[TRACK, CLIP_INDEX, CLIP_SCENE, param("name", ParamType::Text, "the new name (empty clears it)")],
+        kind: CommandKind::Edit,
+        run: rename_clip,
+    },
+    CommandSpec {
         id: "clip.setGain",
         label: "Set an audio clip's gain (every clip that plays the same audio content follows)",
         params: &[
@@ -2910,6 +2917,21 @@ fn delete_clips(session: &mut Session, params: &Value) -> Result<Value, CommandE
             Ok(json!({ "deleted": scene }))
         }
     }
+}
+
+/// `clip.rename`: the clip's name is its content's, and a copy's content is its own, so the
+/// rename is the one clip's. An empty name clears it, and the launcher's slots then show
+/// "clip".
+fn rename_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let name = match params.get("name") {
+        Some(Value::String(name)) => name.trim().to_string(),
+        _ => return Err("name must be a text (empty clears it)".into()),
+    };
+    let (_, content, _) = crate::notes::locate(&session.project, params)?;
+    let content =
+        session.project.contents.iter_mut().find(|c| c.id == content).ok_or("the clip's content is missing")?;
+    content.name.clone_from(&name);
+    Ok(json!({ "name": name }))
 }
 
 /// Removes the clips named by `clips`, which must exist; returns how many went. Indices are read

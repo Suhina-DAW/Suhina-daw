@@ -3921,3 +3921,26 @@ fn slot_content(h: &Harness<'static, App>, track: u32, scene: usize) -> Option<u
             .map(|c| c.content.0)
     })
 }
+
+#[test]
+fn a_slots_context_menu_renames_its_clip() {
+    let mut harness = window(demo_app());
+    // Walk's slot in Bass, scene 2: a right-click opens the menu with the clip's name field
+    // (the menu stays open on a click inside: CloseOnClickOutside).
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click_secondary();
+    harness.run();
+    assert!(harness.query_by_label_contains("Rename clip Walk").is_some(), "the menu carries the clip's name field");
+    harness.get_by_label_contains("Rename clip Walk").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.get_by_label_contains("Rename clip Walk").type_text("Walk the bass");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    // The slot's label carries the new name; one undo brings Walk back.
+    assert!(harness.query_by_label("Launch Walk the bass on Bass (scene 2)").is_some(), "the slot shows the new name");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Launch Walk on Bass (scene 2)").is_some(), "the undo brings the name back");
+}
