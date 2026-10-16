@@ -473,11 +473,13 @@ device chain. Editing the properties is planned.
 
 ## Clip editor (MIDI)
 
-Built so far (`crates/ui/src/piano_roll.rs`): the 16 px ruler with bar numbers and lines, the 36 px
+Built so far (`crates/ui/src/piano_roll.rs`, the ruler in `crates/ui/src/piano_roll_ruler.rs`): the 24 px ruler (the 8 px clip loop row over 16 px of bar numbers and lines, with the start and end markers), the 36 px
 key column, the note rows, notes and the velocity lane (72 px, or 30 % of the detail area's height
 when that is less, with 127 and 1 in its scale column). Rows are drawn as white-key rows
 (`panel.background`) and black-key rows (`window.background`) until the clip has a scale; the
-grid's lines are `border`, bar lines `border.strong`; the grid past the clip's end is darkened.
+grid's lines are `border`, bar lines `border.strong`; the grid outside the part of the content the
+clip plays (before its start marker or loop, past its loop's end or end marker) is darkened, and
+the notes there are drawn at 0.45 of their opacity.
 A rectangle being dragged is a 1 px `text.secondary` outline. The toolbar is built too
 ([#442](https://github.com/suhina-daw/suhina-daw/issues/442), icons
 [#443](https://github.com/suhina-daw/suhina-daw/issues/443) and
@@ -511,7 +513,7 @@ mono `text.hint`; the chosen entries are highlighted as selected, and an entry t
 cannot hold is greyed out while the piano roll follows it. Then the
 **Hide editor** button: a box as tall as the tool buttons with a 1.1 px × in `text.secondary`
 (`text.primary` on `control.hoverBackground` hovered), 3 px from the right edge. The piano roll's
-least height is 120 px of detail area (the toolbar, the 16 px ruler and five 12 px key rows; the
+least height is 120 px of detail area (the toolbar, the 24 px ruler and five 12 px key rows; the
 velocity lane is left out when it would leave fewer than five rows or be under 12 px). Notes a draw or
 paint drag is making are the track colour at 0.7 with a 1 px `text.primary` inset; notes an erase
 drag has passed over fade to 0.12; the cut line of a slice drag is 1 px `accent`, and a note it
@@ -535,8 +537,8 @@ The rest of this table is planned.
 | Clip properties | 20 px title with 2 px clip-colour strip; 6 px padding and group gap; each pair = labels row (10 px `text.secondary`) and values row (15 px mono fields); Loop as a 15 px toggle; with notes selected, a Notes row "N of M" and, under it, From, To, Pitch and Velocity rows in the same pair shape, all 10 px/15 px |
 | MIDI tools | 112 px on `panel.background` with a 1 px `border` on its right; 10 px head ("Selected notes" / "Whole clip") with a 10 px `text.hint` count under it; the quantise block (above); Transpose as a 64 px value field with −/+ steppers; then a two-column grid of 18 px buttons (×2, ÷2, Fit scale, Invert, Humanise, Reverse, Legato, and the velocity Randomise) plus a Ramp row of two 48 px fields (From, To) |
 | Toolbar | 22 px at Toolbar size Normal, 28 px at Large, 33 px at Larger (built: the six tool icons, the clipboard's four, the quantise icon, the MIDI tools icon and the grid value); later also tabs (current has a 1 px underline), divider, Fold, Scale (on = `#C9C4BB`), scale name |
-| Ruler | 16 px; bar numbers `#C9C4BB`, beats `text.hint`; bar lines `#5A5751`, beat lines `#34332F` |
-| Clip loop | 8 px row, 4 px bar `control.activeBackground`, 2 × 8 handles `text.primary` |
+| Ruler | 24 px: the 8 px clip loop row, then 16 px of bar numbers (10 px mono `text.value`) and `border.strong` bar lines (built); later beats `text.hint` and beat lines `#34332F`. The start marker is a 1 px `text.primary` line down the bar-number row with a 6 × 7 px flag at its top pointing right; the end marker (a clip that does not loop) the same flag pointing left. Within 4 px of a marker a press drags it (the cursor shows resizing); anywhere else a drag zooms time (up out, down in) and scrolls it (sideways) (built) |
+| Clip loop | 8 px row on `window.background` with a 1 px `border` under it; a 4 px bar, centred, from the loop start to the loop end: looping, `control.activeBackground` with a 1 px `text.secondary` inset and 2 × 8 px handles `text.primary`; not looping, where turning the loop on would put it, `control.background` with a `text.hint` inset and handles. Within 4 px of a handle a press drags it, the middle moves the loop (the cursor grabs), on the piano roll's grid, Alt for free; a click on the bar turns the loop on or off (built) |
 | Key column | 36 px; white keys `control.background`, black keys `window.background`; the key under the pointer or playing `control.hoverBackground`; 2 px scale mark `#6E6A63`; C labels with octave (C3 = MIDI 60) |
 | Note rows | Scale rows `#23221F`, others `#1A1917`; 1 px row lines `#2A2926`, under C `border.strong` |
 | Note | Track colour; opacity 0.4 + 0.6 × velocity / 127; name in 9 px when ≥ 2 beats wide; 1 px gap to neighbours; selected = 1 px `text.primary` inset |

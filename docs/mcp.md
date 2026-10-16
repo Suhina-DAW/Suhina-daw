@@ -3,7 +3,7 @@ description: The MCP server for agents: tools, file roots, errors and how to run
 read_when: MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools
 type: system
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/automation/src/server.rs
   - crates/automation/src/workspace.rs
@@ -157,10 +157,16 @@ suhina-cli mcp --read-root ./projects --write-root ./renders [--audio]
   {track, start, end}` turns a range of one track into one clip (audio is rendered to a file next
   to the project, which must have been saved).
 
-- **Slot loops.** `clip.setLoop {track, scene, loop}` switches the loop of the clip in a slot: on,
-  it repeats its whole length; off, it plays once. A file placed in a slot with `clip.addFiles`
-  loops, a sample with no known tempo too ([clip launching](spec/clip-launching.md) › Suhina
-  decisions).
+- **Clip loops, lengths and start markers.** `clip.setLoop {track, scene, loop}` switches the
+  loop of the clip in a slot: on, it repeats its whole length; off, it plays once. A file placed
+  in a slot with `clip.addFiles` loops, a sample with no known tempo too
+  ([clip launching](spec/clip-launching.md) › Suhina decisions). It takes an arrangement clip by
+  `index` instead of `scene`, and `start` and `end` (content beats) to set the loop itself, which
+  turns it on. `clip.setLength {track, index | scene, length}` sets how long a clip plays (an
+  arrangement clip may not run into the next clip on its lane), and `clip.setStart {track, index
+  | scene, offset}` its start marker (a clip that does not loop keeps its end, so its length
+  changes by as much). These are what the piano roll's ruler runs when its loop handles and
+  markers are dragged ([clip editor](spec/ui-clip-editor.md) › Commands).
 
 - **Notes.** `note.list {track, index | scene}` lists a MIDI clip's notes (index, time and length
   in beats, key with 60 as C3, velocity 1 to 127, and `muted`); `note.add {..., notes: [{time, length, key,

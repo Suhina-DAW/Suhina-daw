@@ -876,10 +876,49 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.setLoop",
-        label: "Switch the loop of the clip in a track's slot: on, it repeats its whole length until stopped; off, it plays once",
-        params: &[TRACK, SCENE, param("loop", ParamType::Bool, "true loops the clip, false plays it once")],
+        label: "Switch a clip's loop (an arrangement clip by index, or the clip in a track's slot by scene): on, it repeats its whole length, or the loop it has; off, it plays once. With start and end, the loop is set to that part of the content and turned on",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            optional(
+                "loop",
+                ParamType::Bool,
+                "true loops the clip, false plays it once; needed unless start or end is given",
+            ),
+            optional("start", ParamType::Number, "the loop's start in content beats, 0 to 120000"),
+            optional("end", ParamType::Number, "the loop's end in content beats, after start, at most 120000"),
+        ],
         kind: CommandKind::Edit,
-        run: set_slot_loop,
+        run: crate::clip_shape::set_loop,
+    },
+    CommandSpec {
+        id: "clip.setLength",
+        label: "Set how long a clip plays, in beats (an arrangement clip by index, or a slot's clip by scene); an arrangement clip keeps its start and may not run into the next clip on its lane",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            param("length", ParamType::Number, "the new length in beats, above 0 and at most 120000"),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::clip_shape::set_length,
+    },
+    CommandSpec {
+        id: "clip.setStart",
+        label: "Set a clip's start marker: where in its content it starts playing. A clip that does not loop keeps its end marker, so its length changes by as much; a looping clip keeps its length",
+        params: &[
+            TRACK,
+            CLIP_INDEX,
+            CLIP_SCENE,
+            param(
+                "offset",
+                ParamType::Number,
+                "the start marker in content beats, 0 to 120000; before the loop's end, or the clip's end",
+            ),
+        ],
+        kind: CommandKind::Edit,
+        run: crate::clip_shape::set_start,
     },
     CommandSpec {
         id: "scene.launch",
@@ -3421,28 +3460,6 @@ fn launch_clip(session: &mut Session, params: &Value) -> Result<Value, CommandEr
     };
     send(session, LaunchCommand::LaunchClip { column, slot: scene })?;
     Ok(json!({ "scene": scene + 1, "queued": queued }))
-}
-
-/// `clip.setLoop`: a slot clip's loop on (over its whole length, or the loop it already has) or
-/// off (`docs/spec/clip-launching.md` › Playing a clip).
-fn set_slot_loop(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
-    let on = params.get("loop").and_then(Value::as_bool).ok_or("loop must be true or false")?;
-    let column = column_index(&session.project, params)?;
-    let scene = scene_index(&session.project, params)?;
-    let clip = session
-        .project
-        .launcher
-        .columns
-        .get_mut(column)
-        .and_then(|c| c.slots.get_mut(scene))
-        .and_then(|s| s.clip.as_mut())
-        .ok_or("that slot has no clip")?;
-    clip.loop_range = match (on, clip.loop_range) {
-        (false, _) => None,
-        (true, Some(range)) => Some(range),
-        (true, None) => Some(LoopRange { start: 0.0, end: clip.length }),
-    };
-    Ok(json!({ "scene": scene + 1, "loop": on }))
 }
 
 fn launch_scene(session: &mut Session, params: &Value) -> Result<Value, CommandError> {

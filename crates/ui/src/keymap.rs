@@ -86,7 +86,7 @@ pub struct Action {
 }
 
 /// Actions the window does itself or on the selection, with their labels.
-const WINDOW_ACTIONS: [(&str, &str, &str); 60] = [
+const WINDOW_ACTIONS: [(&str, &str, &str); 62] = [
     ("file.new", "New project or open one", "File"),
     ("file.open", "Open a project", "File"),
     ("file.save", "Save the project", "File"),
@@ -150,6 +150,8 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 60] = [
     ("pianoRoll.gridWiden", "Make the piano roll's grid coarser", PIANO_ROLL),
     ("pianoRoll.gridTriplet", "Turn the piano roll's triplet grid on or off", PIANO_ROLL),
     ("pianoRoll.gridSnap", "Turn snapping to the piano roll's grid on or off", PIANO_ROLL),
+    ("pianoRoll.zoomSelection", "Zoom the piano roll to the selected notes, or the whole clip", PIANO_ROLL),
+    ("pianoRoll.zoomClip", "Zoom the piano roll to the whole clip", PIANO_ROLL),
     ("help.about", "Show which version of Suhina this is", "Help"),
 ];
 
@@ -377,7 +379,7 @@ const PRESET_KEY: &str = "preset";
 /// The duplicate key of Draw-first, and the browser's key otherwise.
 const CTRL_B: Shortcut = Shortcut::new(Modifiers::COMMAND, Key::B);
 
-const DEFAULTS: [(&str, &[&str]); 61] = [
+const DEFAULTS: [(&str, &[&str]); 63] = [
     ("file.new", &["Ctrl+T"]),
     ("file.open", &["Ctrl+O"]),
     ("file.save", &["Ctrl+S"]),
@@ -439,6 +441,8 @@ const DEFAULTS: [(&str, &[&str]); 61] = [
     ("pianoRoll.gridWiden", &["Ctrl+2"]),
     ("pianoRoll.gridTriplet", &["Ctrl+3"]),
     ("pianoRoll.gridSnap", &["Ctrl+4"]),
+    ("pianoRoll.zoomSelection", &["Z"]),
+    ("pianoRoll.zoomClip", &["Shift+Z"]),
 ];
 
 impl Default for Keymap {
@@ -780,6 +784,18 @@ mod tests {
             ("pianoRoll.gridTriplet", "Ctrl+3"),
             ("pianoRoll.gridSnap", "Ctrl+4"),
         ] {
+            let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(action.group, PIANO_ROLL);
+            assert!(piano_roll_only(id), "{id} is read only while the piano roll has the keyboard");
+            assert_eq!(Keymap::default().label(id).as_deref(), Some(key), "{id}");
+        }
+        assert!(Keymap::default().conflicts().is_empty());
+    }
+
+    #[test]
+    fn z_and_shift_z_zoom_the_piano_roll() {
+        let known = actions();
+        for (id, key) in [("pianoRoll.zoomSelection", "Z"), ("pianoRoll.zoomClip", "Shift+Z")] {
             let action = known.iter().find(|a| a.id == id).unwrap_or_else(|| panic!("{id}"));
             assert_eq!(action.group, PIANO_ROLL);
             assert!(piano_roll_only(id), "{id} is read only while the piano roll has the keyboard");

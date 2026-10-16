@@ -3,7 +3,7 @@ description: How launching clips and scenes behaves: quantisation, stop buttons,
 read_when: clip launching, scenes, launch quantisation, stop, session view, launcher commands, fades on launched clips, follow actions, launch modes, gate, toggle, repeat, legato, per-clip quantisation, launch keys, MIDI notes, mappings, launcher.addMapping
 type: spec
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 covers:
   - crates/engine/src/launcher.rs
   - crates/engine/src/follow.rs
@@ -265,7 +265,10 @@ The project file keeps them under the launcher ([Suhina format](suhina-format.md
   (one undo step). On, it repeats its whole length (or the loop it already has); off, it plays
   once from its start to its end marker and the column stops (behaviour 4). A clip that is
   playing follows the switch at once, like any edit while playing
-  ([ADR 0005](../decisions/0005-edits-while-playing.md)).
+  ([ADR 0005](../decisions/0005-edits-while-playing.md)). The same command takes an
+  arrangement clip by `index`, and `start` and `end` to set the loop itself; `clip.setLength` and
+  `clip.setStart` set a clip's length and start marker
+  ([clip editor](ui-clip-editor.md) › Commands).
 - **Notes cut at the loop end.** A note that would sound past the loop end (or past the end
   marker of a clip without a loop) is shortened to end there.
 - **Instruments.** A launched clip's notes play on the track's instrument when its device

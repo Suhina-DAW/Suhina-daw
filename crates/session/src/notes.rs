@@ -31,13 +31,13 @@ const EPSILON: f64 = 1e-9;
 /// Where a clip is: an arrangement lane and the clip's index in it, or a launcher column and
 /// the slot's index in it.
 #[derive(Clone, Copy)]
-enum ClipAt {
+pub(crate) enum ClipAt {
     Arrangement(usize, usize),
     Slot(usize, usize),
 }
 
 /// The clip a command names: where it is, its content and the track it plays on.
-fn locate(p: &Project, params: &Value) -> Result<(ClipAt, ContentId, TrackId), CommandError> {
+pub(crate) fn locate(p: &Project, params: &Value) -> Result<(ClipAt, ContentId, TrackId), CommandError> {
     let track = track_id(p, params)?;
     let whole = |key: &str| -> Result<Option<u64>, CommandError> {
         match params.get(key) {
@@ -80,7 +80,7 @@ fn locate(p: &Project, params: &Value) -> Result<(ClipAt, ContentId, TrackId), C
 }
 
 /// The clip at `at`, to change.
-fn clip_mut(p: &mut Project, at: ClipAt) -> Option<&mut Clip> {
+pub(crate) fn clip_mut(p: &mut Project, at: ClipAt) -> Option<&mut Clip> {
     match at {
         ClipAt::Arrangement(lane, index) => p.arrangement.lanes.get_mut(lane)?.clips.get_mut(index),
         ClipAt::Slot(column, slot) => p.launcher.columns.get_mut(column)?.slots.get_mut(slot)?.clip.as_mut(),

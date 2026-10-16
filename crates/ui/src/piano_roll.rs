@@ -15,6 +15,7 @@ use suhina_engine::model::{Clip, LaneData, Note, Project, TrackId};
 use crate::grid::default_track_colour;
 use crate::midi_tools::ToolSettings;
 use crate::piano_roll_grid::{FIXED_VALUES, GridMode, PianoGrid, Width};
+use crate::piano_roll_ruler::{self as ruler_view, ClipShape, RulerState};
 use crate::settings::ToolbarSize;
 use crate::theme;
 use crate::widgets::{self, Action};
@@ -24,7 +25,7 @@ use crate::workflow::Workflow;
 /// the velocity lane.
 const TOOLBAR: f32 = 22.0;
 const KEYS: f32 = 36.0;
-const RULER: f32 = 16.0;
+const RULER: f32 = 24.0;
 const VELOCITY_LANE: f32 = 72.0;
 /// The velocity lane is left out under this height, and leaves at least this many key rows.
 const LEAST_LANE: f32 = 12.0;
@@ -97,6 +98,8 @@ pub struct PianoClip {
     /// The grid is the control bar's (Settings › Piano roll grid): the menu offers only what the
     /// control bar can hold.
     pub grid_follows: bool,
+    /// The clip's start marker, length and loop, as the ruler shows and changes them.
+    pub shape: ClipShape,
 }
 
 /// Where a clip plays its content on the arrangement.
@@ -158,9 +161,19 @@ pub fn arrangement_clip(
     index: usize,
     quantization: Quantization,
 ) -> Option<PianoClip> {
-    let clip = project.arrangement.lanes.iter().find(|l| l.track == Some(track))?.clips.get(index)?;
+    let lane = project.arrangement.lanes.iter().find(|l| l.track == Some(track))?;
+    let clip = lane.clips.get(index)?;
     let mut piano = piano_clip_from(project, track, clip, quantization)?;
     piano.address = json!({ "track": track.0, "index": index });
+    // Up to the next clip on the lane, as `clip.setLength` allows.
+    let next = lane
+        .clips
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| *i != index && c.start > clip.start)
+        .map(|(_, c)| c.start)
+        .fold(f64::INFINITY, f64::min);
+    piano.shape.room = next.is_finite().then_some(next - clip.start);
     Some(piano)
 }
 
@@ -217,6 +230,12 @@ fn piano_clip_from(project: &Project, track: TrackId, clip: &Clip, quantization:
         },
         grid_menu: PianoGrid::default(),
         grid_follows: false,
+        shape: ClipShape {
+            offset: clip.offset,
+            length: clip.length,
+            loop_range: clip.loop_range.map(|l| (l.start, l.end)),
+            room: None,
+        },
     })
 }
 
@@ -394,6 +413,10 @@ pub struct PianoRollState {
     /// A workflow mode or setting picked in the toolbar's menu this frame, for the window to keep
     /// in the keymap.
     pub workflow_picked: Option<crate::workflow::Pick>,
+    /// A drag on the ruler in progress.
+    pub(crate) ruler: RulerState,
+    /// How wide the note grid was last drawn, for the zoom keys (Z, Shift+Z).
+    view_width: f32,
 }
 
 impl Default for PianoRollState {
@@ -431,6 +454,8 @@ impl Default for PianoRollState {
             last_click: None,
             click_added: None,
             workflow_picked: None,
+            ruler: RulerState::default(),
+            view_width: 0.0,
         }
     }
 }
@@ -533,6 +558,22 @@ impl PianoRollState {
                 }
                 return None;
             }
+            // Z: the selected notes fill the width (the whole clip when none is selected); Shift+Z:
+            // the whole clip does. Window state, not a command.
+            "pianoRoll.zoomSelection" => {
+                let start = chosen.iter().map(|n| n.time).fold(f64::INFINITY, f64::min);
+                let end = chosen.iter().map(|n| n.time + n.duration).fold(f64::NEG_INFINITY, f64::max);
+                if start.is_finite() && end > start {
+                    self.zoom_to(start, end);
+                } else {
+                    self.zoom_to(0.0, clip.length);
+                }
+                return None;
+            }
+            "pianoRoll.zoomClip" => {
+                self.zoom_to(0.0, clip.length);
+                return None;
+            }
             _ if chosen.is_empty() => return None,
             _ => {}
         }
@@ -582,6 +623,15 @@ impl PianoRollState {
         params["beats"] = json!(round_beat(beats));
         params["semitones"] = json!(keys);
         Some(Action::new(id, params))
+    }
+
+    /// Zooms and scrolls time so beats `start` to `end` fill the note grid's width (as far as the
+    /// zoom range allows), keys untouched.
+    fn zoom_to(&mut self, start: f64, end: f64) {
+        let width = self.view_width.max(1.0);
+        let span = (end - start).max(EPSILON) as f32;
+        self.beat_width = (width / span).clamp(BEAT_WIDTH_RANGE.0, BEAT_WIDTH_RANGE.1);
+        self.scroll.x = (start.max(0.0) as f32 * self.beat_width).max(0.0);
     }
 
     /// Forgets the clip, so the next one shown is fitted to the view again.
@@ -949,7 +999,7 @@ fn chosen_step(clip: &PianoClip, beat_width: f32) -> f64 {
 }
 
 /// The grid `clip` is edited on at `beat_width`: snapping only while the menu's Snap to grid is on.
-fn note_grid(clip: &PianoClip, beat_width: f32) -> NoteGrid {
+pub(crate) fn note_grid(clip: &PianoClip, beat_width: f32) -> NoteGrid {
     let grid = NoteGrid::new(chosen_step(clip, beat_width), beat_width);
     NoteGrid { snaps: grid.snaps && clip.grid_menu.snap, ..grid }
 }
@@ -998,7 +1048,7 @@ impl NoteGrid {
 
     /// `beat` on the nearest line (or the line before it with `down`), unless `free` or there is
     /// no snapping.
-    fn place(&self, beat: f64, free: bool, down: bool) -> f64 {
+    pub(crate) fn place(&self, beat: f64, free: bool, down: bool) -> f64 {
         if free || !self.snaps {
             return beat;
         }
@@ -1258,6 +1308,9 @@ pub fn show(
         state.right_stepped = false;
     }
     scroll_and_zoom(ui, state, area, grid_rect, inputs);
+    // The ruler: its loop handles and markers, and dragging it to zoom and scroll time.
+    let shape = ruler_view::interact(ui, ruler, grid_rect.left(), clip, state, inputs.alt, actions);
+    state.view_width = grid_rect.width();
     state.scroll.y = state.scroll.y.clamp(0.0, (128.0 * state.key_height - grid_rect.height()).max(0.0));
     let width = ((clip.length + clip.bar_beats * 4.0) as f32 * state.beat_width).max(grid_rect.width());
     state.scroll.x = state.scroll.x.clamp(0.0, (width - grid_rect.width()).max(0.0));
@@ -1502,7 +1555,10 @@ pub fn show(
         state.muting.clear();
     }
 
-    draw(ui, &layout, clip, state, grid, preview);
+    let shape = shape.unwrap_or(clip.shape);
+    draw(ui, &layout, clip, state, grid, preview, shape.played());
+    let axis = ruler_view::Axis { origin: grid_rect.left() - state.scroll.x, beat_width: state.beat_width };
+    ruler_view::draw(ui, ruler, &axis, &shape);
     // The eraser under the pointer: the windowing layer has no eraser cursor, so the pointer is
     // hidden and the Erase button's shape is drawn where it is.
     if let Some(pos) = eraser {
@@ -2292,7 +2348,18 @@ fn dashed_outline(painter: &egui::Painter, rect: Rect, color: Color32) {
     }
 }
 
-fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid: NoteGrid, preview: Option<Effect>) {
+/// Draws the grid, the notes, the velocity lane, the key column and the ruler's bar numbers;
+/// `played` is the part of the content the clip plays (› Ruler): the grid and the notes outside
+/// it are shaded.
+fn draw(
+    ui: &Ui,
+    layout: &Layout,
+    clip: &PianoClip,
+    state: &PianoRollState,
+    grid: NoteGrid,
+    preview: Option<Effect>,
+    played: (f64, f64),
+) {
     let painter = ui.painter_at(layout.keys.union(layout.ruler).union(layout.grid).union(layout.lane));
     let grid_painter = painter.with_clip_rect(layout.grid);
     let first_key = layout.key_at(layout.grid.bottom() - 0.5).unwrap_or(0);
@@ -2337,8 +2404,9 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
     for n in (first_bar..=last_bar).filter(|n| n % label_every == 0).take(MAX_LINES) {
         let x = layout.x_of(n as f64 * bar).round() + 0.5;
         ruler_painter.vline(x, layout.ruler.y_range(), theme::hairline(theme::border_strong()));
-        let label =
-            Rect::from_min_max(Pos2::new(x + 3.0, layout.ruler.top()), Pos2::new(x + 40.0, layout.ruler.bottom()));
+        // The bar numbers sit under the ruler's loop row.
+        let top = layout.ruler.top() + ruler_view::LOOP_ROW;
+        let label = Rect::from_min_max(Pos2::new(x + 3.0, top), Pos2::new(x + 40.0, layout.ruler.bottom()));
         widgets::text_in(
             &ruler_painter,
             label,
@@ -2349,12 +2417,23 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         );
     }
 
-    // Past the clip's end: shaded.
-    let end = layout.x_of(clip.length);
+    // Outside the part the clip plays (before its start marker or its loop, past its loop's end
+    // or its end marker): shaded, and the notes there with it.
+    let shade = Color32::from_black_alpha(90);
+    let (played_start, played_end) = played;
+    let end = layout.x_of(played_end);
     if end < layout.grid.right() {
         let past = Rect::from_min_max(Pos2::new(end.max(layout.grid.left()), layout.grid.top()), layout.grid.max);
-        grid_painter.rect_filled(past, 0.0, Color32::from_black_alpha(90));
+        grid_painter.rect_filled(past, 0.0, shade);
     }
+    let start = layout.x_of(played_start);
+    if start > layout.grid.left() {
+        let before =
+            Rect::from_min_max(layout.grid.min, Pos2::new(start.min(layout.grid.right()), layout.grid.bottom()));
+        grid_painter.rect_filled(before, 0.0, shade);
+    }
+    let outside =
+        |note: &Note| note.time + note.duration <= played_start + EPSILON || note.time >= played_end - EPSILON;
 
     // Notes, where a drag in progress puts them.
     let shown = |i: usize, note: &Note| -> Note {
@@ -2398,6 +2477,7 @@ fn draw(ui: &Ui, layout: &Layout, clip: &PianoClip, state: &PianoRollState, grid
         } else {
             0.4 + 0.6 * velocity / 127.0
         };
+        let alpha = if outside(&note) { alpha * 0.45 } else { alpha };
         grid_painter.rect_filled(rect, 0.0, clip.color.gamma_multiply(alpha));
         if muted {
             dashed_outline(&grid_painter, rect, theme::text_hint());
@@ -2697,7 +2777,31 @@ mod tests {
             placement: Placement { start: 16.0, length: 8.0, offset: 0.0, loop_range: None },
             grid_menu: PianoGrid::default(),
             grid_follows: false,
+            shape: ClipShape { offset: 0.0, length: 8.0, loop_range: None, room: None },
         }
+    }
+
+    #[test]
+    fn z_fits_the_selection_and_shift_z_the_whole_clip() {
+        let clip = clip(vec![note(2.0, 1.0, 60), note(3.0, 1.0, 62), note(6.0, 1.0, 64)]);
+        let mut state = focused_on(&clip);
+        state.view_width = 400.0;
+        state.selected = BTreeSet::from([0, 1]);
+        assert!(state.key_action("pianoRoll.zoomSelection", &clip, 0.0, None).is_none());
+        // Beats 2 to 4 fill 400 points.
+        assert_eq!((state.beat_width, state.scroll.x), (200.0, 400.0));
+        assert!(state.key_action("pianoRoll.zoomClip", &clip, 0.0, None).is_none());
+        assert_eq!((state.beat_width, state.scroll.x), (50.0, 0.0));
+        // Nothing selected: Z fits the clip too.
+        state.selected.clear();
+        state.beat_width = 300.0;
+        state.key_action("pianoRoll.zoomSelection", &clip, 0.0, None);
+        assert_eq!(state.beat_width, 50.0);
+        // A tiny selection stops at the zoom range.
+        state.selected = BTreeSet::from([0]);
+        state.view_width = 100_000.0;
+        state.key_action("pianoRoll.zoomSelection", &clip, 0.0, None);
+        assert_eq!(state.beat_width, BEAT_WIDTH_RANGE.1);
     }
 
     fn focused_on(clip: &PianoClip) -> PianoRollState {

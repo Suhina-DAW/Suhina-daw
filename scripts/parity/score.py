@@ -33,7 +33,7 @@ SECTIONS = {"total": 344, "zero": 111, "coverage": 0.168}
 # pull request cannot read the count of a command it just added from it.
 MANUAL_CHAPTERS = 43  # chapters 1 to 43, the same chapters CHAPTERS lists
 MANUAL_PDF_PAGES = 1039
-COMMANDS = 186
+COMMANDS = 188
 
 # num, chapter title, pages of the manual body, coverage 0..1 (None = not a feature chapter),
 # status, note. "coverage" is the share of what the chapter documents that Suhina has today.
@@ -98,7 +98,7 @@ CHAPTERS = [
      "transport.followTempoMap or the next start). Missing tap tempo, tempo follower/leader, "
      "auto-warp of long samples, warp-marker editing, quantise audio, drawing the tempo as an "
      "automation envelope."),
-    (10, "Editing MIDI", 41, 0.39, "started",
+    (10, "Editing MIDI", 41, 0.40, "started",
      "A first piano roll draws, selects (click, rectangle, Ctrl+A), moves, resizes and deletes notes "
      "on the grid (Alt off-grid), by mouse or by arrow keys, with Select, Draw, Paint, Erase, Slice and Mute "
      "tools (keys 1 to 6, the wheel with the right button held steps through them) and "
@@ -110,7 +110,9 @@ CHAPTERS = [
      "quantises them (Ctrl+U, and grid, amount and ends in the MIDI tools column) and edits velocity in a lane, "
      "through note.* commands with undo; a duplicated clip's notes are its own once edited. A "
      "workflow menu in its toolbar switches between three presets and a Custom mix of the click, "
-     "right-click, double-click and duplicate behaviours. An empty "
+     "right-click, double-click and duplicate behaviours. The ruler shows the clip's loop and its "
+     "start and end markers, dragged on the grid (clip.setLoop, clip.setStart, clip.setLength), "
+     "zooms and scrolls time when dragged, and Z and Shift+Z zoom to the selection or the clip. An empty "
      "MIDI clip is made with a double-click on a slot or a lane (clip.create). No "
      "fold, scales, chords, probability or MPE lanes."),
     (11, "MIDI Tools", 37, 0.12, "started",

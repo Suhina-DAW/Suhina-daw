@@ -670,6 +670,15 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   **Triplet grid**, each with its key: Ctrl+1 and Ctrl+2 make the grid finer and coarser, Ctrl+3
   toggles triplets and Ctrl+4 snapping (in the keymap). With snapping off the lines stay and notes
   are placed freely.
+- **The piano roll's ruler** ([#353](https://github.com/suhina-daw/suhina-daw/issues/353)): an
+  8 px loop row shows the clip's loop as a bar with a handle at each end, and the bar numbers under
+  it the clip's start marker and, for a clip that does not loop, its end marker; dragging a handle,
+  the bar or a marker changes the loop, the start or the length on the piano roll's grid (Alt
+  free), one undo step each (`clip.setLoop {start, end}`, which now takes arrangement clips too,
+  `clip.setStart`, `clip.setLength`), and a click on the bar turns the loop on or off. Notes
+  outside the part the clip plays are shaded like the grid past its end. Dragging the ruler up and
+  down zooms time, sideways scrolls it; **Z** zooms to the selected notes and **Shift+Z** to the
+  whole clip.
 - **The piano roll in a short detail area:** it keeps a least height (120 px: the toolbar, the
   ruler and five key rows, with the clip column whole beside them) and its notes stay centred in
   view as the height changes until the rows are scrolled by hand; it closes by dragging the
