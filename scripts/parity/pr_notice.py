@@ -42,8 +42,8 @@ def notice(files: list[str], body: str) -> str | None:
     return (
         f"This pull request changes code ({shown}) but not scripts/parity/score.py or "
         "scripts/parity/devices.json. If it adds, changes or removes something a user can do, "
-        "update the coverage there and run `python scripts/parity/update_report.py`; otherwise "
-        "write `Parity: no change` and the reason in the description "
+        "update the coverage there (the report's numbers are regenerated on main after the "
+        "merge); otherwise write `Parity: no change` and the reason in the description "
         "(AGENTS.md › Before you finish a task)."
     )
 

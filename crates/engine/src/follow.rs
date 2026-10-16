@@ -153,25 +153,15 @@ impl Random {
 
 #[cfg(test)]
 mod tests {
-    use suhina_model::{ContentId, Extensions, FollowAction, LoopRange};
+    use suhina_model::{ContentId, FollowAction, LoopRange};
 
     use super::*;
 
     fn clip(length: f64, looping: bool, follow: FollowAction) -> Clip {
         Clip {
-            content: ContentId(1),
-            start: 0.0,
-            length,
-            offset: 0.0,
             loop_range: looping.then_some(LoopRange { start: 0.0, end: length }),
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
             follow_action: follow,
-            extensions: Extensions::default(),
-            launch: Default::default(),
+            ..Clip::new(ContentId(1), 0.0, length)
         }
     }
 

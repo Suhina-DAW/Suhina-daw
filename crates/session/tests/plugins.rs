@@ -94,7 +94,7 @@ fn plugin_commands_belong_to_suhina_not_to_a_project() {
 
 #[test]
 fn a_projects_plugins_are_matched_to_the_installed_ones() {
-    use suhina_model::{Channel, ChannelId, ChannelRole, Device, DeviceKind, Extensions};
+    use suhina_model::{Channel, ChannelId, Device, DeviceKind};
     let (_, dir) = projects("check");
     // An installed VST3 plug-in that says it replaces the VST2 plug-in `Gain`.
     let settings = dir.join("settings");
@@ -106,35 +106,16 @@ fn a_projects_plugins_are_matched_to_the_installed_ones() {
     std::fs::write(settings.join("plugin-catalog.json"), catalog.to_string()).unwrap();
     let mut p = Projects::with_library(Library::new(Some(settings), dir.join("no-such-host")));
 
-    let device = |name: &str, kind: DeviceKind| Device {
-        name: name.into(),
-        kind,
-        enabled: true,
-        state: Some(vec![1, 2, 3]),
-        params: Vec::new(),
-        automation: Vec::new(),
-        extensions: Extensions::default(),
-    };
+    let device = |name: &str, kind: DeviceKind| Device { state: Some(vec![1, 2, 3]), ..Device::new(name, kind) };
     let mut project = Project::default();
     project.channels.push(Channel {
-        id: ChannelId(1),
-        name: "Lead".into(),
-        role: ChannelRole::Regular,
-        volume: 1.0,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
         devices: vec![
             device("Gain_x64", DeviceKind::Vst2 { id: 0x4761_696E }),
             device("Gain 2", DeviceKind::Vst3 { id: "00000000000000000000000000000001".into() }),
             device("Missing", DeviceKind::Vst2 { id: 7 }),
             device("Utility", DeviceKind::Builtin("utility".into())),
         ],
-        extensions: Extensions::default(),
-        automation: Vec::new(),
+        ..Channel::new(ChannelId(1), "Lead")
     });
     assert!(run(&mut p, "plugins.check", json!({})).unwrap_err().contains("no project"));
     let id = p.add(Session::new(project), None).unwrap();

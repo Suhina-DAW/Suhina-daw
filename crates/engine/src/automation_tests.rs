@@ -66,21 +66,7 @@ fn hostile_device_lanes_stay_within_bounds() {
 }
 
 fn channel(lanes: Vec<AutomationLane>) -> Channel {
-    Channel {
-        id: suhina_model::ChannelId(1),
-        name: "C".into(),
-        role: ChannelRole::Regular,
-        volume: 1.0,
-        pan: 0.0,
-        mute: false,
-        solo: false,
-        cue: false,
-        output: None,
-        sends: Vec::new(),
-        devices: Vec::new(),
-        automation: lanes,
-        extensions: Default::default(),
-    }
+    Channel { automation: lanes, ..Channel::new(suhina_model::ChannelId(1), "C") }
 }
 
 #[test]

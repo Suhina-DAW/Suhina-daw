@@ -21,35 +21,13 @@ fn tracks_with_inputs(tracks: &[(u32, InputChannels, Monitor)]) -> Project {
         tracks: tracks
             .iter()
             .map(|&(id, channels, monitor)| Track {
-                id: TrackId(id),
-                name: format!("T{id}"),
-                color: None,
                 content: ContentKinds { notes: false, audio: true },
                 channel: Some(ChannelId(id)),
-                parent: None,
-                midi_input: MidiInput::default(),
                 audio_input: AudioInput { channels, monitor },
-                extensions: Extensions::default(),
+                ..Track::new(TrackId(id), format!("T{id}"))
             })
             .collect(),
-        channels: tracks
-            .iter()
-            .map(|&(id, _, _)| Channel {
-                id: ChannelId(id),
-                name: format!("C{id}"),
-                role: ChannelRole::Regular,
-                volume: 1.0,
-                pan: 0.0,
-                mute: false,
-                solo: false,
-                cue: false,
-                output: None,
-                sends: Vec::new(),
-                devices: Vec::new(),
-                extensions: Extensions::default(),
-                automation: Vec::new(),
-            })
-            .collect(),
+        channels: tracks.iter().map(|&(id, _, _)| Channel::new(ChannelId(id), format!("C{id}"))).collect(),
         ..Project::default()
     }
 }
