@@ -531,6 +531,7 @@ fn notes_of(take: &Take, length: f64) -> Vec<Note> {
 
 /// `clip.record`: records into an empty slot of an armed track from the next launch boundary.
 pub(crate) fn record_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    session.player_mut()?;
     let p = session.project();
     let track = track_id(p, params)?;
     let column = column_index(p, params)?;
@@ -559,6 +560,7 @@ pub(crate) fn record_clip(session: &mut Session, params: &Value) -> Result<Value
 
 /// `transport.record`: records every armed track into the arrangement, or ends every take.
 pub(crate) fn record_arrangement(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    session.player_mut()?;
     let on = params.get("on").and_then(Value::as_bool).ok_or("on must be true or false")?;
     let (running, clock, launch, start_marker, _) =
         session.clock().ok_or("no audio engine is attached; open the project in the app or with --audio")?;

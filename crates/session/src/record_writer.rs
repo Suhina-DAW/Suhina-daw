@@ -17,8 +17,11 @@ use std::time::{Duration, Instant};
 use suhina_engine::{RecordReceiver, RecordedAudio, RecordedNote};
 use suhina_model::TrackId;
 
-/// How long the thread rests between looks at the rings: the audio ring holds seconds.
+/// How long the thread rests between looks at the rings while it writes a take: the audio ring
+/// holds seconds.
 const LOOK_EVERY: Duration = Duration::from_millis(5);
+/// How long it rests with no take to write: notes still come through, a little later.
+const LOOK_IDLE: Duration = Duration::from_millis(40);
 /// How long an ended take waits for frames that have not come before its file is finished
 /// anyway (the transport stopped, the device went away).
 const END_WAIT: Duration = Duration::from_millis(500);
@@ -196,7 +199,7 @@ fn run(mut receiver: RecordReceiver, sample_rate: u32, orders: &Receiver<Order>,
                 let _ = reports.send(Report::Written { track: take.track, frames: take.written });
             }
         }
-        std::thread::sleep(LOOK_EVERY);
+        std::thread::sleep(if takes.is_empty() { LOOK_IDLE } else { LOOK_EVERY });
     }
 }
 
