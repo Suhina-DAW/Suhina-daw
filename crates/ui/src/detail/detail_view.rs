@@ -10,12 +10,13 @@
 //! takes the room under that line, and where it lands in the window is reported each frame
 //! ([`EditorPlace`]) for the host process to put it there.
 
-use egui::{Align2, Pos2, Rect, Sense, Ui, Vec2};
+use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::{DeviceKind, LaneData, Note, Project, TrackId};
 use suhina_session::{Placement, PluginReport, PluginStatus};
 
 use crate::interaction::grid::gain_to_db;
+use crate::interaction::menus;
 use crate::kit::motion;
 use crate::kit::theme::{self, PAD, ROW};
 use crate::kit::widgets::{self, Action};
@@ -530,7 +531,6 @@ fn chain_row(
         if rect.left() > area.right() {
             break;
         }
-        name_for_readers(ui, rect.intersect(area), device);
         device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
@@ -637,7 +637,6 @@ fn chain_stack(
         if rect.top() > area.bottom() {
             break;
         }
-        name_for_readers(ui, rect.intersect(area), device);
         device_panel(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         plugin_button(ui, &painter.with_clip_rect(area), rect, chain.track, device, actions);
         if let Some(editor) = editor {
@@ -720,13 +719,6 @@ fn clip_for_readers(ui: &Ui, rect: Rect, info: &ClipInfo) {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
 }
 
-/// Names a device's panel for screen readers and tests.
-fn name_for_readers(ui: &Ui, rect: Rect, device: &DeviceBox) {
-    let response = ui.interact(rect, egui::Id::new(("device", rect.min.x as i32, rect.min.y as i32)), Sense::hover());
-    let label = format!("Device {}", device.name);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
-}
-
 fn hint(painter: &egui::Painter, area: Rect, text: &str) {
     painter.text(area.center(), Align2::CENTER_CENTER, text, theme::ui_font(theme::TEXT), theme::text_hint());
 }
@@ -740,6 +732,13 @@ fn device_panel(
     device: &DeviceBox,
     actions: &mut Vec<Action>,
 ) {
+    // The panel answers a right-click with its menu (the device's remove); its label is the
+    // screen-reader and test name the chain drew for it before.
+    let panel = ui
+        .interact(rect, Id::new(("device-panel", track.0, device.index)), Sense::click())
+        .on_hover_text("Right-click for the device's menu");
+    panel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Device {}", device.name)));
+    panel.context_menu(|ui| menus::device_menu(ui, track, device.index, actions));
     painter.rect_filled(rect, 0.0, theme::panel_background());
     let header = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ROW));
     painter.rect_filled(header, 0.0, theme::control_background());

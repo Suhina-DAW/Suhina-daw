@@ -2063,6 +2063,30 @@ fn project_with_a_device() -> suhina_engine::model::Project {
 }
 
 #[test]
+fn a_devices_menu_removes_it_and_undo_brings_it_back() {
+    let device_count =
+        |h: &Harness<'static, App>| h.state().session().map(|s| s.project().channels[0].devices.len()).unwrap_or(0);
+    let mut app = App::new();
+    app.set_session(Session::new(project_with_a_device()), &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_some());
+    // The panel's right-click menu: Remove device takes it off the track.
+    harness.get_by_label("Device Utility").click_secondary();
+    harness.run();
+    harness.get_by_label("Remove device").click();
+    harness.run();
+    assert_eq!(device_count(&harness), 0, "the device is gone");
+    assert!(harness.query_by_label("Device Utility").is_none());
+    // One undo puts it back, settings and all.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(device_count(&harness), 1, "the device is back");
+    assert!(harness.query_by_label("Device Utility").is_some());
+}
+
+#[test]
 fn the_detail_area_shows_the_selected_tracks_devices_in_a_row_or_stacked() {
     let mut app = App::new();
     app.set_session(Session::new(project_with_a_device()), &[]);
