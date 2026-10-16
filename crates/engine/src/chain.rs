@@ -606,7 +606,19 @@ impl Chain {
     /// event over at its frame.
     fn run(&mut self, frame: usize) {
         let to = frame.min(MAX_BLOCK);
-        let Self { slots, buffer, pending, span_events, midi_scratch, done, deadline, context, device_lanes, joined, .. } = self;
+        let Self {
+            slots,
+            buffer,
+            pending,
+            span_events,
+            midi_scratch,
+            done,
+            deadline,
+            context,
+            device_lanes,
+            joined,
+            ..
+        } = self;
         let from = (*done).min(to);
         let mut index = 0;
         while let Some(slot) = slots.get_mut(index) {
