@@ -6,6 +6,9 @@ status: draft
 last_verified: 2026-10-16
 covers:
   - crates/ui/src/session_view.rs
+  - crates/ui/src/mixer_strip.rs
+  - crates/ui/src/view_settings.rs
+  - crates/ui/tests/mixer_strip.rs
   - crates/ui/src/grid.rs
   - crates/ui/src/slot_launch.rs
   - crates/ui/src/launch_keys.rs
@@ -64,7 +67,11 @@ From top to bottom:
    - **Groove pool** under the browser (collapsible).
    - **Session view** (or Arrangement view; Tab switches).
 4. **Detail area** (collapsible), across the full width: the selected track's device chain, or
-   the selected clip's editor. **Suhina:** a splitter above it sets its height; under the
+   the selected clip's editor. **Suhina:** Settings › Interface › Detail area › **Layout** puts it
+   **Beside the browser** (the default: it starts right of the browser, which runs down to the
+   status bar) or **Full width** (it spans the whole window, under the browser too, which ends
+   above it); with the device chain stacked in a column beside the view the layout does not
+   apply. A splitter above it sets its height; under the
    Arrangement view, while the piano roll shows a clip, the splitter pulls it all the way up
    ([clip editor](ui-clip-editor.md) › Pulled to the top).
 5. **Info view** in the bottom left corner: help text for whatever is under the pointer.
@@ -134,7 +141,9 @@ with its launch settings under it: **Launch mode** (Trigger, Gate, Toggle, Repea
 quantisation** (Global, None, 8 bars … 1/32) and **Legato**, each an undoable edit.
 
 Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
-empty MIDI clip there, one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
+empty MIDI clip there (**Suhina:** while Settings › Interface › **Double-click makes a clip** is On,
+the default; Off, the double-click does nothing, and the Arrangement's lanes follow the same
+setting), one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
 [arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects it, so the
 detail area shows it; a first click on a slot with a stop button still stops the track. Audio
 tracks, groups and returns do nothing on a double-click. Editing its notes waits for the piano
@@ -232,8 +241,9 @@ scene can change it.
 
 One knob per return track (A, B, …). Return tracks show pre/post toggles on the main column.
 
-**Built:** the send knobs sit in the mixer strip's knob row beside the pan knob, after the
-strip's meter, as many as fit (two in a track column; none in a return column); the pre/post
+**Built:** the send knobs sit in a row of their own in the channel strip, above the pan knob,
+as many as fit (four in a track column; none in a return column), once the mixer is tall enough
+for them (Mixer › the channel strip); the pre/post
 choice is in each knob's right-click menu rather than on the main column, and a dot under the
 knob marks a send before the fader. Behaviour and commands: [sends and returns](sends-and-returns.md).
 
@@ -254,6 +264,33 @@ disarms the others, Ctrl adds (`track.setArm`, `exclusive`; [ADR 0017](../decisi
 A track that plays audio is armed to hear its audio input (`track.setAudioInput`, monitoring Auto). MIDI tracks without an instrument show no
 volume, pan or sends, only the MIDI meter. The height of this section is a saved view setting
 **(observed: `ViewStateSessionMixerVolumeSectionHeight`)**.
+
+**Suhina: the channel strip.** Our own design. Each track, group and return column ends in a
+vertical channel strip under its slots, and the strip shows more the taller the mixer is:
+
+- **Resizing.** The line between the slots and the mixer is dragged up or down (the pointer shows
+  a vertical resize); a double-click on it gives the default height back. The least height keeps
+  the toggles and a compact volume; the mixer grows up to just under the stop buttons under the
+  last scene (the slots stay in view), and always at least to its default height, so a project
+  with many scenes still gets the whole strip while its slots scroll. The height is kept in
+  Settings (`session_mixer_height`) and is the same for every project.
+- **Always shown**, at every height: the track on button (showing the track number, or the
+  return's letter), solo, cue, arm (on tracks that play notes or audio), and a volume control. At
+  the least height the volume is a compact value across the strip, dragged up or down.
+- **As it grows**, it adds in this order: a vertical **volume fader** with the track's level meter
+  beside it and its dB value over it (the fader replaces the compact value); the **pan** knob
+  with its value; the **send** knobs; the track's **name** at the top; and at the tallest heights
+  a scrollable list of the track's **devices and plug-ins**. Shrinking drops them in the reverse
+  order. Height the strip has beyond what its parts need goes to the fader, and once the device
+  list shows, to the list after the fader is tall enough. A strip without sends (a return, or no
+  returns in the project) gives that row to the fader.
+- **The fader** is dragged up or down (Shift for finer), and the wheel over it moves it a dB at
+  a time; every frame of a drag is heard, and the drag is one undo step (`track.setVolume` with
+  `tracks` and `continue`). A double-click sets it back to 0 dB, as the Arrangement headers do.
+- **The device list.** One row per device in chain order, its name dimmed while it is off; the
+  wheel scrolls it when it holds more than fits. A click selects the track and shows its devices
+  in the detail area, opening the detail area if it was hidden; the clicked row stays lit.
+- The main column shows the main output's meter where a track's meter stands.
 
 ## Detail area: a selected clip
 

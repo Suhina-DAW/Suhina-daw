@@ -24,6 +24,7 @@ pub mod menus;
 pub mod meter;
 pub mod midi_tools;
 pub mod missing_files;
+pub mod mixer_strip;
 pub mod motion;
 pub mod nesting;
 pub mod piano_roll;
@@ -42,6 +43,7 @@ pub mod start_panel;
 pub mod theme;
 pub mod themes;
 pub mod timeline;
+pub mod view_settings;
 pub mod waveform;
 pub mod widgets;
 

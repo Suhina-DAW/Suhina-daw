@@ -194,6 +194,22 @@ impl Link {
             || self.to_engine.wait(self.region.response_word(), |v| v == sequence, deadline)
     }
 
+    /// Whether the block out has been answered, waiting for it at most until `until` (one
+    /// already past only looks), without taking its result: [`Link::wait`] does that, at once
+    /// after `true`. `true` too when no block is out, as there is nothing to wait for. Lets the
+    /// engine look at the blocks of several links in turn and go on with whichever is answered
+    /// first. Real-time safe.
+    pub fn wait_answered(&self, until: Instant) -> bool {
+        if self.in_flight.is_none() {
+            return true;
+        }
+        let sequence = self.sequence;
+        if self.region.response() == sequence {
+            return true;
+        }
+        Instant::now() < until && self.to_engine.wait(self.region.response_word(), |v| v == sequence, until)
+    }
+
     /// The second half: waits until `deadline` for the block sent with
     /// [`Link::send_with_events`] and reads its result into `output`. `Busy` when no block is
     /// out. Real-time safe.

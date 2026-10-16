@@ -45,7 +45,7 @@ CHAPTERS = [
      "(version, nightly date and commit, platform). Settings pages: General, Interface, Graphics, Audio (driver/device/rate/buffer/exclusive/cue; "
      "a change or a device back after unplugging keeps playback and launched clips going; "
      "input device, MIDI inputs on/off), "
-     "Shortcuts, Plug-ins. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
+     "Shortcuts, Plug-ins; the detail area beside the browser or across the full width. Missing Link, Tempo & MIDI, File & Folder, Library, Record/Warp/Launch, "
      "Learn view, Info view."),
     (3, "Live Concepts", 27, 0.50, "partial",
      "Control bar, browser, sets, arrangement/session, tracks, audio/MIDI clips, devices, mixer "
@@ -59,7 +59,7 @@ CHAPTERS = [
      "and date, with pins and tags on them. Missing collections/tag editor depth, packs, Splice, "
      "Cloud, Push transfer, filter groups, browser history."),
     (5, "Managing Files and Sets", 43, 0.38, "partial",
-     ".suhina save/open, .als import, templates, several projects in tabs, missing-file locate and "
+     ".suhina save/open, File > Open recent, .als import, templates, several projects in tabs, missing-file locate and "
      "relink, backups on an interval or before critical operations with the offer after a crash. "
      "Missing project folders/collect, unused files, packing, .asd, decoding cache, set "
      "merging, file-reference view, export audio/video."),
@@ -75,8 +75,11 @@ CHAPTERS = [
      "through them and marks them). A clip's loop range is read and drawn but no "
      "command sets it. Missing previous/next marker, punch in/out, editing signature changes on the ruler, "
      "time selections, crop, crossfades, linked-track editing, the time commands."),
-    (7, "Session View", 13, 0.62, "partial",
-     "Slots, scenes, scene launch, stop buttons, track status, mixer strip, quantised launching, "
+    (7, "Session View", 13, 0.66, "partial",
+     "Slots, scenes, scene launch, stop buttons, track status, quantised launching, a mixer resized "
+     "from its top edge with a channel strip per track that shows more as it grows (volume fader "
+     "with meter and dB, pan, sends, name, device list), a double-click that makes a clip (a "
+     "setting), "
      "selecting a slot, copying clips between the arrangement and slots (keys, menus, a drag over "
      "the view switch); "
      "scenes inserted, duplicated, deleted and renamed from a menu, with a tempo and time signature "
@@ -135,8 +138,8 @@ CHAPTERS = [
      "each track choosing its MIDI port and channel (track.setMidiInput); an audio input device "
      "with a channel or pair per track and monitoring Auto / In / Off (track.setAudioInput). No "
      "MIDI out, external instrument, resampling, sidechain, multi-timbral."),
-    (18, "Mixing", 18, 0.57, "partial",
-     "Faders, pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
+    (18, "Mixing", 18, 0.59, "partial",
+     "Faders (vertical in the Session view's channel strips), pan, mute, solo (exclusive/Ctrl), groups as buses nested up to 16 deep (solo and mute "
      "through the levels), master, latency compensation, "
      "sends pre or post fader into return tracks that run their device chains (track.setSend, "
      "track.setSendMode, return.add/remove/rename, send knobs in the Session mixer), level "

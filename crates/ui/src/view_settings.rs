@@ -1,0 +1,103 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Settings of the window's layout and editing that live in their own lines of the settings
+//! file: the Session mixer's height, where the detail area goes, and whether a double-click on an
+//! empty slot or lane makes a clip (`docs/design/components.md` › Settings).
+
+/// The Session mixer's height in points: the least, the default and the most a file may say
+/// (the view clamps it further to the space it has).
+pub const MIXER_HEIGHTS: (u32, u32, u32) = (46, 166, 2000);
+
+/// Where the detail area goes: beside the browser, or under it across the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetailLayout {
+    /// The detail area starts right of the browser, which runs down to the status bar.
+    #[default]
+    Beside,
+    /// The detail area spans the whole window width; the browser ends above it.
+    FullWidth,
+}
+
+impl DetailLayout {
+    fn param(self) -> &'static str {
+        match self {
+            Self::Beside => "beside",
+            Self::FullWidth => "full_width",
+        }
+    }
+}
+
+/// The settings this module reads and writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewSettings {
+    /// The Session mixer's height, in points.
+    pub mixer_height: u32,
+    pub detail_layout: DetailLayout,
+    /// A double-click on an empty slot or an empty spot of a lane makes an empty MIDI clip.
+    pub double_click_clip: bool,
+}
+
+impl Default for ViewSettings {
+    fn default() -> Self {
+        Self { mixer_height: MIXER_HEIGHTS.1, detail_layout: DetailLayout::Beside, double_click_clip: true }
+    }
+}
+
+impl ViewSettings {
+    /// The lines this module adds to the settings file.
+    pub fn to_text(&self) -> String {
+        format!(
+            "session_mixer_height = {}\ndetail_layout = {}\ndouble_click_clip = {}\n",
+            self.mixer_height,
+            self.detail_layout.param(),
+            if self.double_click_clip { "on" } else { "off" },
+        )
+    }
+
+    /// Reads one line of the settings file; `false` when the key and value are not one of these
+    /// settings, so the caller goes on with its own.
+    pub fn parse(&mut self, key: &str, value: &str) -> bool {
+        match (key, value) {
+            ("session_mixer_height", height) => match height.parse::<u32>() {
+                Ok(height) => self.mixer_height = height.clamp(MIXER_HEIGHTS.0, MIXER_HEIGHTS.2),
+                Err(_) => return false,
+            },
+            ("detail_layout", "beside") => self.detail_layout = DetailLayout::Beside,
+            ("detail_layout", "full_width") => self.detail_layout = DetailLayout::FullWidth,
+            ("double_click_clip", "on" | "off") => self.double_click_clip = value == "on",
+            _ => return false,
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Settings;
+
+    #[test]
+    fn view_settings_survive_a_round_trip_through_the_settings_file() {
+        let view = ViewSettings { mixer_height: 300, detail_layout: DetailLayout::FullWidth, double_click_clip: false };
+        let settings = Settings { view, ..Settings::default() };
+        let (read, warnings) = Settings::from_text(&settings.to_text());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(read.view, view);
+        let (read, _) = Settings::from_text(&Settings::default().to_text());
+        assert_eq!(read.view, ViewSettings::default());
+    }
+
+    #[test]
+    fn a_mixer_height_out_of_range_is_clamped_and_a_bad_value_warned_about() {
+        let (read, warnings) = Settings::from_text("session_mixer_height = 3\n");
+        assert!(warnings.is_empty());
+        assert_eq!(read.view.mixer_height, MIXER_HEIGHTS.0);
+        let (read, _) = Settings::from_text("session_mixer_height = 99999999\n");
+        assert_eq!(read.view.mixer_height, MIXER_HEIGHTS.2);
+        let (read, warnings) =
+            Settings::from_text("session_mixer_height = tall\ndetail_layout = up\ndouble_click_clip = maybe\n");
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        assert_eq!(read.view, ViewSettings::default());
+    }
+}

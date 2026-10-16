@@ -345,8 +345,11 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   another and answers once, which at small buffers takes about a third of the time of a round
   trip each, with the same sound
   ([#108](https://github.com/suhina-daw/suhina-daw/issues/108)).
-- Still to do: waiting for each chain's plug-in as it answers
-  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)), checking an imported Live Set
+- Each track's chain goes on to its next plug-in as soon as its own plug-in answers, while the
+  other tracks' plug-ins are still working, so heavy plug-ins on different tracks cost a block
+  about one heavy plug-in, and a slow or hung plug-in holds up only its own track
+  ([#151](https://github.com/suhina-daw/suhina-daw/issues/151)).
+- Still to do: checking an imported Live Set
   with real plug-ins ([#112](https://github.com/suhina-daw/suhina-daw/issues/112)), Wayland and
   macOS editors, VST2 hosting (not decided).
 
@@ -495,8 +498,24 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   [#397](https://github.com/suhina-daw/suhina-daw/issues/397)).
 - Solo buttons in the Session mixer and the Arrangement headers (`track.setSolo`): exclusive by
   default, Ctrl adds; the engine hears soloed tracks, their groups and the return tracks.
-- Send knobs in the Session mixer strip, one per return beside the pan knob: drag for the level,
+- Send knobs in the Session mixer strip, one per return in the strip's sends row: drag for the level,
   double-click for off, right-click for before or after the fader.
+- **A channel strip per track in the Session view** ([#491](https://github.com/suhina-daw/suhina-daw/issues/491)):
+  the mixer under the slots is resized from its top edge (46 px up to just under the last
+  scene's stop row, 166 px by default, kept in Settings), and each strip shows more as it grows:
+  a compact volume at the least height, then a volume fader with the meter beside it and its dB
+  value, pan, the sends, the track's name, and a list of its devices and plug-ins (a click shows
+  them in the detail area). The fader is one undo step per drag, a double-click sets 0 dB
+  ([spec](docs/spec/ui-session-view.md)).
+- **The detail area across the full width** ([#492](https://github.com/suhina-daw/suhina-daw/issues/492)):
+  Settings › Interface › Detail area › Layout puts it beside the browser (as before) or under the
+  browser too, spanning the whole window.
+- **File › Open recent** ([#314](https://github.com/suhina-daw/suhina-daw/issues/314)): the
+  recent projects, newest first, each opened as File › Open… opens a file (by the When opening a
+  project setting); a project that is gone says so in the status bar.
+- **Double-click makes a clip** ([#493](https://github.com/suhina-daw/suhina-daw/issues/493)):
+  a setting in Settings › Interface, On by default; Off, a double-click on an empty slot or lane
+  spot no longer makes an empty MIDI clip.
 - Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
   `track.adjustPan` move each track by the same amount, keeping what is between them, and
   `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's

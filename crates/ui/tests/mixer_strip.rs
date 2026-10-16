@@ -1,0 +1,361 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! The Session view's channel strip in the window: what each mixer height shows, resizing it from
+//! its top edge, the fader (one undo step, a double-click for 0 dB) and the device list
+//! (`docs/spec/ui-session-view.md` › Mixer); the detail area's two layouts; and the setting that
+//! turns off making a clip with a double-click.
+
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test helpers outside #[test] functions
+
+use egui::{Key, Modifiers, Pos2, vec2};
+use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
+use suhina_engine::model::{Device, DeviceKind, Extensions};
+use suhina_session::Session;
+use suhina_ui::demo::demo_project;
+use suhina_ui::mixer_strip::{DEVICES_AT, FADER_AT, NAME_AT, PAN_AT, SENDS_AT};
+use suhina_ui::settings::Settings;
+use suhina_ui::view_settings::{DetailLayout, MIXER_HEIGHTS};
+use suhina_ui::{App, theme};
+
+const SIZE: (f32, f32) = (1280.0, 900.0);
+
+/// The demo project with two devices on Drums, the second one off.
+fn project() -> suhina_engine::model::Project {
+    let mut project = demo_project();
+    for (name, enabled) in [("Utility", true), ("Limiter", false)] {
+        project.channels[0].devices.push(Device {
+            name: name.into(),
+            kind: DeviceKind::Builtin(name.to_lowercase()),
+            enabled,
+            state: None,
+            params: Vec::new(),
+            automation: Vec::new(),
+            extensions: Extensions::default(),
+        });
+    }
+    project
+}
+
+/// The window with the project, `settings` applied, frames close enough for a double-click.
+fn window_with(settings: Settings, browser: bool) -> Harness<'static, App> {
+    let mut app = App::new();
+    app.set_browser_open(browser);
+    app.set_session(Session::new(project()), &[]);
+    let mut harness = Harness::builder()
+        .with_size(SIZE)
+        .with_step_dt(1.0 / 60.0)
+        .with_max_steps(60)
+        .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+    theme::install(&harness.ctx);
+    let ctx = harness.ctx.clone();
+    harness.state_mut().set_settings(&ctx, settings);
+    harness.run();
+    harness
+}
+
+fn window_at(height: f32) -> Harness<'static, App> {
+    let mut settings = Settings::default();
+    settings.view.mixer_height = height as u32;
+    window_with(settings, false)
+}
+
+/// Which parts Drums' strip shows.
+fn parts(harness: &Harness<'static, App>) -> Vec<&'static str> {
+    let mut shown = Vec::new();
+    if harness.query_by_label("Drums strip").is_some() {
+        shown.push("name");
+    }
+    if harness.query_by_label("Show Utility on Drums").is_some() {
+        shown.push("devices");
+    }
+    if harness.query_by_label("Drums send to A Reverb").is_some() {
+        shown.push("sends");
+    }
+    if harness.query_by_label("Drums pan").is_some() {
+        shown.push("pan");
+    }
+    let volume = harness.get_by_label("Drums volume").rect().height();
+    shown.push(if volume > 40.0 { "fader" } else { "compact" });
+    if harness.query_by_label_contains("Drums level:").is_some() {
+        shown.push("meter");
+    }
+    shown
+}
+
+fn volume(harness: &Harness<'static, App>) -> f64 {
+    harness.state().session().map_or(f64::NAN, |s| s.project().channels[0].volume)
+}
+
+#[test]
+fn each_mixer_height_shows_its_parts_and_the_toggles_are_always_there() {
+    let least = MIXER_HEIGHTS.0 as f32;
+    let steps: [(f32, &[&str]); 7] = [
+        (least, &["compact"]),
+        (FADER_AT - 1.0, &["compact"]),
+        (FADER_AT, &["fader", "meter"]),
+        (PAN_AT, &["pan", "fader", "meter"]),
+        (SENDS_AT, &["sends", "pan", "fader", "meter"]),
+        (NAME_AT, &["name", "sends", "pan", "fader", "meter"]),
+        (DEVICES_AT, &["name", "devices", "sends", "pan", "fader", "meter"]),
+    ];
+    for (height, expected) in steps {
+        let harness = window_at(height);
+        assert_eq!(parts(&harness), expected, "at {height} px");
+        for always in ["Turn Drums off", "Solo Drums", "Cue Drums"] {
+            assert!(harness.query_by_label_contains(always).is_some(), "{always} at {height} px");
+        }
+        assert!(harness.query_by_label_contains("Arm Drums").is_some(), "arm at {height} px");
+    }
+}
+
+#[test]
+fn the_default_height_shows_the_whole_strip_but_the_device_list() {
+    let harness = window_with(Settings::default(), false);
+    assert_eq!(parts(&harness), ["name", "sends", "pan", "fader", "meter"]);
+    // The fader and its meter stand side by side, the same height.
+    let fader = harness.get_by_label("Drums volume").rect();
+    let meter = harness.get_by_label_contains("Drums level:").rect();
+    assert!(meter.left() > fader.right() && (meter.bottom() - fader.bottom()).abs() < 1.0, "{fader:?} {meter:?}");
+}
+
+#[test]
+fn the_mixers_top_edge_resizes_it_saves_the_height_and_a_double_click_gives_the_default_back() {
+    let mut harness = window_with(Settings::default(), false);
+    let edge = harness.get_by_label("Mixer height").rect().center();
+    // Up by 100 points: the device list shows.
+    harness.drag_at(edge);
+    harness.run_steps(1);
+    for step in 1..=10 {
+        harness.hover_at(edge - vec2(0.0, step as f32 * 10.0));
+        harness.run_steps(1);
+    }
+    harness.drop_at(edge - vec2(0.0, 100.0));
+    harness.run();
+    assert_eq!(harness.state().settings().view.mixer_height, MIXER_HEIGHTS.1 + 100);
+    assert!(parts(&harness).contains(&"devices"));
+
+    // Far down: the least height, the compact volume.
+    let edge = harness.get_by_label("Mixer height").rect().center();
+    harness.drag_at(edge);
+    harness.run_steps(1);
+    harness.hover_at(edge + vec2(0.0, 600.0));
+    harness.run_steps(1);
+    harness.drop_at(edge + vec2(0.0, 600.0));
+    harness.run();
+    assert_eq!(harness.state().settings().view.mixer_height, MIXER_HEIGHTS.0);
+    assert_eq!(parts(&harness), ["compact"]);
+
+    // Far up: it stops under the stop row of the last scene, every slot still in view.
+    let edge = harness.get_by_label("Mixer height").rect().center();
+    harness.drag_at(edge);
+    harness.run_steps(1);
+    harness.hover_at(Pos2::new(edge.x, 0.0));
+    harness.run_steps(1);
+    harness.drop_at(Pos2::new(edge.x, 0.0));
+    harness.run();
+    let stop = harness.get_by_label("Stop Drums").rect();
+    let edge = harness.get_by_label("Mixer height").rect().center();
+    assert!(edge.y >= stop.bottom() && edge.y <= stop.bottom() + 4.0, "{edge:?} under {stop:?}");
+
+    // A double-click on the edge: the default height again.
+    let ready = harness.ctx.input(|i| i.time) + 1.0;
+    while harness.ctx.input(|i| i.time) < ready {
+        harness.step();
+    }
+    for _ in 0..2 {
+        harness.hover_at(edge);
+        harness.drag_at(edge);
+        harness.drop_at(edge);
+        harness.step();
+    }
+    harness.run();
+    assert_eq!(harness.state().settings().view.mixer_height, MIXER_HEIGHTS.1);
+}
+
+#[test]
+fn a_fader_drag_is_one_undo_step_and_a_double_click_resets_it_to_0_db() {
+    let mut harness = window_with(Settings::default(), false);
+    let fader = harness.get_by_label("Drums volume").rect().center();
+    harness.hover_at(fader);
+    harness.run_steps(1);
+    harness.drag_at(fader);
+    harness.run_steps(1);
+    // Down lowers the volume, 0.25 dB a point.
+    for down in [12.0, 24.0, 48.0] {
+        harness.hover_at(fader + vec2(0.0, down));
+        harness.run_steps(1);
+    }
+    harness.drop_at(fader + vec2(0.0, 48.0));
+    harness.run();
+    let lowered = volume(&harness);
+    assert!(lowered < 0.3 && lowered > 0.2, "about -12 dB: {lowered}");
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(volume(&harness), 1.0, "one undo takes the whole drag back");
+    assert!(harness.state().session().is_some_and(|s| !s.can_undo()));
+
+    // Lowered again by the wheel, then a double-click: 0 dB.
+    harness
+        .state_mut()
+        .projects_mut()
+        .execute("track.setVolume", &serde_json::json!({ "tracks": [1], "db": -9.0 }))
+        .unwrap();
+    harness.run();
+    let ready = harness.ctx.input(|i| i.time) + 1.0;
+    while harness.ctx.input(|i| i.time) < ready {
+        harness.step();
+    }
+    for _ in 0..2 {
+        harness.hover_at(fader);
+        harness.drag_at(fader);
+        harness.drop_at(fader);
+        harness.step();
+    }
+    harness.run();
+    assert!((volume(&harness) - 1.0).abs() < 1e-9, "{}", volume(&harness));
+}
+
+#[test]
+fn a_device_in_the_strip_selects_its_track_and_opens_the_detail_area_on_it() {
+    let mut harness = window_at(DEVICES_AT + 40.0);
+    assert!(harness.query_by_label("Show Limiter on Drums").is_some(), "every device has a row");
+    assert!(harness.query_by_label("Show Utility on Bass").is_none());
+    // Hidden first, so the click is what opens it.
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_none());
+    harness.get_by_label("Show Utility on Drums").click();
+    harness.run();
+    assert!(harness.query_by_label("Device Utility").is_some(), "the detail area shows Drums' chain");
+    assert!(harness.query_by_label("Device Limiter").is_some());
+}
+
+#[test]
+fn the_detail_area_sits_beside_the_browser_or_spans_the_full_width() {
+    let mut harness = window_with(Settings::default(), true);
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    let left = harness.get_by_label("Detail area splitter").rect().left();
+    let search = harness.get_by_label("Show MIDI").rect();
+    assert!(left > search.right(), "beside the browser by default: {left} after {search:?}");
+
+    let mut settings = Settings::default();
+    settings.view.detail_layout = DetailLayout::FullWidth;
+    let mut harness = window_with(settings, true);
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    let splitter = harness.get_by_label("Detail area splitter").rect();
+    assert!(splitter.left() < 20.0 && splitter.right() > SIZE.0 - 20.0, "across the whole window: {splitter:?}");
+    // The browser ends above the detail area, and the view is right of the browser.
+    let search = harness.get_by_label("Show MIDI").rect();
+    assert!(search.bottom() < splitter.top());
+    assert!(harness.get_by_label("Track Drums").rect().left() > search.right());
+    assert!(harness.query_by_label("Device Utility").is_some(), "the chain still shows");
+}
+
+/// A double-click at `at`, after a second without clicks.
+fn double_click_at(harness: &mut Harness<'static, App>, at: Pos2) {
+    harness.hover_at(at);
+    harness.run();
+    let ready = harness.ctx.input(|i| i.time) + 1.0;
+    while harness.ctx.input(|i| i.time) < ready {
+        harness.step();
+    }
+    for _ in 0..2 {
+        harness.hover_at(at);
+        harness.drag_at(at);
+        harness.drop_at(at);
+        harness.step();
+    }
+    harness.run();
+}
+
+/// How many clips Keys has, in its slots and on its lane.
+fn keys_clips(harness: &Harness<'static, App>) -> (usize, usize) {
+    let session = harness.state().session().unwrap();
+    let p = session.project();
+    let keys = p.tracks.iter().find(|t| t.name == "Keys").map(|t| t.id);
+    let slots = p
+        .launcher
+        .columns
+        .iter()
+        .filter(|c| Some(c.track) == keys)
+        .flat_map(|c| &c.slots)
+        .filter(|s| s.clip.is_some())
+        .count();
+    let lane = p.arrangement.lanes.iter().filter(|l| l.track == keys).map(|l| l.clips.len()).sum();
+    (slots, lane)
+}
+
+/// A spot of Keys' lane that no clip covers.
+fn empty_spot(harness: &Harness<'static, App>) -> Pos2 {
+    let lane = harness.get_by_label("Lane Keys").rect();
+    let clips: Vec<egui::Rect> = harness.query_all_by_label_contains(" on Keys at bar ").map(|n| n.rect()).collect();
+    (0..200)
+        .map(|i| egui::pos2(lane.right() - 12.0 - i as f32 * 8.0, lane.center().y))
+        .find(|p| lane.contains(*p) && !clips.iter().any(|c| c.expand(2.0).contains(*p)))
+        .unwrap()
+}
+
+#[test]
+fn a_double_click_makes_a_clip_only_while_the_setting_is_on() {
+    for on in [true, false] {
+        let mut settings = Settings::default();
+        settings.view.double_click_clip = on;
+        let mut harness = window_with(settings, false);
+        let (slots, lane) = keys_clips(&harness);
+        let made = usize::from(on);
+
+        let at = harness.get_by_label("Stop Keys (scene 1)").rect().center();
+        double_click_at(&mut harness, at);
+        assert_eq!(keys_clips(&harness), (slots + made, lane), "Session view, setting on: {on}");
+
+        harness.get_by_label("Arrangement view").click();
+        harness.run();
+        let at = empty_spot(&harness);
+        double_click_at(&mut harness, at);
+        assert_eq!(keys_clips(&harness), (slots + made, lane + made), "Arrangement view, setting on: {on}");
+    }
+}
+
+/// Renders the Session view with a tall mixer to `target/ui-snapshots/mixer-strip.png`, for
+/// looking at: `cargo test -p suhina-ui --test mixer_strip -- --ignored`.
+#[test]
+#[ignore = "needs a GPU adapter; run with --ignored"]
+fn render_the_strip() {
+    for (height, file) in
+        [(MIXER_HEIGHTS.1, "mixer-strip.png"), (320, "mixer-strip-tall.png"), (70, "mixer-strip-least.png")]
+    {
+        let mut app = App::new();
+        app.set_browser_open(false);
+        app.set_session(Session::new(project()), &[]);
+        let mut harness = Harness::builder()
+            .with_size(SIZE)
+            .with_pixels_per_point(2.0)
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .wgpu()
+            .build_ui_state(|ui, app: &mut App| app.ui(ui), app);
+        theme::install(&harness.ctx);
+        let mut settings = Settings::default();
+        settings.view.mixer_height = height;
+        let ctx = harness.ctx.clone();
+        harness.state_mut().set_settings(&ctx, settings);
+        harness.run();
+        harness
+            .state_mut()
+            .projects_mut()
+            .execute("track.setVolume", &serde_json::json!({ "tracks": [2], "db": -12.0 }))
+            .unwrap();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let image = harness.render().unwrap_or_else(|e| panic!("render failed: {e}"));
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui-snapshots");
+        std::fs::create_dir_all(&out).unwrap_or_else(|e| panic!("{e}"));
+        image.save(out.join(file)).unwrap_or_else(|e| panic!("{e}"));
+    }
+}

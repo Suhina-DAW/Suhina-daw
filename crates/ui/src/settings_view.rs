@@ -15,6 +15,7 @@ use crate::settings::{
     StopReturn, ToolbarSize,
 };
 use crate::theme::{self, PAD, Palette};
+use crate::view_settings::DetailLayout;
 use crate::widgets;
 
 const PAGE_WIDTH: f32 = 560.0;
@@ -550,6 +551,14 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 Some(Some(steps)) if steps != 0 => outcome.changed |= settings.step_zoom(steps),
                 _ => {}
             }
+            let r = row(&mut y);
+            label(&painter, r, "Double-click makes a clip", "On an empty slot or an empty spot of a lane");
+            let current = settings.view.double_click_clip;
+            if let Some(on) = segmented(ui, &painter, control_rect(r, 2), "Double-click makes a clip", &on_off, current)
+            {
+                settings.view.double_click_clip = on;
+                outcome.changed = true;
+            }
         }
         Page::Browser => {
             section(&mut y, "Browser");
@@ -697,6 +706,15 @@ pub fn show(ui: &mut Ui, settings: &mut Settings, sources: Sources<'_>, state: &
                 segmented(ui, &painter, control_rect(r, 2), "Select on launch", &on_off, settings.select_on_launch)
             {
                 settings.select_on_launch = on;
+                outcome.changed = true;
+            }
+            let r = row(&mut y);
+            label(&painter, r, "Layout", "Beside the browser, or across the whole window under it");
+            let options = [("Beside", DetailLayout::Beside), ("Full width", DetailLayout::FullWidth)];
+            if let Some(layout) =
+                segmented(ui, &painter, control_rect(r, 2), "Detail area layout", &options, settings.view.detail_layout)
+            {
+                settings.view.detail_layout = layout;
                 outcome.changed = true;
             }
         }

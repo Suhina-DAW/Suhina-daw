@@ -249,6 +249,9 @@ pub struct ArrangementViewState {
     /// Moved clips stack on others instead of replacing them: audio clips, MIDI clips.
     pub stack_audio: bool,
     pub stack_midi: bool,
+    /// A double-click on an empty spot of a lane does nothing (Settings › Interface ›
+    /// Double-click makes a clip is off); by default it makes an empty MIDI clip.
+    pub double_click_does_nothing: bool,
     pub header_width: f32,
     heights: HashMap<TrackId, f32>,
     /// The selected clips, in the order they were picked, and the one clicked last: a Shift-click
@@ -316,6 +319,7 @@ impl Default for ArrangementViewState {
             headers_left: false,
             stack_audio: false,
             stack_midi: false,
+            double_click_does_nothing: false,
             header_width: HEADER_COLUMN,
             heights: HashMap::new(),
             selected: Vec::new(),
@@ -1162,6 +1166,7 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
             state.clear_selected_clip();
         }
         if lane.notes
+            && !state.double_click_does_nothing
             && body.double_clicked()
             && let Some(pointer) = body.interact_pointer_pos()
         {

@@ -52,6 +52,8 @@ const DEFAULT_PIANO_GRID: &str = "1/16";
 
 /// Height of the tab row, shown while two or more projects are open.
 const TABS: f32 = 22.0;
+/// How many recent projects File › Open recent lists.
+const RECENT_IN_MENU: usize = 10;
 /// The detail area's height in a row, by default, and the splitter between it and the view.
 const DETAIL_HEIGHT: f32 = 200.0;
 /// The least the view keeps above the detail area; pulled past it, the piano roll goes to the top.
@@ -248,6 +250,8 @@ pub struct App {
     project_lists: Lists,
     /// The dialog or the start panel opened and their lists should be read again, by the app.
     lists_wanted: bool,
+    /// The File menu showed last frame (File › Open recent reads its list as the menu opens).
+    file_menu_open: bool,
     /// The start panel, shown while no project is open.
     start: StartState,
     /// The start panel's lists were asked for since it last appeared.
@@ -349,6 +353,7 @@ impl App {
             project_dialog: None,
             project_lists: Lists::default(),
             lists_wanted: false,
+            file_menu_open: false,
             start: StartState::default(),
             start_lists: false,
             forget_request: None,
@@ -1358,8 +1363,13 @@ impl App {
             } else if missing_bar {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(prompt), |ui| self.missing.bar(ui, prompt));
             }
-            let inner = if self.settings.browser_open { self.browser_panel(ui, inner) } else { inner };
-            let view_area = inner;
+            // With the detail area across the full width, the browser takes its side of what is
+            // left above it (Settings › Interface › Detail area › Layout).
+            let full_width = grid.is_some()
+                && self.settings.view.detail_layout == crate::view_settings::DetailLayout::FullWidth
+                && self.settings.device_layout != DeviceLayout::Stack;
+            let inner = if self.settings.browser_open && !full_width { self.browser_panel(ui, inner) } else { inner };
+            let mut view_area = inner;
             self.detail_drop = None;
             // A clip selected (or clicked) while the editor was closed by hand opens it again.
             let shown_clip = self.shown_clip();
@@ -1385,6 +1395,16 @@ impl App {
                 } else {
                     inner
                 }
+            };
+            let inner = if self.settings.browser_open && full_width {
+                let rest = self.browser_panel(ui, inner);
+                view_area = Rect::from_min_max(
+                    Pos2::new(rest.left(), view_area.top()),
+                    Pos2::new(rest.right(), view_area.bottom()),
+                );
+                rest
+            } else {
+                inner
             };
             // A drag from the browser, or files from the system: the views say what is under the
             // pointer.
@@ -1430,13 +1450,17 @@ impl App {
                         self.view.knobs = self.settings.mixer_controls == MixerControls::Knob;
                         // Both views fold the same groups: the Arrangement view keeps them.
                         self.view.folded = self.arrangement.folds.groups();
+                        self.view.mixer_height = self.settings.view.mixer_height as f32;
+                        self.view.double_click_does_nothing = !self.settings.view.double_click_clip;
                         session_view::show(ui, grid, &progress, &mut self.view, &mut actions);
                         self.arrangement.folds.set_groups(&self.view.folded);
+                        self.session_view_done();
                     }
                     (Some(_), View::Arrangement) => {
                         if let Some(session) = self.projects.active().and_then(|id| self.projects.get(id)) {
                             self.arrangement.stack_audio = self.settings.sample_stacking;
                             self.arrangement.stack_midi = self.settings.midi_stacking;
+                            self.arrangement.double_click_does_nothing = !self.settings.view.double_click_clip;
                             self.arrangement.knobs = self.settings.mixer_controls == MixerControls::Knob;
                             let monitor = session.player().map(|p| p.monitor());
                             // A folded group's row shows the track being worked on, so the folds
@@ -1535,6 +1559,44 @@ impl App {
             g.running || g.columns.iter().any(|c| c.stop_queued || c.slots.iter().any(|s| s.state == SlotState::Queued))
         }) {
             ui.ctx().request_repaint();
+        }
+    }
+
+    /// File › Open recent: the recent projects the project dialog lists, newest first, each opened
+    /// as File › Open… opens a file. The list is read again each time the File menu opens.
+    fn open_recent_menu(&mut self, ui: &mut Ui, was_open: bool) {
+        self.file_menu_open = true;
+        if !was_open {
+            self.lists_wanted = true;
+        }
+        let recent: Vec<PathBuf> = self.project_lists.recent.iter().take(RECENT_IN_MENU).cloned().collect();
+        ui.add_enabled_ui(!recent.is_empty(), |ui| {
+            ui.menu_button("Open recent", |ui| {
+                for path in recent {
+                    let name =
+                        path.file_stem().map_or_else(|| path.display().to_string(), |s| s.to_string_lossy().into());
+                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                        if path.is_file() {
+                            self.request_open(path);
+                        } else {
+                            self.status = Status::Error(format!("{} is no longer there", path.display()));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    /// What the Session view asked for this frame that the window keeps: the mixer's height,
+    /// saved in Settings, and the detail area opened from a strip's device list.
+    fn session_view_done(&mut self) {
+        let height = self.view.mixer_height.round() as u32;
+        if height != self.settings.view.mixer_height {
+            self.settings.view.mixer_height = height;
+            self.settings_changed = true;
+        }
+        if std::mem::take(&mut self.view.open_detail) {
+            self.show_editor();
         }
     }
 
@@ -2283,6 +2345,8 @@ impl App {
         let keymap = self.keymap.clone();
         let keys = move |action: &str| keymap.label(action).unwrap_or_default();
         ui.style_mut().visuals.widgets.inactive.fg_stroke = theme::hairline(theme::text_secondary());
+        // Whether the File menu showed last frame, so its recent list is read once as it opens.
+        let file_menu_was_open = std::mem::take(&mut self.file_menu_open);
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.add(egui::Button::new("New or open…").shortcut_text(keys("file.new"))).clicked() {
@@ -2291,6 +2355,7 @@ impl App {
                 if ui.add(egui::Button::new("Open…").shortcut_text(keys("file.open"))).clicked() {
                     self.open_project_dialog(true);
                 }
+                self.open_recent_menu(ui, file_menu_was_open);
                 ui.separator();
                 if ui.add_enabled(has_project, egui::Button::new("Save").shortcut_text(keys("file.save"))).clicked() {
                     self.save_active(false);
