@@ -24,6 +24,7 @@ name: Generated docs
 # environment `docs-bot` (Settings › Environments), limited to the `main` branch, holds its App ID
 # as DOCS_BOT_APP_ID and a private key as DOCS_BOT_PRIVATE_KEY; the app is on the bypass list of
 # the main ruleset (Always). Without the secrets the files are generated but not pushed.
+# ready-to-merge.yml uses the same app and environment, and needs Pull requests: Read and write too.
 on:
   push:
     branches: [main]
