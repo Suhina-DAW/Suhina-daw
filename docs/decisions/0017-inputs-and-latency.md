@@ -3,7 +3,7 @@ description: How played input reaches the engine (MIDI controllers first, audio 
 read_when: MIDI input, MIDI controller, keyboard, arm, armed track, track.setArm, midi.inputs, live notes, sustain pedal, input latency, monitoring, recording, low latency, midir
 type: decision
 status: current
-last_verified: 2026-10-14
+last_verified: 2026-10-16
 covers:
   - crates/engine/src/live.rs
   - crates/engine/src/live_tests.rs
@@ -17,7 +17,7 @@ covers:
 
 # 0017: Inputs, arming and live latency
 
-- **Status:** accepted (MIDI input; the shallower queue while armed, #265; a MIDI input per track, #278; audio input and monitoring, #267); recording is planned in [#263](https://github.com/suhina-daw/suhina-daw/issues/263)
+- **Status:** accepted (MIDI input; the shallower queue while armed, #265; a MIDI input per track, #278; audio input and monitoring, #267; notes placed by the driver's timestamps, #269); recording is planned in [#263](https://github.com/suhina-daw/suhina-daw/issues/263)
 - **Date:** 2026-10-14
 
 ## Context
@@ -71,9 +71,9 @@ engine code.
    again every two seconds (every thirty when they cannot be listed at all), so a controller
    plugged in is heard without a restart, and one taken out is closed. Closing a port lets go of
    its keys.
-5. **What a key press costs**, from the driver's callback to the speaker: up to one block until
-   the render thread starts its next one, what is queued ahead in the ring, and the device's
-   buffer and its own delay. A player sets the buffer small (64 to 256 frames, with ASIO or
+5. **What a key press costs**, from the driver's callback to the speaker: the fixed delay of
+   decision 10 (before it, up to one block until the render thread started its next one), what
+   is queued ahead in the ring, and the device's buffer and its own delay. A player sets the buffer small (64 to 256 frames, with ASIO or
    WASAPI exclusive mode on Windows); the default 1024 frames is too slow to play.
 6. **While a track is armed, the output keeps one block queued instead of two** (amendment,
    [#265](https://github.com/suhina-daw/suhina-daw/issues/265)). The render thread reads
@@ -87,8 +87,8 @@ engine code.
    buffer. At 48 kHz with 128-frame blocks a key now waits at most about 5.3 ms plus the device
    (8 ms before); at 256 frames, 10.7 ms (16 ms).
 7. **The latency is reported.** `audio.info` gives `live` (a track is armed) and
-   `live_latency_ms`, the longest a key takes to be heard: the measured engine-to-speaker latency
-   and one block. Settings › Audio shows it as *Key to sound*. The engine's own part is tested
+   `live_latency_ms`, what a key takes to be heard: the measured engine-to-speaker latency and
+   the fixed delay of decision 10 (one block before it). Settings › Audio shows it as *Key to sound*. The engine's own part is tested
    offline: a live note sounds from the first frames of the next block, at any block size; the
    output's queue depth is tested on the real render thread.
 8. **Each track chooses what it hears** (amendment,
@@ -133,13 +133,32 @@ engine code.
      armed track keeps the shallower queue (decision 6). `audio.info` reports the input device,
      its channels and its underruns.
 
+10. **Notes are placed by when they were played** (amendment,
+    [#269](https://github.com/suhina-daw/suhina-daw/issues/269)). A note on the first frame of the
+    next block jitters by up to a block (1.3 ms at 64 frames, 21 ms at 1024). Instead each note
+    carries a time on the engine's live clock (`live_now`, microseconds since the process
+    started): the MIDI layer turns the driver's timestamp into it per port (`StampClock`: the
+    driver's clock sits where the shortest gap from a stamp to its arrival puts it, since a
+    message can arrive late but never early, and that gap may grow slowly so a driver clock that
+    runs slow is followed). Before every block the render thread tells the renderer when it
+    renders it (`Renderer::set_live_clock`), and a fixed delay: the longest the thread waits
+    between blocks (a block, or a device buffer that takes several) and one block more. The
+    renderer keeps its frames on a steady cadence of blocks, pulled slowly towards the time it is
+    told and started again when the two are further apart than the delay, so the render
+    thread's own jitter does not move notes. A note plays at the frame where its time and the
+    delay fall: in a later block when that is past this one (up to 256 notes wait; a note never
+    overtakes one before it from the same source), at the block's first frame when it has
+    passed or the note has no time. It trades a little latency (one block more at the smallest
+    buffers) for none of the jitter. Tested with synthetic timestamps against the render clock
+    (`live_tests.rs`): every block size, a note anywhere in a block, a jittering render thread.
+
 ## Consequences
 
 - A MIDI keyboard plays any instrument, built in or a plug-in, on armed tracks, with the sustain
   pedal; the latency follows the buffer size chosen.
-- Live notes land on the block's first frame: they jitter by up to one block. Placing them at a
-  constant delay from the driver's timestamps removes the jitter
-  ([#269](https://github.com/suhina-daw/suhina-daw/issues/269)).
+- Live notes keep the spacing they were played with, a fixed delay after they were played
+  (decision 10), instead of jittering by up to one block. Recording (#266) places them by the
+  same times.
 - A clip note and a live note on the same key of the same track share that key: the later one
   restarts it, and either's release ends it.
 - Arming is lost when the project closes. Saving it with the project can be added later as a

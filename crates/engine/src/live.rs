@@ -6,13 +6,20 @@
 //! runs or not.
 //!
 //! The MIDI driver's thread sends notes over a lock-free queue, each with where it came from (a
-//! port and a channel, [`LiveSource`]); the render thread takes them at the start of each block
-//! and plays them at its first frame on the chains of the armed tracks whose input
-//! ([`LiveFilter`]) takes that source, the way the preview voice plays its notes (ADR 0011).
+//! port and a channel, [`LiveSource`]) and, when the driver stamped it, when it was played on
+//! the live clock ([`live_now`]); the render thread takes them at the start of each block and
+//! plays them on the chains of the armed tracks whose input ([`LiveFilter`]) takes that source,
+//! the way the preview voice plays its notes (ADR 0011). A stamped note is played a fixed delay
+//! after its time ([`Renderer::set_live_clock`](crate::Renderer::set_live_clock)), at the
+//! frame where that falls, so notes keep the spacing they were played with whatever the block
+//! size (#269); a note without a time plays at the block's first frame.
 //! Which tracks are armed, and what each hears, comes from the controller
 //! ([`crate::LaunchCommand::SetArmed`]) and outlives graph swaps. The keys held and the sustain
 //! pedal are kept per source, so one controller's pedal does not hold another's notes. Nothing
 //! here allocates, locks or frees on the render thread.
+
+use std::sync::OnceLock;
+use std::time::Instant;
 
 use rtrb::{Consumer, Producer, RingBuffer};
 use suhina_model::TrackId;
@@ -28,6 +35,50 @@ pub const MAX_ARMED: usize = 64;
 pub const MAX_SOURCES: usize = 16;
 /// A live note's end: it sounds until its key is released.
 const UNTIL_RELEASED: u64 = u64::MAX - 1;
+/// Stamped notes waiting for their frame in a later block: more than a hand plays within the
+/// delay. Past that, a note plays at once.
+const MAX_WAITING: usize = 256;
+/// How much of the difference between the render thread's clock and the steady block cadence
+/// is taken in each block: enough to follow a device clock that drifts, too little to follow
+/// the render thread's own jitter.
+const CLOCK_PULL: f64 = 1.0 / 64.0;
+
+/// Now, on the clock live notes are stamped with: microseconds since this process first asked,
+/// never 0 (0 is a note without a time). Reading it does not allocate, lock or block.
+pub fn live_now() -> u64 {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    let epoch = EPOCH.get_or_init(Instant::now);
+    u64::try_from(epoch.elapsed().as_micros()).unwrap_or(u64::MAX).saturating_add(1)
+}
+
+/// Turns a MIDI driver's timestamps (microseconds on a clock of the driver's own) into times on
+/// the live clock ([`live_now`]), for one port: the driver's clock is placed where the shortest
+/// gap from a stamp to its arrival puts it, since a message can arrive late but never early.
+/// The gap is let grow slowly (about 120 parts per million of the time between messages) to
+/// follow a driver clock that runs slow, and a stamp that goes back starts it again.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StampClock {
+    /// Live-clock time minus driver time, and the last stamp.
+    offset: Option<(i128, u64)>,
+}
+
+impl StampClock {
+    /// The live-clock time of a message the driver stamped `stamp` and that arrived at
+    /// `arrived` (live clock); never after it arrived, and never 0.
+    pub fn time(&mut self, stamp: u64, arrived: u64) -> u64 {
+        let gap = i128::from(arrived) - i128::from(stamp);
+        let offset = match self.offset {
+            Some((offset, last)) if stamp >= last => {
+                let creep = i128::from((stamp - last) / 8192);
+                gap.min(offset.saturating_add(creep))
+            }
+            _ => gap,
+        };
+        self.offset = Some((offset, stamp));
+        let time = (i128::from(stamp) + offset).clamp(1, i128::from(arrived.max(1)));
+        u64::try_from(time).unwrap_or(arrived)
+    }
+}
 
 /// What a MIDI controller played.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -98,7 +149,7 @@ impl LiveFilter {
 
 /// The sending end of the live-note queue, for the thread a MIDI driver calls back on.
 pub struct LiveSender {
-    producer: Producer<(LiveSource, LiveEvent)>,
+    producer: Producer<(LiveSource, LiveEvent, u64)>,
 }
 
 impl LiveSender {
@@ -112,7 +163,14 @@ impl LiveSender {
     /// Queues `event` from `source` for the start of the next block. Returns false when it was
     /// dropped: the queue is full, or the renderer it fed is gone.
     pub fn send_from(&mut self, source: LiveSource, event: LiveEvent) -> bool {
-        !self.producer.is_abandoned() && self.producer.push((source, event)).is_ok()
+        self.send_at(source, event, 0)
+    }
+
+    /// Queues `event` from `source`, played at `time` on the live clock ([`live_now`]; 0 for
+    /// no time): it sounds a fixed delay after that time (#269). Returns false when it was
+    /// dropped, as [`LiveSender::send_from`] does.
+    pub fn send_at(&mut self, source: LiveSource, event: LiveEvent, time: u64) -> bool {
+        !self.producer.is_abandoned() && self.producer.push((source, event, time)).is_ok()
     }
 
     /// The renderer still takes notes from this sender.
@@ -158,24 +216,62 @@ impl Keys {
     }
 }
 
+/// A note taken from the queue, waiting for its frame.
+#[derive(Clone, Copy)]
+struct Waiting {
+    /// The renderer frame it plays at.
+    at: u64,
+    source: LiveSource,
+    event: LiveEvent,
+}
+
+/// Where the render thread is on the live clock: renderer frame `position` is rendered at
+/// `time` (microseconds) on a steady cadence of blocks.
+#[derive(Clone, Copy)]
+struct Cadence {
+    position: u64,
+    time: f64,
+}
+
 /// The render thread's end: the queue, the armed tracks with their inputs, and each source's
 /// keys.
 pub(crate) struct Live {
-    consumer: Option<Consumer<(LiveSource, LiveEvent)>>,
+    consumer: Option<Consumer<(LiveSource, LiveEvent, u64)>>,
     armed: [(TrackId, LiveFilter); MAX_ARMED],
     armed_count: usize,
     keys: [Keys; MAX_SOURCES],
     keys_count: usize,
+    /// Stamped notes whose frame is in a later block, in the order they came.
+    waiting: [Waiting; MAX_WAITING],
+    waiting_count: usize,
+    /// The earliest frame a waiting note plays at.
+    next_due: u64,
+    /// The render thread's place on the live clock, once it has said (`set_clock`).
+    cadence: Option<Cadence>,
+    /// How long after its time a stamped note plays, in frames.
+    delay: u64,
+    sample_rate: f64,
+    /// Where each note was played (renderer frame), for the tests.
+    #[cfg(test)]
+    pub(crate) played: Vec<(u64, LiveEvent)>,
 }
 
 impl Live {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(sample_rate: u32) -> Self {
         Self {
             consumer: None,
             armed: [(TrackId(0), LiveFilter::default()); MAX_ARMED],
             armed_count: 0,
             keys: [Keys::EMPTY; MAX_SOURCES],
             keys_count: 0,
+            waiting: [Waiting { at: 0, source: LiveSource::default(), event: LiveEvent::AllNotesOff }; MAX_WAITING],
+            waiting_count: 0,
+            next_due: u64::MAX,
+            cadence: None,
+            delay: 0,
+            sample_rate: f64::from(sample_rate.max(1)),
+            #[cfg(test)]
+            played: Vec::new(),
         }
     }
 
@@ -184,6 +280,35 @@ impl Live {
         let (producer, consumer) = RingBuffer::new(LIVE_QUEUE);
         self.consumer = Some(consumer);
         LiveSender { producer }
+    }
+
+    /// The render thread is about to render renderer frame `position` at `now` on the live
+    /// clock; stamped notes play `delay` frames after their time. The frames are kept on a
+    /// steady cadence (each block follows the last by its length) that is pulled slowly
+    /// towards `now`, and started again at `now` when the two are further apart than the delay
+    /// (the first block, a pause, an underrun): the render thread's own jitter does not move
+    /// the notes.
+    pub(crate) fn set_clock(&mut self, now: u64, delay: u32, position: u64) {
+        self.delay = u64::from(delay);
+        let now = now as f64;
+        let per_frame = 1e6 / self.sample_rate;
+        let steady = self.cadence.map(|c| c.time + position.saturating_sub(c.position) as f64 * per_frame);
+        let time = match steady {
+            Some(steady) if (now - steady).abs() <= self.delay as f64 * per_frame => {
+                steady + (now - steady) * CLOCK_PULL
+            }
+            _ => now,
+        };
+        self.cadence = Some(Cadence { position, time });
+    }
+
+    /// The renderer frame a note stamped `time` plays at, never before `position`; `position`
+    /// for a note without a time or before the render thread has said where it is.
+    fn frame_of(&self, time: u64, position: u64) -> u64 {
+        let Some(cadence) = self.cadence.filter(|_| time != 0) else { return position };
+        let frames = (time as f64 - cadence.time) * self.sample_rate / 1e6;
+        let at = cadence.position as f64 + frames + self.delay as f64;
+        if at.is_finite() && at > position as f64 { at.round() as u64 } else { position }
     }
 
     fn armed(&self) -> &[(TrackId, LiveFilter)] {
@@ -265,72 +390,125 @@ impl Live {
         Some(slot)
     }
 
-    /// Plays what the controllers sent since the last block, at the block's first frame, on the
-    /// instrument chains of the armed tracks that hear each note's source. Call it once the
-    /// chains have begun the block.
+    /// Takes what the controllers sent since the last block, for a block starting at renderer
+    /// frame `position`: a note without a time, or one whose frame has passed, plays at the
+    /// block's first frame; a stamped one waits for its frame ([`Live::frame`]). Call it once
+    /// the chains have begun the block.
     pub(crate) fn receive(&mut self, chains: &mut [Chain], position: u64) {
         // Bounded: what arrives while this runs waits for the next block.
         for _ in 0..LIVE_QUEUE {
-            let Some(Ok((source, event))) = self.consumer.as_mut().map(Consumer::pop) else { break };
-            let Some(slot) = self.keys_of(source) else { continue };
-            let Self { armed, armed_count, keys, .. } = self;
-            let armed = armed.get(..*armed_count).unwrap_or_default();
-            let Some(keys) = keys.get_mut(slot) else { continue };
-            let targets = chains
-                .iter_mut()
-                .filter(|c| c.instrument && armed.iter().any(|(t, f)| *t == c.track && f.takes(source)));
-            match event {
-                LiveEvent::NoteOn { key, velocity } => {
-                    let Some(held) = keys.held.get_mut(usize::from(key)) else { continue };
-                    *held = true;
+            let Some(Ok((source, event, time))) = self.consumer.as_mut().map(Consumer::pop) else { break };
+            let at = self.frame_of(time, position);
+            // A note never overtakes one that came before it from the same source.
+            let after = self
+                .waiting
+                .get(..self.waiting_count)
+                .unwrap_or_default()
+                .iter()
+                .filter(|w| w.source == source)
+                .map(|w| w.at)
+                .max()
+                .unwrap_or(0);
+            let at = at.max(after);
+            if at > position
+                && let Some(slot) = self.waiting.get_mut(self.waiting_count)
+            {
+                *slot = Waiting { at, source, event };
+                self.waiting_count += 1;
+                self.next_due = self.next_due.min(at);
+                continue;
+            }
+            self.play(chains, source, event, 0, position);
+        }
+        self.frame(chains, 0, position);
+    }
+
+    /// Plays the waiting notes due by renderer frame `position`, at `frame` of the block, in the
+    /// order they came. Never allocates.
+    pub(crate) fn frame(&mut self, chains: &mut [Chain], frame: usize, position: u64) {
+        if self.next_due > position {
+            return;
+        }
+        let mut kept = 0;
+        let mut next_due = u64::MAX;
+        for index in 0..self.waiting_count {
+            let Some(waiting) = self.waiting.get(index).copied() else { break };
+            if waiting.at <= position {
+                self.play(chains, waiting.source, waiting.event, frame, position);
+            } else {
+                if let Some(slot) = self.waiting.get_mut(kept) {
+                    *slot = waiting;
+                }
+                kept += 1;
+                next_due = next_due.min(waiting.at);
+            }
+        }
+        self.waiting_count = kept;
+        self.next_due = next_due;
+    }
+
+    /// Plays one note from `source` at `frame` of the block (renderer frame `position`) on the
+    /// instrument chains of the armed tracks that hear the source.
+    fn play(&mut self, chains: &mut [Chain], source: LiveSource, event: LiveEvent, frame: usize, position: u64) {
+        #[cfg(test)]
+        self.played.push((position, event));
+        let Some(slot) = self.keys_of(source) else { return };
+        let Self { armed, armed_count, keys, .. } = self;
+        let armed = armed.get(..*armed_count).unwrap_or_default();
+        let Some(keys) = keys.get_mut(slot) else { return };
+        let targets =
+            chains.iter_mut().filter(|c| c.instrument && armed.iter().any(|(t, f)| *t == c.track && f.takes(source)));
+        match event {
+            LiveEvent::NoteOn { key, velocity } => {
+                let Some(held) = keys.held.get_mut(usize::from(key)) else { return };
+                *held = true;
+                if let Some(sustained) = keys.sustained.get_mut(usize::from(key)) {
+                    *sustained = false;
+                }
+                let velocity = if velocity.is_finite() { velocity } else { 1.0 };
+                for chain in targets {
+                    chain.note_on(frame, position, key, velocity, UNTIL_RELEASED);
+                }
+            }
+            LiveEvent::NoteOff { key } => {
+                let Some(held) = keys.held.get_mut(usize::from(key)) else { return };
+                if !*held {
+                    return;
+                }
+                *held = false;
+                if keys.sustain {
                     if let Some(sustained) = keys.sustained.get_mut(usize::from(key)) {
-                        *sustained = false;
+                        *sustained = true;
                     }
-                    let velocity = if velocity.is_finite() { velocity } else { 1.0 };
-                    for chain in targets {
-                        chain.note_on(0, position, key, velocity, UNTIL_RELEASED);
-                    }
+                    return;
                 }
-                LiveEvent::NoteOff { key } => {
-                    let Some(held) = keys.held.get_mut(usize::from(key)) else { continue };
-                    if !*held {
-                        continue;
-                    }
-                    *held = false;
-                    if keys.sustain {
-                        if let Some(sustained) = keys.sustained.get_mut(usize::from(key)) {
-                            *sustained = true;
-                        }
-                        continue;
-                    }
-                    for chain in targets {
-                        chain.release_key(0, key);
-                    }
+                for chain in targets {
+                    chain.release_key(frame, key);
                 }
-                LiveEvent::Sustain { on } => {
-                    keys.sustain = on;
-                    if on {
-                        continue;
-                    }
-                    for chain in targets {
-                        for key in 0..=127u8 {
-                            if keys.sustained.get(usize::from(key)).copied().unwrap_or(false) {
-                                chain.release_key(0, key);
-                            }
+            }
+            LiveEvent::Sustain { on } => {
+                keys.sustain = on;
+                if on {
+                    return;
+                }
+                for chain in targets {
+                    for key in 0..=127u8 {
+                        if keys.sustained.get(usize::from(key)).copied().unwrap_or(false) {
+                            chain.release_key(frame, key);
                         }
                     }
-                    keys.sustained = [false; 128];
                 }
-                LiveEvent::AllNotesOff => {
-                    for chain in targets {
-                        for key in 0..=127u8 {
-                            if keys.sounding(key) {
-                                chain.release_key(0, key);
-                            }
+                keys.sustained = [false; 128];
+            }
+            LiveEvent::AllNotesOff => {
+                for chain in targets {
+                    for key in 0..=127u8 {
+                        if keys.sounding(key) {
+                            chain.release_key(frame, key);
                         }
                     }
-                    *keys = Keys { source, ..Keys::EMPTY };
                 }
+                *keys = Keys { source, ..Keys::EMPTY };
             }
         }
     }

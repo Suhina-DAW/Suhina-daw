@@ -132,12 +132,13 @@ impl Progress {
         self.live.load(Ordering::Relaxed)
     }
 
-    /// The longest time from a key pressed on a MIDI controller to the speaker: the measured
-    /// latency and one block, which is how long the note may wait for the render thread to
-    /// begin its next block.
+    /// The time from a key pressed on a MIDI controller to the speaker: the measured latency,
+    /// and the fixed delay a stamped note is played after (#269), the longest the render thread
+    /// waits between blocks (a block, or a device buffer) and one block more.
     pub fn live_latency(&self, sample_rate: u32) -> Duration {
         let block = self.block.load(Ordering::Relaxed);
-        self.latency().saturating_add(Duration::from_secs_f64(block as f64 / f64::from(sample_rate.max(1))))
+        let delay = block.max(self.callback_frames()).saturating_add(block);
+        self.latency().saturating_add(Duration::from_secs_f64(delay as f64 / f64::from(sample_rate.max(1))))
     }
 
     pub(crate) fn fail(&self) {
@@ -665,6 +666,11 @@ fn render_ahead(
             continue;
         }
         let started = Instant::now();
+        // A stamped live note plays this long after it was played (#269): the longest the
+        // thread waits between blocks (a block, or a device buffer that takes several at once)
+        // and the block it lands in.
+        let delay = frames.max(progress.callback_frames()).saturating_add(frames);
+        renderer.set_live_clock(suhina_engine::live_now(), u32::try_from(delay).unwrap_or(u32::MAX));
         renderer.process_with_cue(&mut block, &mut cue);
         // A device that takes faster than it plays, or a project too heavy to render in time,
         // keeps the thread from waiting: it rests rather than outlive its real-time limit.

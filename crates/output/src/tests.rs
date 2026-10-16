@@ -109,12 +109,16 @@ fn while_a_track_is_armed_the_ring_keeps_one_block_or_a_device_buffer() {
 }
 
 #[test]
-fn a_keys_latency_is_the_measured_latency_and_one_block() {
+fn a_keys_latency_is_the_measured_latency_and_the_fixed_delay() {
     let progress = Progress::default();
     progress.set_latency(Duration::from_millis(5));
     progress.block.store(480, Ordering::Relaxed);
-    assert_eq!(progress.live_latency(48_000), Duration::from_millis(15));
-    assert_eq!(progress.live_latency(0), Duration::from_millis(5) + Duration::from_secs(480), "a rate of 0");
+    // Two blocks: the longest wait between blocks, and the block the note lands in (#269).
+    assert_eq!(progress.live_latency(48_000), Duration::from_millis(25));
+    assert_eq!(progress.live_latency(0), Duration::from_millis(5) + Duration::from_secs(960), "a rate of 0");
+    // A device that takes more than a block at once makes the wait longer.
+    progress.set_callback_frames(960);
+    assert_eq!(progress.live_latency(48_000), Duration::from_millis(35));
     assert!(!progress.live());
 }
 

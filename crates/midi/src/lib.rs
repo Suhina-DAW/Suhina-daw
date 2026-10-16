@@ -8,13 +8,15 @@
 //!
 //! The driver calls back on a thread of its own (never the audio thread), which parses each
 //! message and hands the note to the session's [`LiveInput`], and from there to the engine of
-//! the project that plays. Only notes, the sustain pedal and the all-notes-off messages are read;
-//! everything else is ignored.
+//! the project that plays, with the time the driver stamped it with turned into the engine's
+//! live clock ([`StampClock`]), so the engine plays it at a fixed delay from when it was played
+//! (#269). Only notes, the sustain pedal and the all-notes-off messages are read; everything
+//! else is ignored.
 
 use std::sync::Arc;
 
 use midir::{Ignore, MidiInput, MidiInputConnection};
-use suhina_engine::{LiveEvent, LiveSource, port_id};
+use suhina_engine::{LiveEvent, LiveSource, StampClock, live_now, port_id};
 use suhina_session::{LiveInput, MidiSystem};
 
 /// The name Suhina's ports carry in the system's MIDI graph.
@@ -97,13 +99,17 @@ impl MidiSystem for Midi {
             .ok_or_else(|| format!("{name} is not there"))?;
         let sink = Arc::clone(&input);
         let id = port_id(name);
+        // The live clock starts before the first message, so its first stamp is not at 0.
+        let _started = live_now();
+        let mut clock = StampClock::default();
         let connection = client
             .connect(
                 &port,
                 &format!("{CLIENT} input"),
-                move |_, message, _| {
+                move |stamp, message, _| {
                     if let Some((channel, event)) = parse(message) {
-                        sink.send_from(LiveSource { port: id, channel }, event);
+                        let time = clock.time(stamp, live_now());
+                        sink.send_at(LiveSource { port: id, channel }, event, time);
                     }
                 },
                 (),

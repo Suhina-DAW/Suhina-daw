@@ -77,7 +77,10 @@ pub use launcher::{
     ColumnStatus, Controller, LaunchCommand, LauncherMonitor, MAX_START_BEAT, PlayingMeter, Quantization, Queued,
     SceneShift,
 };
-pub use live::{LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, port_id};
+pub use live::{
+    LIVE_QUEUE, LiveEvent, LiveFilter, LivePorts, LiveSender, LiveSource, MAX_ARMED, MAX_SOURCES, StampClock, live_now,
+    port_id,
+};
 pub use meters::{Level, MAX_METERED_TRACKS, MeterMonitor, PEAK_FALL_DB_PER_SECOND, RMS_SECONDS};
 use plugin::{DEADLINE_SHARE, Delay};
 pub use plugin::{
@@ -352,7 +355,7 @@ impl Renderer {
             plugin_info: plugins.info,
             preview: preview::Preview::new(sample_rate),
             cue: cue::Cue::new(),
-            live: live::Live::new(),
+            live: live::Live::new(sample_rate),
             input: input::Input::new(),
             cpu: cpu::CpuMeter::new(),
             meters,
@@ -460,6 +463,22 @@ impl Renderer {
     /// the output keeps less queued ahead of the device. Lock-free; for the render thread.
     pub fn live_armed(&self) -> bool {
         self.live.any_armed()
+    }
+
+    /// Where the render thread is on the live clock ([`live_now`]): it renders the next block
+    /// at `now`. Notes stamped with a time are played `delay` frames after it, at the frame
+    /// where that falls (#269): a delay as long as the render thread's longest wait between two
+    /// blocks and one block more leaves every note a frame in the block after it, so notes keep
+    /// the spacing they were played with. Call it before every [`Renderer::process`]; without
+    /// it, every note plays at the first frame of the next block. Never allocates.
+    pub fn set_live_clock(&mut self, now: u64, delay: u32) {
+        self.live.set_clock(now, delay, self.position);
+    }
+
+    /// The renderer frame each live note was played at, in order.
+    #[cfg(test)]
+    pub(crate) fn live_played(&self) -> Vec<u64> {
+        self.live.played.iter().map(|(at, _)| *at).collect()
     }
 
     pub fn stretch_underruns(&self) -> u64 {
@@ -598,6 +617,7 @@ impl Renderer {
                 chain.release_due(frame, self.position);
             }
             self.preview.frame(&mut self.graph.chains, frame, self.position);
+            self.live.frame(&mut self.graph.chains, frame, self.position);
             // The click for this frame's beat, read before the launcher moves the beat on.
             let launcher = &self.graph.launcher;
             let click = self.metronome.frame(self.running, launcher.beat(), |index| launcher.starts_bar(index));
