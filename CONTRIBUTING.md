@@ -46,8 +46,8 @@
   them: the kind from the branch name (`feature/` `enhancement`, `fix/` `bug`, `docs/`
   `documentation`, `chore/` `chore`; also `documentation` when every file changed is a document)
   and the areas from the paths changed. It only adds labels; add a platform label by hand.
-- **CodeRabbit:** reviews every pull request against AGENTS.md (`.coderabbit.yaml`) and shows a
-  **CodeRabbit** check beside CI. Its comments are suggestions, not requirements: answer or resolve
+- **CodeRabbit:** reviews every pull request that is not a draft against AGENTS.md
+  (`.coderabbit.yaml`) and shows a **CodeRabbit** check beside CI. Its comments are suggestions, not requirements: answer or resolve
   them, and leave DSP and real-time behaviour to the tests and renders. The check is never red and
   never required. Comment `@coderabbitai review` to run it again.
 
