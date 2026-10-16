@@ -10,6 +10,7 @@ pub mod arrangement_view;
 pub mod automation_lanes;
 pub mod browser;
 pub mod browser_view;
+pub mod colour_picker;
 pub mod demo;
 pub mod detail_view;
 mod device_canvas;

@@ -19,7 +19,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | Document | Type | Status | Read when | What it says |
 |---|---|---|---|---|
 | [Architecture](architecture.md) | system | current | adding a crate or feature, where does code go, threads, audio thread, data flow, layers, player, controller | How the crates, threads and commands fit together, from a file to the speakers, and where new code goes |
-| [MCP server](mcp.md) | system | current | MCP, agents, audio output, MIDI input, arm, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools | The MCP server for agents: tools, file roots, errors and how to run it |
+| [MCP server](mcp.md) | system | current | MCP, agents, audio output, MIDI input, arm, record, recording, count-in, audio device, buffer size, ASIO, project_open, command_run, file roots, rmcp, suhina-cli mcp, several projects, project id, plug-in commands, device commands, library commands, add samples, track.add, clip.addFiles, preview, preview.noteOn, preview.noteOff, note.split, mute a note, note.setMuted, note.humanize, note.fitToScale, note.invert, note.reverse, note.legato, note.stretch, note.randomizeVelocity, note.rampVelocity, MIDI tools | The MCP server for agents: tools, file roots, errors and how to run it |
 | [plugdata and the device SDK: scope comparison](research/parity-plugdata-device-sdk.md) | system | current | plugdata, Pure Data parity, device SDK node coverage, patch devices | Scope comparison between plugdata's documented object ecosystem and Suhina's executable data-only SDK nodes |
 | [0001: A DAW-neutral project model](decisions/0001-daw-neutral-model.md) | decision | current | changing the model, track, channel, clip content, lane, pattern, importing another format, clip scale, default scale | Why tracks and mixer channels are separate and clips place shared contents, so several DAWs' projects fit |
 | [0002: Every action is a command](decisions/0002-commands.md) | decision | current | adding a command, undo, redo, command registry, params, CommandSpec | Why every action is a command with an id, typed params and snapshot undo, shared by CLI, MCP and UI |
@@ -70,6 +70,7 @@ after every merge; do not edit by hand. Find a document by what you are about to
 | [Missing files](spec/missing-files.md) | spec | draft | missing files, missing samples, file not found, relink, locate, find files, moved samples, project.missingFiles, project.relinkFiles, library.findFiles | What happens when a project's audio files cannot be found: the bar that says so, the panel that lists them and finds them by name (browser index, project folder, a chosen folder), and relinking in one undo step |
 | [NKS preset files](spec/nks-format.md) | spec | planned | NKS, nksf, nksfx, Native Instruments presets, preset previews, .previews folder, NISI, NICA, PLID, PCHK, MessagePack, Komplete Kontrol presets, plug-in state chunk | What is known of Native Instruments preset files (.nksf, .nksfx) and their audio previews, from public sources, and what must be observed on our own files before Suhina reads them |
 | [Plug-ins in the browser](spec/plugin-browsing.md) | spec | current | plug-in views, browser plug-ins, group by type, vendor, flat list, sorting, columns, VST3 sub-categories, CLAP features, favourites, tags | How the browser shows installed plug-ins: grouped by vendor or by type, or as one flat list with sortable columns; and how each format's own categories map to Suhina's groups |
+| [Recording](spec/recording.md) | spec | current | recording, record, take, record button, clip.record, transport.record, count-in, transport.setCountIn, record.state, MIDI recording, audio recording, Recorded folder, latency compensation of a take, overdub, loopback | How recording works: MIDI and audio takes into a clip slot or the arrangement, the count-in, where a played note or a recorded sound is placed (lined up with what was heard), the files audio takes are written to, and what happens when a disk fills or a device is lost |
 | [Sample map](spec/sample-map.md) | spec | draft | sample map, similarity, sound map, browse by sound, t-SNE, UMAP, point cloud, grid layout, similar samples, kick snare hat categories, audio features, MFCC, NKS, preset previews, soundmap commands | How the sample map behaves: samples laid out by how they sound, coloured by kind, as a cloud or a grid, previewed by pointing, dragged into the project; NKS preset previews in the same map |
 | [Suhina device graph (`.sd`)](spec/sd-device-format.md) | spec | current | .sd, Suhina device, device graph, device SDK, community effect, visual node, device UI | Version 4 of the data-only Suhina device graph format, SDK, track loading, and device revision migrations |
 | [Custom device panels](spec/sdk-custom-ui.md) | spec | current | custom SDK control, device background, icon, photo, texture, XY pad, drawing API, image asset | Self-contained device canvases, image assets, drawing expressions and programmable parameter controls |
@@ -171,6 +172,7 @@ Change this code, and check these documents.
 | `crates/engine/src/buses.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [Automation](spec/automation.md), [Cue output](spec/cue-output.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/chain.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Automation](spec/automation.md), [Device groups](spec/device-groups.md), [Suhina device graph (`.sd`)](spec/sd-device-format.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/chain_tests.rs` | [Suhina device graph (`.sd`)](spec/sd-device-format.md) |
+| `crates/engine/src/count_in.rs` | [Recording](spec/recording.md) |
 | `crates/engine/src/cpu.rs` | [Architecture](architecture.md), [MCP server](mcp.md), [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/engine/src/cue.rs` | [Cue output](spec/cue-output.md) |
 | `crates/engine/src/cue_tests.rs` | [Cue output](spec/cue-output.md) |
@@ -191,6 +193,8 @@ Change this code, and check these documents.
 | `crates/engine/src/plugin.rs` | [0005: Edits while playing](decisions/0005-edits-while-playing.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Key inputs and plug-in buses](spec/sidechain.md) |
 | `crates/engine/src/plugin_params.rs` | [Automation](spec/automation.md) |
 | `crates/engine/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md) |
+| `crates/engine/src/record.rs` | [0017: Inputs, arming and live latency](decisions/0017-inputs-and-latency.md), [Recording](spec/recording.md) |
+| `crates/engine/src/record_tests.rs` | [Recording](spec/recording.md) |
 | `crates/engine/src/sends.rs` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md), [Sends and returns](spec/sends-and-returns.md) |
 | `crates/engine/src/sends_tests.rs` | [Sends and returns](spec/sends-and-returns.md) |
 | `crates/engine/src/stretch.rs` | [0003: Time-stretching and stretch modes](decisions/0003-time-stretching.md) |
@@ -258,6 +262,8 @@ Change this code, and check these documents.
 | `crates/session/src/preview.rs` | [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md), [Browser](spec/browser.md), [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
 | `crates/session/src/projects.rs` | [Architecture](architecture.md), [0002: Every action is a command](decisions/0002-commands.md), [0007: Several open projects](decisions/0007-several-open-projects.md), [0011: Previewing, and audio added to a playing project](decisions/0011-preview-and-added-audio.md) |
 | `crates/session/src/rack.rs` | [Architecture](architecture.md), [0006: Plug-in hosting](decisions/0006-plug-in-hosting.md), [Plug-ins in the browser](spec/plugin-browsing.md) |
+| `crates/session/src/record_writer.rs` | [Architecture](architecture.md), [Recording](spec/recording.md) |
+| `crates/session/src/recording.rs` | [Recording](spec/recording.md) |
 | `crates/session/src/relink.rs` | [Missing files](spec/missing-files.md) |
 | `crates/session/src/scales.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
 | `crates/session/src/sends.rs` | [Sends and returns](spec/sends-and-returns.md) |
@@ -271,6 +277,7 @@ Change this code, and check these documents.
 | `crates/session/tests/launch_settings.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/launcher.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/meters.rs` | [Level meters](spec/level-meters.md) |
+| `crates/session/tests/recording.rs` | [Recording](spec/recording.md) |
 | `crates/session/tests/scenes.rs` | [Clip launching](spec/clip-launching.md) |
 | `crates/session/tests/sends.rs` | [Sends and returns](spec/sends-and-returns.md) |
 | `crates/session/tests/stems.rs` | [Stems files](spec/stems-format.md) |
@@ -307,6 +314,7 @@ Change this code, and check these documents.
 | `crates/ui/src/piano_roll_scale.rs` | [UI: clip editor (MIDI piano roll)](spec/ui-clip-editor.md) |
 | `crates/ui/src/pick.rs` | [Components](design/components.md) |
 | `crates/ui/src/project_dialog.rs` | [Components](design/components.md), [About Suhina](spec/about.md), [Backups](spec/backups.md) |
+| `crates/ui/src/record_controls.rs` | [Recording](spec/recording.md) |
 | `crates/ui/src/sample_map.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/sample_map_crowd.rs` | [Sample map](spec/sample-map.md) |
 | `crates/ui/src/sample_map_panel.rs` | [Sample map](spec/sample-map.md) |
@@ -328,6 +336,7 @@ Change this code, and check these documents.
 | `crates/ui/tests/meters.rs` | [Level meters](spec/level-meters.md) |
 | `crates/ui/tests/mixer_strip.rs` | [UI: main window and Session view](spec/ui-session-view.md) |
 | `crates/ui/tests/open_recent.rs` | [Components](design/components.md) |
+| `crates/ui/tests/recording.rs` | [Recording](spec/recording.md) |
 | `crates/ui/tests/waveforms.rs` | [Waveforms](spec/waveforms.md) |
 | `crates/ui/themes/**` | [Design brief](design/brief.md) |
 | `devices/**` | [0004: Built-in effects and instruments](decisions/0004-built-in-devices.md) |

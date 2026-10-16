@@ -10,6 +10,7 @@ use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2};
 use serde_json::json;
 use suhina_engine::model::TrackId;
 
+use crate::colour_picker;
 use crate::grid::{Column, ColumnKind};
 use crate::meter;
 use crate::motion;
@@ -29,6 +30,8 @@ const READOUT: f32 = 12.0;
 const UNDER_READOUT: f32 = 2.0;
 /// A row of knobs (pan, sends) and the gap under it.
 const KNOB_ROW: f32 = theme::KNOB + 4.0;
+/// The track colour's band down the strip's left edge, in its padding.
+const COLOUR_BAND: f32 = 5.0;
 /// The name row and the gap under it.
 const NAME: f32 = 16.0;
 const UNDER_NAME: f32 = 2.0;
@@ -171,6 +174,14 @@ pub fn show(
     if strip.double_clicked() {
         state.open_devices = Some(column.track);
     }
+    // The track's colour down the left edge, at every height; a click opens the palette.
+    let band = Rect::from_min_size(rect.min, Vec2::new(COLOUR_BAND, rect.height()));
+    painter.rect_filled(band, 0.0, colour_picker::fill(column.color, column.mute));
+    let band_hit = band.intersect(painter.clip_rect());
+    if band_hit.is_positive() {
+        let colour_id = id.with("strip-colour");
+        colour_picker::area(ui, band_hit, colour_id, column.track, &column.name, column.color, actions);
+    }
     let parts = layout(rect, !column.sends.is_empty());
     if let Some(name) = parts.name {
         name_row(ui, painter, name, column, id);
@@ -203,8 +214,18 @@ pub fn show(
 fn name_row(ui: &Ui, painter: &egui::Painter, rect: Rect, column: &Column, id: Id) {
     let response = ui.interact(rect.intersect(painter.clip_rect()), id.with("strip-name"), Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{} strip", column.name)));
-    let color = if column.mute { theme::text_hint() } else { theme::text_primary() };
-    widgets::text_in(painter, rect, Align2::LEFT_CENTER, &column.name, theme::ui_font(theme::TEXT), color);
+    // The name stands on the track's colour, as in the column's header.
+    let fill = colour_picker::fill(column.color, column.mute);
+    painter.rect_filled(rect, 0.0, fill);
+    let text = rect.shrink2(Vec2::new(4.0, 0.0));
+    widgets::text_in(
+        painter,
+        text,
+        Align2::LEFT_CENTER,
+        &column.name,
+        theme::ui_font(theme::TEXT),
+        theme::text_on(fill),
+    );
 }
 
 /// Where the track's audio goes: "→" and a dropdown of "Main" and the group tracks; picking one

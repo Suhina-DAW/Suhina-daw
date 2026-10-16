@@ -322,7 +322,7 @@ the empty area.
 Tags have a name and a colour. There are seven at first: Red, Orange, Yellow, Green, Blue,
 Purple and Grey; a right-click on a tag's dot in the footer renames it (a field, Enter; clicks
 inside that menu do not close it),
-recolours it (a colour button) or removes it; new ones are added from a row's Tag menu, up to 64
+recolours it (the swatches of the track colour palette, [components](../design/components.md#colour-palette), or a colour button for any colour) or removes it; new ones are added from a row's Tag menu, up to 64
 (Settings › Browser › Tag limit raises it, at most 1024). Any item can carry any
 number of tags; a tag is a 6 px dot after the name. Clicking a tag's dot in the footer shows
 only items with that tag (several: items with any of them); clicking it again stops.
