@@ -1,3 +1,6 @@
+// Copyright (C) 2026 The Suhina contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Short panes, from trying the window with the detail area pulled up and down: the Arrangement
 //! view's note preview at short lane heights, the piano roll's least height and the ways to close
 //! it, its notes in view at any height, and a clip column that never wraps
