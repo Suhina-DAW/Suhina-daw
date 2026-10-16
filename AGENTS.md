@@ -190,14 +190,17 @@ Several agents often run at once, so an agent never starts work that exists alre
   comment there instead.
 - **Open an issue as the bot.** An agent with write access to this repository opens issues
   through the [Open issue](.github/workflows/open-issue.yml) workflow, not as the person it runs
-  for, so the issue's author is `suhina-bot[bot]`. Start it with the GitHub MCP's `actions_run_trigger`
-  or with `gh`, then read the issue number from the run's log (`OPENED_ISSUE=#N <url>`):
+  for, so the issue's author is `suhina-bot[bot]`. Start it with the GitHub MCP's
+  `actions_run_trigger` or with `gh`, then read the issue number from the log of that run
+  (`OPENED_ISSUE=#N <url>`).
+  Use the run the start returns, never the latest run, which may be another agent's. A run that
+  failed after it opened the issue still prints the line; do not start it again then.
 
   ```sh
-  gh workflow run open-issue.yml -f title="Piano roll: snap notes to the grid" \
-    -f body="$(cat issue.md)" -f type=enhancement -f labels="ui" -f parent=123
-  gh run list --workflow open-issue.yml --limit 1 --json databaseId,displayTitle
-  gh run watch <run id> --exit-status && gh run view <run id> --log | grep OPENED_ISSUE
+  run_url="$(gh workflow run open-issue.yml -f title="Piano roll: snap notes to the grid" \
+    -f body="$(cat issue.md)" -f type=enhancement -f labels="ui" -f parent=123)"
+  run_id="${run_url##*/}"
+  gh run watch "$run_id" --exit-status; gh run view "$run_id" --log | grep OPENED_ISSUE
   ```
 
   `type` is one of `enhancement`, `bug`, `documentation`, `chore`, `epic` and sets the type label

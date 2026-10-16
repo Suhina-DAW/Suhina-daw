@@ -43,8 +43,11 @@ on:
         type: string
         default: ""
 
+# The workflow's own token only reads: the actor's permission, labels and the parent issue. The issue
+# is written with the App's token.
 permissions:
   contents: read
+  issues: read
 
 jobs:
   open:
@@ -147,16 +150,26 @@ jobs:
             if (issueType) payload.type = issueType;
             const { data: issue } = await github.request("POST /repos/{owner}/{repo}/issues", payload);
 
-            if (parent !== null) {
-              await github.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
-                owner, repo, issue_number: parent, sub_issue_id: issue.id,
-              });
-            }
-
+            // Said before anything else can fail, so a failed run that did open the issue still
+            // names it and nobody starts the workflow again for the same issue.
             console.log(`OPENED_ISSUE=#${issue.number} ${issue.html_url}`);
             core.setOutput("number", issue.number);
             core.setOutput("url", issue.html_url);
-            await core.summary
-              .addRaw(`Opened [#${issue.number} ${issue.title}](${issue.html_url})`)
-              .addRaw(parent !== null ? ` under #${parent}.` : ".")
-              .write();
+            core.summary.addRaw(`Opened [#${issue.number} ${issue.title}](${issue.html_url})`);
+
+            if (parent !== null) {
+              try {
+                await github.request("POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues", {
+                  owner, repo, issue_number: parent, sub_issue_id: issue.id,
+                });
+                core.summary.addRaw(` under #${parent}.`);
+              } catch (error) {
+                core.summary.addRaw(`, but adding it under #${parent} failed: ${error.message}`);
+                await core.summary.write();
+                core.setFailed(`Opened #${issue.number}, but adding it under #${parent} failed: ${error.message}`);
+                return;
+              }
+            } else {
+              core.summary.addRaw(".");
+            }
+            await core.summary.write();
