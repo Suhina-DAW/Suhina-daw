@@ -3545,21 +3545,30 @@ impl App {
                     return None;
                 }
                 // A slot-to-slot drag moves the clip, swapping with a target's clip — Ctrl
-                // copies instead, as the cross-view drags do.
-                let target_clip = project
+                // copies instead, as the cross-view drags do. The occupancy decides Move or
+                // Swap: an occupied slot's clip may have no name, and the swap is still a swap.
+                let (target_occupied, target_clip) = project
                     .launcher
                     .columns
                     .iter()
                     .find(|c| c.track == track)
                     .and_then(|c| c.slots.get(scene))
-                    .and_then(|s| s.clip.as_ref())
-                    .and_then(|placed| project.content(placed.content))
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                match (copy, target_clip.is_empty()) {
-                    (false, true) => Some(format!("Move {clip} to {}, scene {}", name(track), scene + 1)),
-                    (false, false) => {
-                        Some(format!("Swap {clip} and {target_clip} in {}, scene {}", name(track), scene + 1))
+                    .map(|s| {
+                        (
+                            s.clip.is_some(),
+                            s.clip
+                                .as_ref()
+                                .and_then(|placed| project.content(placed.content))
+                                .map(|c| c.name.clone())
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .unwrap_or((false, String::new()));
+                match (copy, target_occupied) {
+                    (false, false) => Some(format!("Move {clip} to {}, scene {}", name(track), scene + 1)),
+                    (false, true) => {
+                        let theirs = if target_clip.is_empty() { "clip" } else { target_clip.as_str() };
+                        Some(format!("Swap {clip} and {theirs} in {}, scene {}", name(track), scene + 1))
                     }
                     (true, _) => Some(format!("Copy {clip} to {}, scene {}", name(track), scene + 1)),
                 }

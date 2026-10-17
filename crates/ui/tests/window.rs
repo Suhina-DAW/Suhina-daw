@@ -3912,6 +3912,10 @@ fn a_slots_context_menu_renames_its_clip() {
     harness.run();
     harness.get_by_label_contains("Rename clip Walk").type_text("Walk the bass");
     harness.run();
+    eprintln!(
+        "PROBE draft: {:?}",
+        harness.ctx.data(|d| d.get_temp::<String>(egui::Id::new(("slot-rename", suhina_engine::model::TrackId(2), 2))))
+    );
     harness.key_press(Key::Enter);
     harness.run();
     // The slot's label carries the new name; one undo brings Walk back.
@@ -3919,4 +3923,42 @@ fn a_slots_context_menu_renames_its_clip() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     assert!(harness.query_by_label("Launch Walk on Bass (scene 2)").is_some(), "the undo brings the name back");
+}
+
+#[test]
+fn an_empty_rename_field_clears_the_clips_name() {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Rename clip Walk").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.key_press(Key::Backspace);
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(harness.query_by_label("Launch clip on Bass (scene 2)").is_some(), "the empty draft clears the name");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Launch Walk on Bass (scene 2)").is_some(), "the undo brings the name back");
+}
+
+#[test]
+fn a_rename_draft_dies_with_its_menu() {
+    let mut harness = window(demo_app());
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Rename clip Walk").click();
+    harness.run();
+    harness.get_by_label_contains("Rename clip Walk").type_text("X");
+    harness.run();
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label_contains("Rename clip").is_none(), "the menu closed");
+    // Reopening starts from the name as it is now, not the typing that was never applied.
+    harness.get_by_label("Launch Walk on Bass (scene 2)").click_secondary();
+    harness.run();
+    let field = harness.get_by_label_contains("Rename clip Walk");
+    assert_eq!(field.value().as_deref(), Some("Walk"), "the reopened field carries the name, not the stale draft");
 }

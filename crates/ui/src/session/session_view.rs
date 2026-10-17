@@ -656,6 +656,13 @@ fn column_body(
             state.select_slot(column.track, scene);
         }
         if editable {
+            // The slot's rename draft dies with its menu — either of the slot's two responses may
+            // host it, so the check is once for the pair: a reopen starts from the name as it is
+            // now.
+            let menu_open = [&launch, &select].into_iter().flatten().any(egui::Response::context_menu_opened);
+            if !menu_open {
+                ui.ctx().data_mut(|d| d.remove::<String>(Id::new(("slot-rename", column.track, number))));
+            }
             for response in [&launch, &select].into_iter().flatten() {
                 // An empty slot is selected by a click, any slot by a right-click: Ctrl+C and
                 // Ctrl+V act on it.

@@ -534,7 +534,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.rename",
-        label: "Rename a clip: an arrangement clip by index, or a slot's clip by scene; a copy's content is its own, so the rename is the one clip's",
+        label: "Rename a clip: an arrangement clip by index, or a slot's clip by scene; clips that play the same content share the name",
         params: &[TRACK, CLIP_INDEX, CLIP_SCENE, param("name", ParamType::Text, "the new name (empty clears it)")],
         kind: CommandKind::Edit,
         run: rename_clip,
