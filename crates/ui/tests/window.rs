@@ -3878,7 +3878,10 @@ fn a_slot_drag_to_another_slot_moves_it_ctrl_drags_copy_and_an_occupied_one_swap
     assert!(harness.query_by_label("Launch Walk on Bass (scene 2)").is_some(), "the source kept its clip");
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
-    // A drag onto an occupied slot swaps the two: Walk to Beat's slot, Beat to Walk's.
+    // A drag onto an occupied slot swaps the two: Walk to Beat's slot, Beat to Walk's. Both
+    // sides are asserted: each slot holds what the other held before.
+    let walk_before = slot_content(&harness, 2, 1);
+    let beat_before = slot_content(&harness, 1, 0);
     let walk = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
     let beat = harness.get_by_label("Launch Beat A on Drums (scene 1)").rect().center();
     harness.hover_at(walk);
@@ -3889,11 +3892,29 @@ fn a_slot_drag_to_another_slot_moves_it_ctrl_drags_copy_and_an_occupied_one_swap
     harness.step();
     harness.drop_at(beat);
     harness.run();
-    let (first, _, _) = slots(&harness);
     assert!(
         matches!(harness.state().status(), Status::Done(text) if text.contains("Swapped")),
         "{:?}",
         harness.state().status()
     );
-    let _ = first;
+    assert_eq!(slot_content(&harness, 2, 1), beat_before, "Walk's slot holds what Beat had");
+    assert_eq!(slot_content(&harness, 1, 0), walk_before, "Beat's slot holds what Walk had");
+    // One undo puts both back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(slot_content(&harness, 2, 1), walk_before, "the undo puts Walk back");
+}
+
+/// The content id of the clip in a launcher's slot, `None` where the slot is empty.
+fn slot_content(h: &Harness<'static, App>, track: u32, scene: usize) -> Option<u32> {
+    h.state().session().and_then(|s| {
+        s.project()
+            .launcher
+            .columns
+            .iter()
+            .find(|c| c.track == TrackId(track))
+            .and_then(|c| c.slots.get(scene))
+            .and_then(|s| s.clip.as_ref())
+            .map(|c| c.content.0)
+    })
 }
