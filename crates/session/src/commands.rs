@@ -2919,9 +2919,9 @@ fn delete_clips(session: &mut Session, params: &Value) -> Result<Value, CommandE
     }
 }
 
-/// `clip.rename`: the clip's name is its content's, and a copy's content is its own, so the
-/// rename is the one clip's. An empty name clears it, and the launcher's slots then show
-/// "clip".
+/// `clip.rename`: the clip's name is its content's, so clips that play the same content share
+/// the new name (a pasted copy has a content of its own and keeps its name). An empty name
+/// clears it, and the launcher's slots then show "clip".
 fn rename_clip(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     let name = match params.get("name") {
         Some(Value::String(name)) => name.trim().to_string(),

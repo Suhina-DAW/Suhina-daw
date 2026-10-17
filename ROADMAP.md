@@ -255,6 +255,8 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   ([spec](docs/spec/clip-launching.md) › Clips between the arrangement and the slots). Within
   the Session view a drag **moves** a clip to the slot under the pointer, swapping with what is
   there (`clip.moveSlot`); Ctrl+drag copies.
+- A clip is renamed from its right-click menu, a slot's or an arrangement clip's: the name field
+  at the menu's top, applied with Enter or **Rename** (`clip.rename`; an empty name clears it).
 - A metronome (`transport.setMetronome`, off by default): a click on every beat while the
   transport runs, higher on the first beat of a bar, following tempo edits and scene tempos.
   Count-in comes with recording.
