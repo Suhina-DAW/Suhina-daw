@@ -94,4 +94,11 @@ ignore = [
     # (winit > sctk-adwaita > ab_glyph > owned_ttf_parser), which draw the title bar text.
     # Remove this when winit moves off it.
     { id = "RUSTSEC-2026-0192", reason = "unmaintained, no replacement upstream; only winit's Wayland title bar uses it" },
+    # zbus and its crates (zbus_names, zvariant, zvariant_derive) are marked unmaintained. This
+    # is the pure-Rust D-Bus client the realtime crate uses to speak to rtkit (ADR 0017); there
+    # is no maintained pure-Rust replacement of its shape, and the advisory names no
+    # vulnerability. Reconsider when one arrives or when the advisory is withdrawn.
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained class (zbus); the realtime crate's rtkit client, no vulnerability named" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained class (zbus family)" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained class (zbus family)" },
 ]

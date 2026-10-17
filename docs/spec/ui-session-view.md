@@ -241,9 +241,16 @@ scene can change it.
 
 ### I/O section (below the grid, per track, toggleable)
 
+- Audio tracks: the audio input's block on the track's strip, above the on/solo/cue/arm row:
+  **Audio From** (the caption) with the source's dropdown — "No input", a channel, or a stereo
+  pair of the audio input device that Settings › Audio chose, the same list the track menu
+  shows — and the **Monitor** buttons **In / Auto / Off** with the one the project has lit.
+  They show from the mixer height where the track's name and output rows appear in full
+  ([components](../design/components.md) › Height steps). A pick is the same command the menu
+  runs (`track.setAudioInput`, one undo step); clicking the monitor button that is already on
+  runs nothing.
 - MIDI tracks: "MIDI From" (source, channel), monitoring (In / Auto / Off), "MIDI To" or "Audio
-  To" once an instrument is on the track.
-- Audio tracks: "Audio From" (source, channel), monitoring, "Audio To".
+  To" once an instrument is on the track — planned with the I/O section.
 - Return tracks: "Audio To".
 - Main: cue out and main out.
 
@@ -290,8 +297,10 @@ vertical channel strip under its slots, and the strip shows more the taller the 
 - **As it grows**, it adds in this order: a vertical **volume fader** with the track's level meter
   beside it and its dB value over it (the fader replaces the compact value); the **pan** knob
   with its value; the **send** knobs; the track's **name** at the top; under it the track's
-  **output**; and at the tallest heights a scrollable list of the track's **devices and
-  plug-ins**. Shrinking drops them in the reverse
+  **output**; at the tallest heights a scrollable list of the track's **devices and
+  plug-ins**; and on a track that plays audio the **input's block** above the on/solo/cue/arm
+  row (Audio From and the monitor's In / Auto / Off buttons, [I/O](#io-section-below-the-grid-per-track-toggleable)).
+  Shrinking drops them in the reverse
   order. Height the strip has beyond what its parts need goes to the fader, and once the device
   list shows, to the list after the fader is tall enough. A strip without sends (a return, or no
   returns in the project) gives that row to the fader.

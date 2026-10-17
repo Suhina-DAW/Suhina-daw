@@ -527,7 +527,9 @@ In the Arrangement view a header click selects a track (Ctrl adds, Shift takes a
 groups the selection, dragging a header moves the track above the lane under the pointer (below it
 from its lower half), and a right-click opens the track's menu: name, colour, group, ungroup,
 **Move into group** (a submenu of every other group it can go into), **Move out of group** (one
-level up, right after the group it leaves), delete. A group's header starts with a triangle that
+level up, right after the group it leaves), **Audio input** or **MIDI input** on a track that
+plays them (the source's channels and the monitoring; the commands the strip's block and the
+Session view's menu share), delete. A group's header starts with a triangle that
 folds its tracks away (Folded groups). The Session view's column headers have the same menu.
 
 A header's left edge is a 6 px band of the track's colour, the header's full height (dimmed while

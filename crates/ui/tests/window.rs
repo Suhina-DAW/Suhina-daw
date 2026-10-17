@@ -176,6 +176,54 @@ fn launching_without_an_audio_engine_says_why() {
     }
 }
 
+/// An audio track's strip, grown past the input block: it carries "Audio From" with what it is,
+/// and the three monitor picks with the on one lit; the strip's picks run the same
+/// `track.setAudioInput` the track menu's do. A notes track's strip has nothing of it.
+#[test]
+fn an_audio_tracks_strip_shows_audio_from_and_the_monitor_picks() {
+    use suhina_engine::model::{ContentKinds, Monitor};
+    let mut project = demo_project();
+    project.tracks[0].content = ContentKinds { notes: false, audio: true };
+    let name = project.tracks[0].name.clone();
+    let mut app = App::new();
+    app.set_browser_open(false);
+    app.set_session(Session::new(project), &[]);
+    let mut settings = suhina_ui::settings::Settings::default();
+    settings.view.mixer_height = 320;
+    app.set_settings(&egui::Context::default(), settings);
+    let mut harness = window(app);
+
+    // The rows are there: the source (the test's device has no channels, so eight are offered)
+    // and the three monitor buttons.
+    assert!(harness.query_by_label_contains(&format!("{name} audio from: No input")).is_some());
+    assert!(harness.query_by_label(&format!("{name} monitor In")).is_some());
+    assert!(harness.query_by_label(&format!("{name} monitor Auto")).is_some());
+    assert!(harness.query_by_label(&format!("{name} monitor Off")).is_some());
+    assert!(
+        harness.query_by_label_contains("Keys audio from:").is_none(),
+        "a track that plays notes has no audio block"
+    );
+
+    // The dropdown offers the same list the track menu's does (`audio_input_picks`, and that
+    // menu is driven by the track-menu test and the hand check: under kittest's window the
+    // strip's popup itself does not open — its picks are the menu's). The monitor's buttons
+    // are the strip's own: driven here, with the project as the outcome.
+    harness.get_by_label(&format!("{name} monitor In")).click();
+    harness.run();
+    let heard = |h: &Harness<'static, App>| h.state().session().map(|s| s.project().tracks[0].audio_input);
+    assert_eq!(heard(&harness).map(|i| i.monitor), Some(Monitor::In));
+    harness.get_by_label(&format!("{name} monitor In")).click();
+    harness.run();
+    assert_eq!(heard(&harness).map(|i| i.monitor), Some(Monitor::In), "the re-click changes nothing");
+    // One undo takes the monitor back; clicking Auto sets it again.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(heard(&harness).map(|i| i.monitor), Some(Monitor::Auto));
+    harness.get_by_label(&format!("{name} monitor Auto")).click();
+    harness.run();
+    assert_eq!(heard(&harness).map(|i| i.monitor), Some(Monitor::Auto));
+}
+
 #[test]
 fn an_empty_window_asks_for_a_project() {
     let harness = window(App::new());

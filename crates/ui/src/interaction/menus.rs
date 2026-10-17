@@ -46,6 +46,59 @@ pub fn audio_input_text(input: &AudioInput) -> String {
     format!("{channels} · {monitor}")
 }
 
+/// The picks of a track's audio input (ADR 0017): none, each channel of the input device, each
+/// neighbouring pair. A pick runs `track.setAudioInput`; with no device open, the first eight
+/// appear, so a project's choices are setable before an interface is there. The list is what
+/// the track's menu and the strip's dropdown both offer.
+pub fn audio_input_picks(input: &AudioInput, channels: u16) -> Vec<(&'static str, serde_json::Value)> {
+    let mut picks = vec![("No input", json!({ "input": "none" }))];
+    let channels = if channels == 0 { 8 } else { channels };
+    let chosen = match input.channels {
+        InputChannels::None => 0,
+        InputChannels::Mono(c) => c,
+        InputChannels::Stereo(c) => c.saturating_add(1),
+    };
+    let shown = channels.max(chosen);
+    for c in 1..=shown {
+        picks.push((Box::leak(format!("In {c}").into_boxed_str()), json!({ "input": c.to_string() })));
+    }
+    for c in (1..shown).step_by(2) {
+        let pair = format!("{c}/{}", c + 1);
+        picks.push((Box::leak(format!("In {pair}").into_boxed_str()), json!({ "input": pair })));
+    }
+    picks
+}
+
+/// The three monitor choices, as the track's menu lists them (Auto first, reading like a
+/// sentence about what is heard) and the strip's three buttons carry them.
+pub fn audio_monitor_picks() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("Monitor auto (while armed)", json!({ "monitor": "auto" })),
+        ("Monitor in", json!({ "monitor": "in" })),
+        ("Monitor off", json!({ "monitor": "off" })),
+    ]
+}
+
+/// Whether the params say what `input` listens to, so the menu and the strip tick their picks.
+pub fn audio_is(input: &AudioInput, params: &serde_json::Value) -> bool {
+    if let Some(monitor) = params.get("monitor").and_then(serde_json::Value::as_str) {
+        return input.monitor
+            == match monitor {
+                "in" => Monitor::In,
+                "off" => Monitor::Off,
+                _ => Monitor::Auto,
+            };
+    }
+    let text = params.get("input").and_then(serde_json::Value::as_str).unwrap_or("");
+    match (text, input.channels) {
+        ("none", InputChannels::None) => true,
+        ("", _) => false,
+        (text, InputChannels::Mono(c)) => text == c.to_string(),
+        (text, InputChannels::Stereo(c)) => *text == format!("{c}/{}", c.saturating_add(1)),
+        (_, InputChannels::None) => false,
+    }
+}
+
 /// The choices of a track's audio input (ADR 0017): none, each channel of the input device,
 /// each neighbouring pair; then its monitoring. A pick runs `track.setAudioInput`.
 pub fn audio_input_choices(ui: &mut Ui, track: TrackId, input: &AudioInput, channels: u16, actions: &mut Vec<Action>) {
@@ -58,43 +111,15 @@ pub fn audio_input_choices(ui: &mut Ui, track: TrackId, input: &AudioInput, chan
             ui.close();
         }
     };
-    pick(ui, "No input", input.channels == InputChannels::None, json!({ "input": "none" }));
+    for (label, params) in audio_input_picks(input, channels) {
+        pick(ui, label, audio_is(input, &params), params);
+    }
     if channels == 0 {
         ui.label(text("No input device: choose one in Settings › Audio"));
     }
-    // The device's channels, and the one chosen if the device has fewer now; without a device,
-    // the first eight, so a project can be set up before the interface is there.
-    let channels = if channels == 0 { 8 } else { channels };
-    let chosen = match input.channels {
-        InputChannels::None => 0,
-        InputChannels::Mono(c) => c,
-        InputChannels::Stereo(c) => c.saturating_add(1),
-    };
-    let shown = channels.max(chosen);
-    egui::Grid::new(("audio-channels", track.0)).spacing(Vec2::splat(2.0)).show(ui, |ui| {
-        for c in 1..=shown {
-            pick(ui, &format!("In {c}"), input.channels == InputChannels::Mono(c), json!({ "input": c.to_string() }));
-            if c % 4 == 0 {
-                ui.end_row();
-            }
-        }
-    });
-    egui::Grid::new(("audio-pairs", track.0)).spacing(Vec2::splat(2.0)).show(ui, |ui| {
-        for c in (1..shown).step_by(2) {
-            let pair = format!("{c}/{}", c + 1);
-            pick(ui, &format!("In {pair}"), input.channels == InputChannels::Stereo(c), json!({ "input": pair }));
-            if c % 8 == 7 {
-                ui.end_row();
-            }
-        }
-    });
     ui.separator();
-    for (label, monitor, value) in [
-        ("Monitor auto (while armed)", Monitor::Auto, "auto"),
-        ("Monitor in", Monitor::In, "in"),
-        ("Monitor off", Monitor::Off, "off"),
-    ] {
-        pick(ui, label, input.monitor == monitor, json!({ "monitor": value }));
+    for (label, params) in audio_monitor_picks() {
+        pick(ui, label, audio_is(input, &params), params);
     }
 }
 
@@ -423,6 +448,23 @@ pub fn slot_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The strip's dropdown and the track's menu both offer the same list, pairs included: with
+    /// no device open, the first eight channels, mono and one pair each, are there to set a
+    /// project with before the interface arrives.
+    #[test]
+    fn audio_input_picks_offer_monos_and_pairs() {
+        let picks = audio_input_picks(&AudioInput::default(), 0);
+        let labels: Vec<&str> = picks.iter().map(|(l, _)| *l).collect();
+        assert!(labels.contains(&"In 1"), "{labels:?}");
+        assert!(labels.contains(&"In 8"), "{labels:?}");
+        assert!(labels.contains(&"In 1/2"), "{labels:?}");
+        assert!(labels.contains(&"In 3/4"), "{labels:?}");
+        let ticked = audio_is(&AudioInput::default(), &picks[0].1);
+        assert!(ticked, "no device yet, so no input ticked");
+        let monitors = audio_monitor_picks();
+        assert_eq!(monitors.len(), 3);
+    }
 
     #[test]
     fn scene_fields_become_commands() {
