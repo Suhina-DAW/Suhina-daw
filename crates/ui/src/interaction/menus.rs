@@ -5,7 +5,9 @@
 
 use egui::{Id, Key, Ui, Vec2};
 use serde_json::json;
-use suhina_engine::model::{AudioInput, InputChannels, MidiInput, MidiPort, Monitor, Rgb, TimeSignature, TrackId};
+use suhina_engine::model::{
+    AudioInput, ClipId, InputChannels, MidiInput, MidiPort, Monitor, Rgb, TimeSignature, TrackId,
+};
 
 use crate::interaction::colour_picker;
 use crate::kit::theme;
@@ -223,12 +225,11 @@ pub fn track_menu(ui: &mut Ui, menu: &TrackMenu<'_>, actions: &mut Vec<Action>) 
 /// The menu of arrangement clips; `stack` is true when the stacking setting for the clips' kind
 /// is on, so their copies leave the clips they land on as they are. `clips` is the selection the
 /// click fell in, or the one clip it fell on; `enabled` is whether the clicked clip plays now.
-pub fn clip_menu(ui: &mut Ui, clips: &[(TrackId, usize)], stack: bool, enabled: bool, actions: &mut Vec<Action>) {
+pub fn clip_menu(ui: &mut Ui, clips: &[(TrackId, ClipId)], stack: bool, enabled: bool, actions: &mut Vec<Action>) {
     if clips.is_empty() {
         return;
     }
-    let list: Vec<serde_json::Value> =
-        clips.iter().map(|(track, index)| json!({ "track": track.0, "index": index })).collect();
+    let list: Vec<serde_json::Value> = clips.iter().map(|(_, clip)| json!({ "clip": clip.0 })).collect();
     ui.set_min_width(140.0);
     if ui.add(egui::Button::new("Copy").shortcut_text("Ctrl+C")).clicked() {
         actions.push(Action::new("clip.copy", json!({ "clips": list.clone() })));
@@ -258,7 +259,7 @@ pub fn clip_menu(ui: &mut Ui, clips: &[(TrackId, usize)], stack: bool, enabled: 
 pub fn clip_edit_menu(
     ui: &mut Ui,
     track: TrackId,
-    index: usize,
+    clip: ClipId,
     span: (f64, f64),
     at: Option<f64>,
     actions: &mut Vec<Action>,
@@ -269,7 +270,7 @@ pub fn clip_edit_menu(
     if ui.add_enabled(inside.is_some(), egui::Button::new("Split here")).clicked()
         && let Some(beat) = inside
     {
-        actions.push(Action::new("clip.split", json!({ "track": track.0, "index": index, "at": beat })));
+        actions.push(Action::new("clip.split", json!({ "clip": clip.0, "at": beat })));
         ui.close();
     }
     if ui.add(egui::Button::new("Consolidate").shortcut_text("Ctrl+J")).clicked() {

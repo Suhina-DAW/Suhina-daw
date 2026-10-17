@@ -14,6 +14,13 @@ const SR: u32 = 48_000;
 const BEAT: usize = SR as usize / 2;
 
 fn project() -> Project {
+    // Ids on its lanes, clips and scenes, as a session gives them.
+    let mut project = project_built();
+    project.assign_ids().unwrap();
+    project
+}
+
+fn project_built() -> Project {
     let track = |id: u32, name: &str| Track {
         id: TrackId(id),
         name: name.into(),
@@ -60,6 +67,7 @@ fn project() -> Project {
         scale: None,
     };
     let clip = |content: u32, enabled: bool| Clip {
+        id: Default::default(),
         content: ContentId(content),
         start: 0.0,
         length: 1.0,
@@ -83,7 +91,7 @@ fn project() -> Project {
             mappings: Vec::new(),
             scenes: vec![
                 Scene { name: "Intro".into(), ..Scene::default() },
-                Scene { name: "Drop".into(), tempo_bpm: Some(128.0), time_signature: None },
+                Scene { id: Default::default(), name: "Drop".into(), tempo_bpm: Some(128.0), time_signature: None },
             ],
             columns: vec![
                 LauncherColumn {
@@ -491,6 +499,7 @@ fn bad_positions_and_stop_returns_are_errors() {
 fn playing_with_clips() -> (Session, Renderer) {
     let mut project = project();
     let clip = |start: f64| Clip {
+        id: Default::default(),
         content: ContentId(1),
         start,
         length: 1.0,
@@ -505,8 +514,12 @@ fn playing_with_clips() -> (Session, Renderer) {
         extensions: Extensions::default(),
         launch: Default::default(),
     };
-    let lane =
-        |track: u32, clips: Vec<Clip>| ArrangementLane { name: String::new(), track: Some(TrackId(track)), clips };
+    let lane = |track: u32, clips: Vec<Clip>| ArrangementLane {
+        id: Default::default(),
+        name: String::new(),
+        track: Some(TrackId(track)),
+        clips,
+    };
     project.arrangement.lanes = vec![lane(1, vec![clip(4.0), clip(10.0)]), lane(2, vec![clip(2.0)])];
     let mut renderer = Renderer::stopped(&project, &AudioPool::new(), SR).unwrap();
     let mut session = Session::new(project);
