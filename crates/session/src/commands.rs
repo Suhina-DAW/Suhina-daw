@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, FadeCurve, FadeShape, LaneData, LoopRange,
-    MAX_GROUP_DEPTH, Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, ClipPlace, FadeCurve, FadeShape, LaneData,
+    LoopRange, MAX_GROUP_DEPTH, Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
 use crate::{
@@ -329,6 +329,13 @@ static COMMANDS: &[CommandSpec] = &[
         params: &[optional("track", ParamType::Track, "only clips on this track (id or name)")],
         kind: CommandKind::Read,
         run: clips,
+    },
+    CommandSpec {
+        id: "arrangement.audioOverlaps",
+        label: "List the pairs of audio clips that sound together on one track because their arrangement spans overlap; clips that only touch do not",
+        params: &[optional("track", ParamType::Track, "only overlaps on this track (id or name)")],
+        kind: CommandKind::Read,
+        run: audio_overlaps,
     },
     CommandSpec {
         id: "transport.setTempo",
@@ -2055,6 +2062,44 @@ fn clips(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
         }
     }
     Ok(Value::Array(out))
+}
+
+/// `arrangement.audioOverlaps`: [`Project::audio_overlaps`], each clip named as `clip.move`
+/// addresses it (ADR 0028).
+fn audio_overlaps(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
+    let p = session.project();
+    let only = match params.get("track") {
+        Some(_) => Some(track_id(p, params)?),
+        None => None,
+    };
+    let track_name = |id: TrackId| p.tracks.iter().find(|t| t.id == id).map(|t| t.name.as_str()).unwrap_or_default();
+    let clip = |place: ClipPlace| {
+        let name = p
+            .arrangement
+            .lanes
+            .get(place.lane)
+            .and_then(|l| l.clips.get(place.index))
+            .and_then(|c| p.content(c.content))
+            .map(|c| c.name.as_str());
+        json!({ "track": place.track.0, "track_name": track_name(place.track), "index": place.index, "name": name })
+    };
+    let found = p.audio_overlaps();
+    let overlaps: Vec<Value> = found
+        .pairs
+        .iter()
+        .filter(|o| only.is_none_or(|t| t == o.track))
+        .map(|o| {
+            json!({
+                "track": o.track.0,
+                "track_name": track_name(o.track),
+                "start": o.start,
+                "end": o.end,
+                "kind": if o.contained { "contained" } else { "partial" },
+                "clips": [clip(o.first), clip(o.second)],
+            })
+        })
+        .collect();
+    Ok(json!({ "overlaps": overlaps, "truncated": found.truncated }))
 }
 
 fn clip_json(p: &Project, track_name: &str, track: TrackId, index: usize, clip: &Clip) -> Value {
