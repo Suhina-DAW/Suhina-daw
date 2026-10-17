@@ -208,8 +208,8 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ArrangementLane, Clip, ClipContent, ClipId, ClipPlace, ContentId, Extensions, IdsExhausted, LaneId,
-        LauncherColumn, Project, Scene, SceneId, Slot, Track, TrackId, ValidationError,
+        Arrangement, ArrangementLane, Clip, ClipContent, ClipId, ClipPlace, ContentId, Extensions, IdsExhausted,
+        LaneId, Launcher, LauncherColumn, Project, Scene, SceneId, Slot, Track, TrackId, ValidationError,
     };
 
     fn clip(start: f64) -> Clip {
@@ -223,23 +223,27 @@ mod tests {
             clips: vec![clip(0.0), clip(4.0)],
             ..ArrangementLane::default()
         };
-        let mut p = Project::default();
-        p.tracks = vec![Track::new(TrackId(1), "1"), Track::new(TrackId(2), "2")];
-        p.contents = vec![ClipContent {
-            id: ContentId(1),
-            name: String::new(),
-            length: 4.0,
-            lanes: Vec::new(),
-            extensions: Extensions::default(),
-            scale: None,
-        }];
-        p.arrangement.lanes = vec![lane(1), lane(2)];
-        p.launcher.scenes = vec![Scene::default(), Scene::default()];
-        p.launcher.columns = vec![LauncherColumn {
-            track: TrackId(1),
-            slots: vec![Slot::default(), Slot { clip: Some(clip(0.0)), has_stop: false }],
-        }];
-        p
+        Project {
+            tracks: vec![Track::new(TrackId(1), "1"), Track::new(TrackId(2), "2")],
+            contents: vec![ClipContent {
+                id: ContentId(1),
+                name: String::new(),
+                length: 4.0,
+                lanes: Vec::new(),
+                extensions: Extensions::default(),
+                scale: None,
+            }],
+            arrangement: Arrangement { lanes: vec![lane(1), lane(2)], markers: Vec::new() },
+            launcher: Launcher {
+                scenes: vec![Scene::default(), Scene::default()],
+                columns: vec![LauncherColumn {
+                    track: TrackId(1),
+                    slots: vec![Slot::default(), Slot { clip: Some(clip(0.0)), has_stop: false }],
+                }],
+                mappings: Vec::new(),
+            },
+            ..Project::default()
+        }
     }
 
     #[test]
