@@ -357,6 +357,16 @@ pub fn scene_field_action(field: &str, scene: usize, text: &str) -> Option<Actio
 
 /// A clip slot's right-click menu: copy its clip, or paste the copied clip into it (`scene`
 /// from 1). Copy is greyed out on an empty slot, Paste while nothing has been copied.
+/// The menu of a device in a track's chain: removing it takes it off the track, settings and
+/// all.
+pub fn device_menu(ui: &mut Ui, track: TrackId, index: usize, actions: &mut Vec<Action>) {
+    ui.set_min_width(120.0);
+    if ui.button("Remove device").clicked() {
+        actions.push(Action::new("device.remove", json!({ "track": track.0, "device": index })));
+        ui.close();
+    }
+}
+
 pub fn slot_menu(
     ui: &mut Ui,
     track: TrackId,
