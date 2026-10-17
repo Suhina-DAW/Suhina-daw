@@ -2139,6 +2139,54 @@ fn clicking_a_second_device_moves_the_selection_so_delete_takes_it() {
 }
 
 #[test]
+fn a_removals_undo_puts_the_selection_back_on_its_device() {
+    use suhina_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
+    let mut project = project_with_a_device();
+    project.channels[0].devices.push(Device {
+        name: "Utility 2".into(),
+        kind: DeviceKind::Builtin("utility".into()),
+        enabled: true,
+        state: None,
+        params: vec![DeviceParam::new("gain", -3.5)],
+        automation: Vec::new(),
+        extensions: Extensions::default(),
+    });
+    let mut app = App::new();
+    app.set_session(Session::new(project), &[]);
+    let mut harness = window(app);
+    let devices = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().channels[0].devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    // The second device is selected; the first is REMOVED from its menu: the selection follows
+    // what it pointed at ("Utility 2"), which stood an index up afterwards.
+    harness.get_by_label("Device Utility 2").click();
+    harness.run();
+    harness.get_by_label("Device Utility").click_secondary();
+    harness.run();
+    harness.get_by_label("Remove device").click();
+    harness.run();
+    assert_eq!(devices(&harness), ["Utility 2"], "the FIRST device went");
+    // The undo restores it: the selection is back where it was, so the next Delete takes the
+    // SELECTED device, not whatever index pointed at meanwhile.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(devices(&harness), ["Utility", "Utility 2"], "the undo put the device back");
+    // Redo, straight after, repeats the removal: the selection follows that too, so Delete
+    // takes the same selected device again.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Y);
+    harness.run();
+    assert_eq!(devices(&harness), ["Utility 2"], "the redo repeated the removal");
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(devices(&harness), Vec::<String>::new(), "delete takes the selected device again");
+}
+
+#[test]
 fn the_detail_area_shows_the_selected_tracks_devices_in_a_row_or_stacked() {
     let mut app = App::new();
     app.set_session(Session::new(project_with_a_device()), &[]);

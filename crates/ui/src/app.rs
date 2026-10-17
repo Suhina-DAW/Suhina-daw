@@ -221,6 +221,9 @@ pub struct App {
     /// The device selected in the detail area (its panel's click): the track and the device's
     /// index, for the Delete key to take off the track. Window state.
     selected_device: Option<(TrackId, usize)>,
+    /// A device removal awaiting its undo or redo: the track, the index it left, how long the
+    /// chain was, and where the selection pointed before it followed the removal. Window state.
+    pending_device_remove: Option<(TrackId, usize, usize, usize)>,
     /// The detail area is showing, and its height (in a row) or width (stacked).
     detail_open: bool,
     detail_height: f32,
@@ -340,6 +343,7 @@ impl App {
             keymap_changed: false,
             detail_showing: detail_view::Showing::Clip,
             selected_device: None,
+            pending_device_remove: None,
             detail_open: true,
             detail_height: DETAIL_HEIGHT,
             detail_max: false,
@@ -470,10 +474,12 @@ impl App {
             view: std::mem::take(&mut self.view),
             arrangement: Some(std::mem::take(&mut self.arrangement)),
             selected_device: self.selected_device.take(),
+            // The removal is another project's: its undo and redo say nothing here.
             revision: self.revision,
             timeline: self.timeline.take(),
             waveforms: std::mem::take(&mut self.waveforms),
         };
+        self.pending_device_remove = None;
         self.stashes.insert(id, stash);
     }
 
@@ -1198,6 +1204,19 @@ impl App {
         self.open_request.take()
     }
 
+    /// How many devices `track`'s chain holds, if the track is in the project.
+    fn device_count(&self, track: TrackId) -> Option<usize> {
+        self.session().and_then(|s| {
+            s.project()
+                .tracks
+                .iter()
+                .find(|t| t.id == track)
+                .and_then(|t| t.channel)
+                .and_then(|c| s.project().channels.iter().find(|ch| ch.id == c))
+                .map(|ch| ch.devices.len())
+        })
+    }
+
     /// Runs one command and shows its outcome in the status bar.
     pub fn run(&mut self, action: &Action) {
         if action.id.starts_with("projects.") {
@@ -1557,18 +1576,45 @@ impl App {
                 self.unsaved_prompt = Some(Leaving { project, then: AfterLeaving::Close });
                 continue;
             }
+            // What the chain was, before a removal about to run: its undo or redo later says
+            // whether the chain is back and where the selection pointed.
+            let before_removal = (action.id == "device.remove")
+                .then(|| action.params["track"].as_u64().and_then(|t| u32::try_from(t).ok()).map(TrackId))
+                .flatten()
+                .and_then(|track| self.device_count(track).map(|count| (track, count)));
             self.run(action);
             // A removed device takes its selection with it, whichever way it was removed — and
             // the devices after it move up an index, so a selection below the removal follows.
             if action.id == "device.remove"
-                && let Some(track) = action.params["track"].as_u64().and_then(|t| u32::try_from(t).ok()).map(TrackId)
+                && let Some((track, count)) = before_removal
                 && let Some(index) = action.params["device"].as_u64().and_then(|i| usize::try_from(i).ok())
+                && !matches!(self.status, Status::Error(_))
                 && self.selected_device.is_some_and(|(t, _)| t == track)
             {
+                let followed = self.selected_device;
                 match self.selected_device {
                     Some((_, selected)) if selected == index => self.selected_device = None,
                     Some((t, selected)) if selected > index => self.selected_device = Some((t, selected - 1)),
                     _ => {}
+                }
+                // Its undo or redo then puts the chain back or takes it again: the selection
+                // follows once, from where it pointed before the removal.
+                if let Some((_, selected)) = followed {
+                    self.pending_device_remove = Some((track, index, count, selected));
+                }
+            }
+            // An undo or redo of that removal: undone, the chain is back and the selection is
+            // where it was; redone, it moves as the removal did. The record stands either
+            // way, until the next pick or removal says where the user is now.
+            if matches!(action.id, "edit.undo" | "edit.redo")
+                && let Some((track, index, count, selected)) = self.pending_device_remove
+                && let Some(now) = self.device_count(track)
+            {
+                if now == count {
+                    self.selected_device = Some((track, selected));
+                } else if now.checked_add(1) == Some(count) {
+                    self.selected_device =
+                        (selected != index).then_some((track, if selected > index { selected - 1 } else { selected }));
                 }
             }
             // The window gets Ctrl+V only as a paste of the system clipboard's text, which it
@@ -1892,6 +1938,9 @@ impl App {
         }
         if picked.inner.clicked.is_some() {
             self.selected_device = picked.inner.clicked;
+            // A fresh pick says where the user is now: a removal's undo or redo no longer
+            // moves the selection for them.
+            self.pending_device_remove = None;
         }
         self.place_editors(&places);
         // The toolbar's × hides the editor.
