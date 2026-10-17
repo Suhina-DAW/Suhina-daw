@@ -177,6 +177,30 @@ fn launching_without_an_audio_engine_says_why() {
 }
 
 #[test]
+fn the_plugin_key_says_when_a_track_has_no_running_plug_in() {
+    let mut harness = window(demo_app());
+    // No device panel selection and no plug-in on the demo's tracks: the key says so.
+    harness.get_by_label("Track Bass").click();
+    harness.run();
+    harness.key_press(Key::P);
+    harness.run();
+    assert!(
+        matches!(harness.state().status(), Status::Hint(text) if text.contains("no running plug-in")),
+        "{:?}",
+        harness.state().status()
+    );
+    // The action is on the Shortcuts page under its default key, mappable like any other
+    // (the keymap tests cover the default and the conflicts).
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label("Settings page: Shortcuts").click();
+    harness.run();
+    assert!(harness.query_by_label_contains("Open or close the selected track's plug-in editor").is_some());
+    harness.key_press(Key::Escape);
+    harness.run();
+}
+
+#[test]
 fn an_empty_window_asks_for_a_project() {
     let harness = window(App::new());
     assert!(harness.state().session().is_none());
