@@ -252,7 +252,7 @@ pub struct ArrangementViewState {
     pub stack_audio: bool,
     pub stack_midi: bool,
     /// A double-click on an empty spot of a lane does nothing (Settings › Arrangement ›
-    /// Double-click makes a clip is off); by default it makes an empty MIDI clip.
+    /// Double-click makes a clip is off); by default it makes an empty clip of the track's kind.
     pub double_click_does_nothing: bool,
     pub header_width: f32,
     heights: HashMap<TrackId, f32>,
@@ -1150,16 +1150,17 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
             continue;
         }
         // A click on an empty spot of a lane clears the clip selection (arrangement-editing ›
-        // Selecting clips). A double-click on an empty spot of a lane that plays notes makes a
-        // MIDI clip a bar long in the grid cell under the pointer (Alt: where the pointer is). The
-        // clips are laid over it, so a click or a double-click on one is the clip's.
+        // Selecting clips). A double-click on an empty spot of a lane that holds clips makes a
+        // one-bar clip there in the grid cell under the pointer (Alt: where the pointer is) — MIDI
+        // on a notes track, audio on one that plays audio. The clips are laid over it, so a
+        // click or a double-click on one is the clip's.
         let body =
             ui.interact(row.clip.intersect(lanes_area), Id::new(("arrangement-lane", lane.track.0)), Sense::click());
         body.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Lane {}", lane.name)));
         if body.clicked() {
             state.clear_selected_clip();
         }
-        if lane.notes
+        if (lane.notes || lane.plays_audio)
             && !state.double_click_does_nothing
             && body.double_clicked()
             && let Some(pointer) = body.interact_pointer_pos()
@@ -1171,7 +1172,10 @@ fn show_lanes(ui: &mut Ui, timeline: &Timeline, state: &mut ArrangementViewState
             } else {
                 ((raw / grid.step).floor() * grid.step).max(0.0)
             };
-            let params = json!({ "track": lane.track.0, "start": start, "stack": state.stack_midi });
+            // The clip's kind follows the track, notes first, as the command decides it, and the
+            // stacking setting follows.
+            let stack = if lane.notes { state.stack_midi } else { state.stack_audio };
+            let params = json!({ "track": lane.track.0, "start": start, "stack": stack });
             actions.push(Action::new("clip.create", params));
         }
         // The track the piano roll edits, alone in the view: lit, so it is clear which it is.

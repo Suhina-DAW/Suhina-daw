@@ -733,6 +733,24 @@ fn a_missing_audio_file_is_found_by_its_absolute_path() {
 }
 
 #[test]
+fn an_empty_audio_region_is_left_alone_by_rebase_audio() {
+    // An empty audio clip has no file yet; saving elsewhere does not invent one.
+    let mut project = everything();
+    project.contents.push(ClipContent {
+        id: ContentId(900),
+        name: "Audio clip".into(),
+        length: 4.0,
+        lanes: vec![ContentLane { target: None, data: LaneData::Audio(AudioRegion { ..AudioRegion::new("") }) }],
+        extensions: Extensions::default(),
+        scale: None,
+    });
+    rebase_audio(&mut project, Path::new("/nowhere"), Path::new("/elsewhere"));
+    let LaneData::Audio(region) = &project.contents[2].lanes[0].data else { return };
+    assert_eq!(region.file, "", "the empty clip still names no file");
+    assert!(region.absolute_file.is_none(), "no absolute path is invented either: {:?}", region.absolute_file);
+}
+
+#[test]
 fn clip_scales_and_the_default_scale_survive_a_round_trip() {
     let mut project = everything();
     let d_dorian = Scale::new(2, ScaleMode::Dorian).unwrap();

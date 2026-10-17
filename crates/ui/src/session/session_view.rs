@@ -91,7 +91,7 @@ pub struct SessionViewState {
     /// (`docs/spec/ui-clip-editor.md` › Where it opens).
     pub open_devices: Option<TrackId>,
     /// A double-click on an empty slot does nothing (Settings › Arrangement › Double-click makes a
-    /// clip is off); by default it makes an empty MIDI clip.
+    /// clip is off); by default it makes an empty clip of the track's kind.
     pub double_click_does_nothing: bool,
 }
 
@@ -592,7 +592,8 @@ fn column_body(
         let sense = if editable { Sense::click_and_drag() } else { Sense::click() };
         let launch = match slot.state {
             // An empty slot without a stop button launches nothing. On a track it can be selected
-            // (to paste into), and on a track that plays notes a double-click makes a MIDI clip in it.
+            // (to paste into), and a double-click makes an empty clip in it — MIDI on a notes
+            // track, audio on one that plays audio.
             SlotState::Empty if editable || column.notes => {
                 let response = ui.interact(rect.intersect(clip), id.with(scene), Sense::click());
                 response.widget_info(|| {
@@ -644,12 +645,12 @@ fn column_body(
             state.select_slot(column.track, scene);
         }
         if !has_clip
-            && column.notes
+            && (column.notes || column.plays_audio)
             && !state.double_click_does_nothing
             && launch.as_ref().is_some_and(Response::double_clicked)
         {
             actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
-            // The new clip is selected, so the detail area opens its piano roll.
+            // The new clip is selected, so the detail area shows it.
             state.select_slot(column.track, scene);
         }
         if select.as_ref().is_some_and(Response::clicked) {

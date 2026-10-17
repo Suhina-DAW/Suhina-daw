@@ -2786,6 +2786,49 @@ fn a_double_click_on_an_empty_slot_of_a_midi_track_makes_an_empty_clip_there() {
 }
 
 #[test]
+fn a_double_click_on_an_empty_slot_of_an_audio_track_makes_an_empty_clip_there() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    // An audio track next to the demo's MIDI ones.
+    harness.get_by_label("+ Audio track").click();
+    harness.run();
+    assert!(harness.query_by_label("Stop Audio 1 (scene 1)").is_some(), "the track's empty slot is there");
+    let at = harness.get_by_label("Stop Audio 1 (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    assert!(
+        harness.query_by_label("Launch Audio clip on Audio 1 (scene 1)").is_some(),
+        "the empty audio clip is there"
+    );
+    // One undo step takes it back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(harness.query_by_label("Stop Audio 1 (scene 1)").is_some(), "the slot is empty again");
+}
+
+#[test]
+fn a_double_click_on_an_empty_spot_of_an_audio_lane_makes_a_clip_there() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    harness.get_by_label("Arrangement view").click();
+    harness.run();
+    // An audio track next to the demo's MIDI ones; its empty lane shows in the arrangement.
+    harness.get_by_label("+ Audio track").click();
+    harness.run();
+    assert!(harness.query_by_label("Lane Audio 1").is_some(), "the lane is there");
+    let at = harness.get_by_label("Lane Audio 1").rect().center();
+    double_click_at(&mut harness, at);
+    let made = harness.state().session().and_then(|s| {
+        s.project()
+            .arrangement
+            .lanes
+            .iter()
+            .find(|l| l.name == "Audio 1")
+            .map(|l| l.clips.len().max(1) == l.clips.len() && !l.clips.is_empty())
+    });
+    assert!(made.unwrap_or(false), "the empty audio clip is in the lane");
+    // The made clip is selected; the detail area shows it.
+    assert!(harness.query_all_by_label_contains("Audio clip").next().is_some(), "it is selected");
+}
+
+#[test]
 fn the_delete_key_takes_a_selected_slot_clip_off_its_slot() {
     let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
     // A double-click makes the empty clip in Keys' slot; its name area selects the clip.
