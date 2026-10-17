@@ -68,6 +68,13 @@ cargo install cargo-deny --version 0.20.2 --locked
 cargo deny check
 ```
 
+**Dependabot** opens the updates: a security update as soon as a RustSec or GitHub advisory
+names a crate Suhina uses, and on Mondays the week's version updates
+([`.github/dependabot.yml`](.github/dependabot.yml)): minor and patch updates of the Cargo
+workspace grouped in one pull request, a major update in a pull request of its own, and the GitHub
+Actions the workflows use. They go through CI and review like any other pull request; a major
+update that changes an API needs the code changed in the same pull request.
+
 When it rejects a licence, prefer another crate. Add an exception only for a licence that is
 GPLv3-compatible, for the crate that needs it, with a comment saying what the crate is for and
 why the licence is fine. To update `cargo-deny`, change `CARGO_DENY_VERSION` and

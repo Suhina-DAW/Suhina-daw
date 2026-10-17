@@ -62,7 +62,7 @@ impl LaneKey {
 }
 
 /// How a parameter's values map onto a lane's height and onto the commands.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Scale {
     /// A linear gain in the lane, decibels in commands; placed like the mixer's volume field.
     Volume,
@@ -72,6 +72,8 @@ pub enum Scale {
     Mute,
     /// A built-in device parameter, placed as its knob turns.
     Device(ParamInfo),
+    /// A data-only device parameter, placed linearly or logarithmically as its control requires.
+    Sd { min: f64, max: f64, control: suhina_device_sdk::ParameterControl, unit: String, options: Vec<String> },
 }
 
 impl Scale {
@@ -82,6 +84,7 @@ impl Scale {
             Self::Pan => (value + 1.0) / 2.0,
             Self::Mute => value,
             Self::Device(info) => info.to_normalized(value),
+            Self::Sd { min, max, control, .. } => sd_position(value, *min, *max, *control),
         };
         if position.is_finite() { position.clamp(0.0, 1.0) } else { 0.0 }
     }
@@ -94,6 +97,7 @@ impl Scale {
             Self::Pan => (position * 2.0 - 1.0).clamp(-1.0, 1.0),
             Self::Mute => position.round(),
             Self::Device(info) => info.from_normalized(position),
+            Self::Sd { min, max, control, .. } => sd_value(position, *min, *max, *control),
         }
     }
 
@@ -115,6 +119,7 @@ impl Scale {
             Self::Pan => round(value, 1000.0),
             Self::Mute => value.round(),
             Self::Device(info) => info.clamp(value),
+            Self::Sd { min, max, control, .. } => sd_clamp(value, *min, *max, *control),
         }
     }
 
@@ -127,6 +132,7 @@ impl Scale {
             Self::Pan => (value + delta).clamp(-1.0, 1.0),
             Self::Mute => (value + delta).clamp(0.0, 1.0).round(),
             Self::Device(info) => info.clamp(value + delta),
+            Self::Sd { min, max, control, .. } => sd_clamp(value + delta, *min, *max, *control),
         }
     }
 
@@ -135,6 +141,7 @@ impl Scale {
         match self {
             Self::Mute => true,
             Self::Device(info) => matches!(info.kind, ParamKind::Toggle | ParamKind::Choice(_)),
+            Self::Sd { control, .. } => control.is_stepped(),
             Self::Volume | Self::Pan => false,
         }
     }
@@ -161,8 +168,56 @@ impl Scale {
                     Unit::None => format!("{value:.2}"),
                 },
             },
+            Self::Sd { min, control, unit, options, .. } => match control {
+                suhina_device_sdk::ParameterControl::Toggle | suhina_device_sdk::ParameterControl::Button => {
+                    if value >= 0.5 { "On" } else { "Off" }.into()
+                }
+                suhina_device_sdk::ParameterControl::Choice | suhina_device_sdk::ParameterControl::Radio => {
+                    let index = (value.round() - *min).max(0.0) as usize;
+                    options.get(index).cloned().unwrap_or_else(|| format!("{}", value.round()))
+                }
+                suhina_device_sdk::ParameterControl::Integer => format!("{}", value.round()),
+                _ if !unit.is_empty() => format!("{value:.2} {unit}"),
+                _ => format!("{value:.2}"),
+            },
         }
     }
+}
+
+fn sd_clamp(value: f64, min: f64, max: f64, control: suhina_device_sdk::ParameterControl) -> f64 {
+    let value = if value.is_finite() { value.clamp(min, max) } else { min };
+    if control.is_stepped() { value.round().clamp(min, max) } else { value }
+}
+
+fn sd_position(value: f64, min: f64, max: f64, control: suhina_device_sdk::ParameterControl) -> f64 {
+    let value = sd_clamp(value, min, max, control);
+    if min >= max {
+        0.5
+    } else if matches!(
+        control,
+        suhina_device_sdk::ParameterControl::LogSlider | suhina_device_sdk::ParameterControl::LogKnob
+    ) && min > 0.0
+    {
+        (value.ln() - min.ln()) / (max.ln() - min.ln())
+    } else {
+        (value - min) / (max - min)
+    }
+}
+
+fn sd_value(position: f64, min: f64, max: f64, control: suhina_device_sdk::ParameterControl) -> f64 {
+    let position = position.clamp(0.0, 1.0);
+    let value = if min >= max {
+        min
+    } else if matches!(
+        control,
+        suhina_device_sdk::ParameterControl::LogSlider | suhina_device_sdk::ParameterControl::LogKnob
+    ) && min > 0.0
+    {
+        (min.ln() + position * (max.ln() - min.ln())).exp()
+    } else {
+        min + position * (max - min)
+    };
+    sd_clamp(value, min, max, control)
 }
 
 fn round(value: f64, per: f64) -> f64 {
@@ -242,18 +297,49 @@ impl Params {
                     })
                     .collect();
             for (index, device) in channel.devices.iter().enumerate() {
-                let DeviceKind::Builtin(id) = &device.kind else { continue };
-                let Some(info) = suhina_device_registry::info(id) else { continue };
-                for spec in info.params {
-                    let lane = lane_of(&device.automation, spec.id);
-                    params.push(Param {
-                        key: LaneKey { device: Some(index), param: spec.id.into() },
-                        name: spec.name.into(),
-                        device_name: Some(device.name.clone()),
-                        scale: Scale::Device(*spec),
-                        enabled: lane.as_ref().is_none_or(|l| l.enabled),
-                        points: lane.map(|l| l.points).unwrap_or_default(),
-                    });
+                match &device.kind {
+                    DeviceKind::Builtin(id) => {
+                        let Some(info) = suhina_device_registry::info(id) else { continue };
+                        for spec in info.params {
+                            let lane = lane_of(&device.automation, spec.id);
+                            params.push(Param {
+                                key: LaneKey { device: Some(index), param: spec.id.into() },
+                                name: spec.name.into(),
+                                device_name: Some(device.name.clone()),
+                                scale: Scale::Device(*spec),
+                                enabled: lane.as_ref().is_none_or(|l| l.enabled),
+                                points: lane.map(|l| l.points).unwrap_or_default(),
+                            });
+                        }
+                    }
+                    DeviceKind::Sd => {
+                        let Some(graph) = device
+                            .state
+                            .as_deref()
+                            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                            .and_then(|text| suhina_device_sdk::DeviceGraph::from_sd(text).ok())
+                        else {
+                            continue;
+                        };
+                        for spec in &graph.parameters {
+                            let lane = lane_of(&device.automation, &spec.id);
+                            params.push(Param {
+                                key: LaneKey { device: Some(index), param: spec.id.clone() },
+                                name: spec.name.clone(),
+                                device_name: Some(device.name.clone()),
+                                scale: Scale::Sd {
+                                    min: spec.min,
+                                    max: spec.max,
+                                    control: spec.control,
+                                    unit: spec.unit.clone(),
+                                    options: spec.ui.options.clone(),
+                                },
+                                enabled: lane.as_ref().is_none_or(|l| l.enabled),
+                                points: lane.map(|l| l.points).unwrap_or_default(),
+                            });
+                        }
+                    }
+                    _ => {}
                 }
             }
             tracks.insert(track.id, params);
@@ -1102,5 +1188,46 @@ mod tests {
         let mut state = LanesState::default();
         state.toggle(track, &params);
         assert_eq!(state.shown(track, &params), [LaneKey { device: Some(0), param: "gain".into() }]);
+    }
+
+    #[test]
+    fn sd_parameters_are_listed_and_use_their_control_scale() {
+        let mut project = crate::demo::demo_project();
+        let track = project.tracks[0].id;
+        let Some(channel) = project.tracks[0].channel.and_then(|id| project.channels.iter_mut().find(|c| c.id == id))
+        else {
+            return;
+        };
+        let mut graph =
+            suhina_device_sdk::DeviceGraph::new("test.filter", "Test Filter", suhina_device_sdk::DeviceRole::Effect);
+        let mut parameter = suhina_device_sdk::Parameter::new("frequency", "Frequency", (20.0, 20_000.0), 1_000.0);
+        parameter.control = suhina_device_sdk::ParameterControl::LogKnob;
+        parameter.unit = "Hz".into();
+        graph.parameters.push(parameter);
+        graph.nodes = vec![
+            suhina_device_sdk::Node::audio_input("in"),
+            suhina_device_sdk::Node::gain("gain", "frequency"),
+            suhina_device_sdk::Node::audio_output("out"),
+        ];
+        graph.connections =
+            vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
+        let mut lane = AutomationLane::new("frequency");
+        lane.insert(AutomationPoint::new(4.0, 1_000.0));
+        channel.devices.push(suhina_engine::model::Device {
+            name: "Test Filter".into(),
+            kind: DeviceKind::Sd,
+            enabled: true,
+            state: graph.to_sd().ok().map(String::into_bytes),
+            params: Vec::new(),
+            automation: vec![lane],
+            extensions: Default::default(),
+        });
+        let params = Params::build(&project);
+        let frequency = params.param(track, &LaneKey { device: Some(0), param: "frequency".into() });
+        assert_eq!(frequency.map(Param::label).as_deref(), Some("Test Filter: Frequency"));
+        let Some(Scale::Sd { .. }) = frequency.map(|p| &p.scale) else { panic!("expected .sd scale") };
+        assert_eq!(frequency.map(|p| p.scale.text(1_000.0)).as_deref(), Some("1000.00 Hz"));
+        let position = (1_000.0_f64.ln() - 20.0_f64.ln()) / (20_000.0_f64.ln() - 20.0_f64.ln());
+        assert!((frequency.map_or(0.0, |p| p.scale.position(1_000.0)) - position).abs() < 1e-9);
     }
 }

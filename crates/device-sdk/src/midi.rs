@@ -16,6 +16,7 @@ pub struct PreparedMidiEffect {
     ops: Vec<Op>,
     parameters: Vec<Parameter>,
     values: Vec<f64>,
+    held: [Option<u8>; 128],
 }
 
 impl PreparedMidiEffect {
@@ -42,7 +43,7 @@ impl PreparedMidiEffect {
                 _ => {}
             }
         }
-        Ok(Self { ops, parameters, values })
+        Ok(Self { ops, parameters, values, held: [None; 128] })
     }
 
     /// Update a prepared transpose control without allocating or rebuilding the graph.
@@ -53,10 +54,43 @@ impl PreparedMidiEffect {
     }
 
     /// Transforms events in order. Returns the number written; if the output is too small,
-    /// processing stops without writing beyond it. Caller should size for the input event cap.
-    pub fn process(&self, input: &[(usize, NoteEvent)], output: &mut [(usize, NoteEvent)]) -> usize {
+    /// processing stops without writing beyond it. Caller should size for twice the input event cap.
+    pub fn process(&mut self, input: &[(usize, NoteEvent)], output: &mut [(usize, NoteEvent)]) -> usize {
         let mut written = 0;
         'events: for &(frame, mut event) in input {
+            if written >= output.len() {
+                break;
+            }
+            if let NoteEvent::On { key, velocity: 0.0 } = event {
+                event = NoteEvent::Off { key, velocity: 0.0 };
+            }
+            if let NoteEvent::Off { key, velocity } = event {
+                let Some(mapped) = self.held.get_mut(usize::from(key)).and_then(Option::take) else { continue };
+                if let Some(slot) = output.get_mut(written) {
+                    *slot = (frame, NoteEvent::Off { key: mapped, velocity });
+                    written += 1;
+                }
+                continue;
+            }
+            let original = match event {
+                NoteEvent::On { key, .. } => {
+                    if let Some(held) = self.held.get_mut(usize::from(key)) {
+                        if held.is_some() && output.len().saturating_sub(written) < 2 {
+                            break;
+                        }
+                        if let Some(mapped) = held.take() {
+                            output[written] = (frame, NoteEvent::Off { key: mapped, velocity: 0.0 });
+                            written += 1;
+                        }
+                    }
+                    Some(key)
+                }
+                NoteEvent::AllNotesOff => {
+                    self.held.fill(None);
+                    None
+                }
+                _ => None,
+            };
             for op in &self.ops {
                 let Op::Transpose { semitones, parameter } = *op;
                 let semitones = parameter
@@ -64,27 +98,20 @@ impl PreparedMidiEffect {
                     .map_or(f64::from(semitones), |value| *value)
                     .round()
                     .clamp(f64::from(i8::MIN), f64::from(i8::MAX)) as i8;
-                match (semitones, event) {
-                    (semitones, NoteEvent::On { key, velocity }) => {
-                        let Some(key) =
-                            i16::from(key).checked_add(i16::from(semitones)).filter(|k| (0..=127).contains(k))
-                        else {
-                            continue 'events;
-                        };
-                        event = NoteEvent::On { key: key as u8, velocity };
-                    }
-                    (semitones, NoteEvent::Off { key, velocity }) => {
-                        let Some(key) =
-                            i16::from(key).checked_add(i16::from(semitones)).filter(|k| (0..=127).contains(k))
-                        else {
-                            continue 'events;
-                        };
-                        event = NoteEvent::Off { key: key as u8, velocity };
-                    }
-                    _ => {}
+                if let NoteEvent::On { key, velocity } = event {
+                    let Some(key) = i16::from(key).checked_add(i16::from(semitones)).filter(|k| (0..=127).contains(k))
+                    else {
+                        continue 'events;
+                    };
+                    event = NoteEvent::On { key: key as u8, velocity };
                 }
             }
             let Some(slot) = output.get_mut(written) else { break };
+            if let (Some(original), NoteEvent::On { key, .. }) = (original, event)
+                && let Some(held) = self.held.get_mut(usize::from(original))
+            {
+                *held = Some(key);
+            }
             *slot = (frame, event);
             written += 1;
         }

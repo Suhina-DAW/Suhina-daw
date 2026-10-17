@@ -1,13 +1,13 @@
 // Copyright (C) 2026 The Suhina contributors
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Automation of built-in device parameters and of a track's mixer (#395,
+//! Automation of built-in and `.sd` device parameters and of a track's mixer (#395,
 //! `docs/spec/automation.md`). Plug-in parameters have their own events (`plugin_params`) but
 //! share the [`Envelope`].
 //!
 //! Lanes are turned into arrangement frames when the graph is built. While the transport runs:
 //!
-//! - **A built-in device's lane** sets its parameter at the block's first frame, at every point
+//! - **A built-in or `.sd` device's lane** sets its parameter at the block's first frame, at every point
 //!   inside the block and at every [`STEP`] frames of the arrangement while it moves, where the
 //!   value changed. The chain splits the device's block there (ADR 0004, decision 5: the host
 //!   splits, the device smooths).
@@ -26,7 +26,7 @@ use suhina_model::{AutomationLane, Channel, ChannelRole, Project, TrackId};
 
 /// Frames between the values a moving lane gives (1.3 ms at 48 kHz).
 pub const STEP: usize = 64;
-/// Most built-in device lanes one chain plays; more are left out.
+/// Most built-in and `.sd` device lanes one chain plays; more are left out.
 const MAX_DEVICE_LANES: usize = 64;
 /// Most parameter changes one block of a chain holds: each lane's at its first frame, its
 /// [`STEP`]s in the longest block and up to [`MAX_LANE_POINTS`] points.
@@ -156,7 +156,7 @@ fn changes(
     }
 }
 
-/// A built-in device's parameter change at a frame of the block.
+/// A device parameter change at a frame of the block.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DeviceChange {
     pub(crate) frame: usize,
@@ -173,7 +173,7 @@ struct DeviceLane {
     last: f64,
 }
 
-/// The lanes of a chain's built-in devices and the changes they make in the current block.
+/// The lanes of a chain's built-in and `.sd` devices and the changes they make in the current block.
 pub(crate) struct DeviceLanes {
     lanes: Vec<DeviceLane>,
     /// This block's changes, in frame order.
@@ -198,6 +198,29 @@ impl DeviceLanes {
             }
             let stepped =
                 info.params.get(param).is_some_and(|p| matches!(p.kind, ParamKind::Toggle | ParamKind::Choice(_)));
+            if let Some(envelope) = Envelope::new(lane, frames_per_beat, stepped) {
+                self.lanes.push(DeviceLane { slot, param, envelope, last: f64::NAN });
+            }
+        }
+        if self.block.capacity() < MAX_EVENTS && !self.lanes.is_empty() {
+            self.block.reserve_exact(MAX_EVENTS);
+        }
+    }
+
+    /// Adds a data-only device's lanes, matched to its parameters by id. Allocates.
+    pub(crate) fn add_sd(
+        &mut self,
+        slot: usize,
+        parameters: &[suhina_device_sdk::Parameter],
+        lanes: &[AutomationLane],
+        frames_per_beat: f64,
+    ) {
+        for lane in lanes {
+            let Some(param) = parameters.iter().position(|p| p.id == lane.param) else { continue };
+            if self.lanes.len() >= MAX_DEVICE_LANES || self.lanes.iter().any(|l| l.slot == slot && l.param == param) {
+                continue;
+            }
+            let stepped = parameters.get(param).is_some_and(|p| p.control.is_stepped());
             if let Some(envelope) = Envelope::new(lane, frames_per_beat, stepped) {
                 self.lanes.push(DeviceLane { slot, param, envelope, last: f64::NAN });
             }

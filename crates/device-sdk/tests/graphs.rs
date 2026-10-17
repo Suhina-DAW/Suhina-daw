@@ -56,8 +56,14 @@ fn midi_transpose_parameter_updates_without_recompiling() {
     assert_eq!(effect.process(&input, &mut output), 1);
     assert_eq!(output[0].1, NoteEvent::On { key: 72, velocity: 0.8 });
     effect.set_parameter(0, -80.0);
+    assert_eq!(effect.process(&[(17, NoteEvent::Off { key: 60, velocity: 0.3 })], &mut output), 1);
+    assert_eq!(output[0], (17, NoteEvent::Off { key: 72, velocity: 0.3 }));
     assert_eq!(effect.process(&input, &mut output), 1);
     assert_eq!(output[0].1, NoteEvent::On { key: 36, velocity: 0.8 });
+    effect.set_parameter(0, 12.0);
+    assert_eq!(effect.process(&[(0, NoteEvent::On { key: 120, velocity: 0.8 })], &mut output), 0);
+    effect.set_parameter(0, 0.0);
+    assert_eq!(effect.process(&[(1, NoteEvent::Off { key: 120, velocity: 0.3 })], &mut output), 0);
 }
 
 #[test]
@@ -705,5 +711,42 @@ fn delay_controls_have_padding_frames_and_aligned_centres() {
             .unwrap();
         assert_eq!(points.last().unwrap()[0].evaluate(&lookup), c.bounds[2] - 4.);
         assert_eq!(points[0][1].evaluate(&lookup), c.bounds[3] / 2. - 2.);
+    }
+}
+
+#[test]
+fn midi_repress_and_zero_velocity_release_previous_mapping() {
+    use suhina_device_api::NoteEvent;
+    let g = graph(K::MidiTransposeParameter { parameter: "amount".into() });
+    for zero_velocity in [false, true] {
+        let mut effect = g.compile_midi().unwrap();
+        let on = [(3, NoteEvent::On { key: 60, velocity: 0.8 })];
+        let mut output = [(0, NoteEvent::AllNotesOff); 2];
+        assert_eq!(effect.process(&on, &mut output), 1);
+        effect.set_parameter(0, 0.0);
+        if zero_velocity {
+            assert_eq!(effect.process(&[(7, NoteEvent::On { key: 60, velocity: 0.0 })], &mut output), 1);
+            assert_eq!(output[0], (7, NoteEvent::Off { key: 72, velocity: 0.0 }));
+        } else {
+            assert_eq!(effect.process(&on, &mut output[..1]), 0);
+            assert_eq!(effect.process(&on, &mut output), 2);
+            assert_eq!(output[0], (3, NoteEvent::Off { key: 72, velocity: 0.0 }));
+            assert_eq!(output[1], on[0]);
+            assert_eq!(effect.process(&[(7, NoteEvent::Off { key: 60, velocity: 0.0 })], &mut output), 1);
+            assert_eq!(output[0], (7, NoteEvent::Off { key: 60, velocity: 0.0 }));
+        }
+        assert_eq!(effect.process(&[(8, NoteEvent::Off { key: 60, velocity: 0.0 })], &mut output), 0);
+    }
+}
+
+#[test]
+fn parameter_controls_share_discrete_semantics() {
+    use ParameterControl::*;
+    for control in [Integer, Toggle, Button, Choice, Radio, Slider, LogSlider, Knob, LogKnob, Number, VerticalSlider] {
+        let stepped = matches!(control, Integer | Toggle | Button | Choice | Radio);
+        assert_eq!(control.is_stepped(), stepped);
+        let mut parameter = Parameter::new("value", "Value", (0.0, 1.0), 0.0);
+        parameter.control = control;
+        assert_eq!(parameter.clamp(0.7), if stepped { 1.0 } else { 0.7 });
     }
 }

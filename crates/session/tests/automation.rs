@@ -28,6 +28,28 @@ fn lanes(session: &Session) -> &[AutomationLane] {
     &session.project().channels[0].automation
 }
 
+fn sd_device() -> Device {
+    let mut graph =
+        suhina_device_sdk::DeviceGraph::new("test.gain", "Test Gain", suhina_device_sdk::DeviceRole::Effect);
+    graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 2.0), 0.5));
+    graph.nodes = vec![
+        suhina_device_sdk::Node::audio_input("in"),
+        suhina_device_sdk::Node::gain("gain", "gain"),
+        suhina_device_sdk::Node::audio_output("out"),
+    ];
+    graph.connections =
+        vec![suhina_device_sdk::Connection::new("in", "gain"), suhina_device_sdk::Connection::new("gain", "out")];
+    Device {
+        name: "Test Gain".into(),
+        kind: DeviceKind::Sd,
+        enabled: true,
+        state: graph.to_sd().ok().map(String::into_bytes),
+        params: Vec::new(),
+        automation: Vec::new(),
+        extensions: Extensions::default(),
+    }
+}
+
 #[test]
 fn mixer_points_are_added_moved_and_deleted_with_undo() {
     let mut session = Session::new(project());
@@ -138,6 +160,42 @@ fn device_set_automation_takes_built_in_devices() {
         run(&mut session, "device.setAutomation", json!({ "track": 1, "device": 0, "param": "nope", "points": [] }))
             .is_err()
     );
+}
+
+#[test]
+fn sd_automation_uses_stable_ids_and_the_parameter_range() {
+    let mut p = project();
+    p.channels[0].devices.push(sd_device());
+    let mut session = Session::new(p);
+    let set = run(
+        &mut session,
+        "device.setAutomation",
+        json!({ "track": 1, "device": 0, "param": "gain", "points": [4, 3, 0, -1] }),
+    )
+    .unwrap();
+    assert_eq!(set["param"], "gain");
+    assert_eq!(
+        session.project().channels[0].devices[0].automation[0]
+            .points
+            .iter()
+            .map(|p| (p.beat, p.value))
+            .collect::<Vec<_>>(),
+        [(0.0, 0.0), (4.0, 2.0)]
+    );
+    run(
+        &mut session,
+        "automation.addPoint",
+        json!({ "track": 1, "device": 0, "param": "gain", "beat": 2, "value": 1.25 }),
+    )
+    .unwrap();
+    assert_eq!(
+        run(&mut session, "automation.list", json!({ "track": 1 })).unwrap()["devices"][0]["lanes"][0]["param"],
+        "gain"
+    );
+    let set =
+        run(&mut session, "device.setParam", json!({ "track": 1, "device": 0, "param": "gain", "value": 1 })).unwrap();
+    assert_eq!(set["automation"], "off");
+    assert!(session.project().channels[0].devices[0].automation.iter().all(|lane| !lane.enabled));
 }
 
 #[test]

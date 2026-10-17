@@ -117,7 +117,9 @@ fn an_effect_on_a_track_processes_its_sound_before_the_fader() {
 fn an_sd_gain_graph_runs_in_the_offline_device_chain() {
     let mut graph =
         suhina_device_sdk::DeviceGraph::new("test.gain", "Test Gain", suhina_device_sdk::DeviceRole::Effect);
-    graph.parameters.push(suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 2.0), 0.5));
+    let mut gain = suhina_device_sdk::Parameter::new("gain", "Gain", (0.0, 1.0), 1.0);
+    gain.control = suhina_device_sdk::ParameterControl::Toggle;
+    graph.parameters.push(gain);
     graph.nodes = vec![
         suhina_device_sdk::Node::audio_input("in"),
         suhina_device_sdk::Node::gain("gain", "gain"),
@@ -128,20 +130,31 @@ fn an_sd_gain_graph_runs_in_the_offline_device_chain() {
     let mut effect = device("sd", &[]);
     effect.kind = DeviceKind::Sd;
     effect.state = graph.to_sd().ok().map(String::into_bytes);
+    effect.automation = vec![AutomationLane {
+        param: "gain".into(),
+        points: vec![AutomationPoint::new(0.0, 1.0), AutomationPoint::new(0.5, 0.0)],
+        enabled: true,
+    }];
     let notes = vec![note(0.0, 1.0, 69)];
     let plain = render_offline(&project(notes.clone(), 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
     let processed = render_offline(&project(notes, 1.0, vec![device("fm-synth", &[]), effect]), SR, 512).unwrap();
-    let half: Vec<f32> = plain.iter().map(|sample| sample * 0.5).collect();
-    assert!(max_diff(&processed[..plain.len()], &half) < 1e-5);
+    assert!(max_diff(&processed[..BEAT], &plain[..BEAT]) < 1e-5);
+    assert!(processed[BEAT..].iter().all(|sample| sample.abs() < 1e-6));
 }
 
 #[test]
 fn an_sd_midi_effect_transposes_notes_before_the_instrument() {
     let mut graph =
         suhina_device_sdk::DeviceGraph::new("test.transpose", "Transpose", suhina_device_sdk::DeviceRole::MidiEffect);
+    let mut transpose_param = suhina_device_sdk::Parameter::new("semitones", "Semitones", (-12.0, 12.0), 12.0);
+    transpose_param.control = suhina_device_sdk::ParameterControl::Integer;
+    graph.parameters.push(transpose_param);
     graph.nodes = vec![
         suhina_device_sdk::Node::new("in", suhina_device_sdk::NodeKind::MidiInput),
-        suhina_device_sdk::Node::new("up", suhina_device_sdk::NodeKind::MidiTranspose { semitones: 12 }),
+        suhina_device_sdk::Node::new(
+            "up",
+            suhina_device_sdk::NodeKind::MidiTransposeParameter { parameter: "semitones".into() },
+        ),
         suhina_device_sdk::Node::new("out", suhina_device_sdk::NodeKind::MidiOutput),
     ];
     graph.connections =
@@ -149,11 +162,20 @@ fn an_sd_midi_effect_transposes_notes_before_the_instrument() {
     let mut transpose = device("sd", &[]);
     transpose.kind = DeviceKind::Sd;
     transpose.state = graph.to_sd().ok().map(String::into_bytes);
-    let notes = vec![note(0.0, 1.0, 48)];
+    transpose.automation = vec![AutomationLane {
+        param: "semitones".into(),
+        points: vec![AutomationPoint::new(0.0, 12.0), AutomationPoint::new(0.5, 0.0)],
+        enabled: true,
+    }];
+    let notes = vec![note(0.0, 0.75, 48), note(0.8, 0.2, 48)];
     let original = render_offline(&project(notes.clone(), 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
     let shifted = render_offline(&project(notes, 1.0, vec![transpose, device("fm-synth", &[])]), SR, 512).unwrap();
-    let expected =
-        render_offline(&project(vec![note(0.0, 1.0, 60)], 1.0, vec![device("fm-synth", &[])]), SR, 512).unwrap();
+    let expected = render_offline(
+        &project(vec![note(0.0, 0.75, 60), note(0.8, 0.2, 48)], 1.0, vec![device("fm-synth", &[])]),
+        SR,
+        512,
+    )
+    .unwrap();
     assert!(peak(&shifted) > 1e-3);
     assert!(max_diff(&expected, &shifted) < 1e-6);
     assert!(max_diff(&original, &shifted) > 1e-3);

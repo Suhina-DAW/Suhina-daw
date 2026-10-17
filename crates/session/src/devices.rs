@@ -23,6 +23,12 @@ fn sd_role(device: &Device) -> Option<suhina_device_sdk::DeviceRole> {
     suhina_device_sdk::DeviceGraph::from_sd(text).ok().map(|graph| graph.role)
 }
 
+pub(crate) fn sd_graph(device: &Device) -> Result<suhina_device_sdk::DeviceGraph, CommandError> {
+    let bytes = device.state.as_deref().ok_or("the .sd graph is missing")?;
+    let text = std::str::from_utf8(bytes).map_err(|_| "the .sd graph is invalid UTF-8")?;
+    suhina_device_sdk::DeviceGraph::from_sd(text).map_err(|e| e.to_string().into())
+}
+
 /// The built-in effects and instruments with their parameters.
 pub(crate) fn list(_: &mut Session, _: &Value) -> Result<Value, CommandError> {
     Ok(Value::Array(suhina_device_registry::DEVICES.iter().map(|info| info_json(info)).collect()))
@@ -542,8 +548,8 @@ fn set_plugin_param(
 /// Most points one automation lane holds.
 const MAX_POINTS: usize = 65_536;
 
-/// Sets or removes the automation lane of one parameter of a device: a plug-in's by its id, a
-/// built-in effect or instrument's by its stable id (#395).
+/// Sets or removes the automation lane of one parameter of a device: a plug-in's by its id, and
+/// a built-in or `.sd` device's by its stable id (#395).
 pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Value, CommandError> {
     const POINTS: &str = "points must be a list of numbers, a beat then a value for each point: [0, 0.2, 4, 0.8]";
     let param = params.get("param").and_then(Value::as_str).ok_or("param must be a parameter id")?;
@@ -558,23 +564,29 @@ pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Va
     let channel = channel_param(session, params)?;
     let index = device_index(channel.devices.len(), params)?;
     // A built-in device's parameter: its spec, to keep values as the device takes them.
-    let builtin = match channel.devices.get(index).map(|d| &d.kind) {
-        Some(kind) if is_plugin(kind) => None,
-        Some(DeviceKind::Builtin(id)) => {
+    let device = channel.devices.get(index).ok_or("the device is missing")?;
+    let (builtin, sd_graph) = match &device.kind {
+        kind if is_plugin(kind) => (None, None),
+        DeviceKind::Builtin(id) => {
             let info =
                 suhina_device_registry::info(id).ok_or_else(|| format!("{id:?} is not a device this version knows"))?;
             let spec = info
                 .param_index(param)
                 .and_then(|i| info.params.get(i))
                 .ok_or_else(|| format!("{} has no parameter {param:?}; devices.list lists them", info.name))?;
-            Some(spec)
+            (Some(spec), None)
+        }
+        DeviceKind::Sd => {
+            let graph = sd_graph(device)?;
+            if !graph.parameters.iter().any(|p| p.id == param) {
+                return Err(format!("{} has no parameter {param:?}", graph.name).into());
+            }
+            (None, Some(graph))
         }
         _ => return Err("this device has no parameters Suhina can automate (it is from another program)".into()),
     };
-    let id = match builtin {
-        Some(_) => 0,
-        None => plugin_param_id(param)?,
-    };
+    let plugin = builtin.is_none() && sd_graph.is_none();
+    let id = if plugin { plugin_param_id(param)? } else { 0 };
     let mut points = Vec::with_capacity(numbers.len() / 2);
     for [beat, value] in numbers.as_chunks::<2>().0 {
         let number = |v: &Value| v.as_f64().filter(|n| n.is_finite());
@@ -586,6 +598,9 @@ pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Va
         }
         let value = match builtin {
             Some(spec) => spec.clamp(value),
+            None if let Some(graph) = &sd_graph => {
+                graph.parameters.iter().find(|p| p.id == param).map_or(value, |p| p.clamp(value))
+            }
             None => plugin_value(session, track, index, id, value)?,
         };
         points.push(AutomationPoint { beat, value, curve: 0.0 });
@@ -595,15 +610,12 @@ pub(crate) fn set_automation(session: &mut Session, params: &Value) -> Result<Va
     let count = points.len();
     let channel = channel_param(session, params)?;
     let device = channel.devices.get_mut(index).ok_or("the device is missing")?;
-    let name = if builtin.is_some() { param.to_string() } else { id.to_string() };
-    device.automation.retain(|lane| match builtin {
-        Some(_) => lane.param != name,
-        None => param_id(&lane.param) != Some(id),
-    });
+    let name = if plugin { id.to_string() } else { param.to_string() };
+    device.automation.retain(|lane| if plugin { param_id(&lane.param) != Some(id) } else { lane.param != name });
     if !points.is_empty() {
         device.automation.push(AutomationLane { param: name.clone(), points, enabled: true });
     }
-    let param = if builtin.is_some() { json!(name) } else { json!(id) };
+    let param = if plugin { json!(id) } else { json!(name) };
     Ok(json!({ "device": index, "param": param, "points": count }))
 }
 

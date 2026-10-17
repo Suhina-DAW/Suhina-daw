@@ -1404,7 +1404,7 @@ static COMMANDS: &[CommandSpec] = &[
             param(
                 "param",
                 ParamType::Text,
-                "parameter id: a built-in effect or instrument's from devices.list, a plug-in's (a number) from device.pluginParams",
+                "parameter id: a built-in effect or instrument's from devices.list, an .sd device's stable id, or a plug-in's number from device.pluginParams",
             ),
             param(
                 "value",
@@ -1427,14 +1427,14 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "device.setAutomation",
-        label: "Automate a parameter of a device over the arrangement: points of beat and value, a straight line between them; no points removes the automation (automation.addPoint edits one point)",
+        label: "Automate a built-in, .sd or plug-in device parameter over the arrangement: points of beat and value, a straight line between them; no points removes the automation (automation.addPoint edits one point)",
         params: &[
             TRACK,
             DEVICE,
             param(
                 "param",
                 ParamType::Text,
-                "parameter id: a built-in effect or instrument's from devices.list, a plug-in's (a number) from device.pluginParams",
+                "parameter id: a built-in effect or instrument's from devices.list, an .sd device's stable id, or a plug-in's number from device.pluginParams",
             ),
             param(
                 "points",
