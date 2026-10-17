@@ -67,13 +67,18 @@ and why.
 
 4. **The lists are edited in place, by commands.** `tempo.addPoint`, `tempo.movePoint`,
    `tempo.deletePoint`, `timeSignature.add`, `timeSignature.move` and `timeSignature.delete` are
-   edits with one undo step each ([ADR 0002](0002-commands.md)). A change on a beat (or a bar) that
-   already has one replaces it, so the list is kept in beat order. Points are addressed by their
-   number in that order, as `tempo.points` lists them. Commands never put two points on one beat;
-   an imported map or a hand-written file can. The conversion keeps one such pair, a ramp followed
-   by a step (the ramp arrives at its tempo, then the tempo jumps: a Live Set's glide that ends in a
-   jump); of any other two points on one beat the later in the list wins. A command on that beat
-   replaces every point there with its one.
+   edits with one undo step each ([ADR 0002](0002-commands.md)), and the lists are kept in beat (or
+   bar) order. Points are addressed by their number in that order, as `tempo.points` lists them.
+   **A beat holds at most a ramp and a step**, the ramp first: the tempo glides to the ramp's tempo
+   and jumps there to the step's, a vertical line at the end of a slope. Tempo envelopes in other
+   formats draw the same thing as two breakpoints at one time with different values (DAWproject
+   allows any number of points at one time; a Live Set's glide that ends in a jump reads this way),
+   and a format with a type per tempo event has the same two kinds, a jump and a ramp. A command
+   replaces a point of its own kind on its beat and leaves the other kind. Any other pair on one beat
+   says nothing more (two steps: the first lasts no time; a step then a ramp: the ramp glides over no
+   beats), so the conversion keeps the later of such a pair, and only an imported map or a
+   hand-written file can make one. A bar holds one time-signature change, and a change on a bar
+   that has one replaces it.
 
 5. **Merging is three-way, keyed by beat and by bar.** The tempo map of two versions is merged
    against their common ancestor ([0027](0027-merge-and-versions.md)) point by point, with the beat
@@ -81,8 +86,8 @@ and why.
    taken; the same change on both sides is taken once; different changes to the point on the same
    beat, or a change on one side and a deletion on the other, are a conflict reported to the user.
    No clock and no append-only history are needed, because the ancestor says what each side changed.
-   The key is the beat with the ramp flag, so a ramp-then-step pair on one beat is two keys and each
-   merges on its own.
+   The key is the beat with the ramp flag, the same key the commands replace by (decision 4), so
+   the glide and the jump on one beat are two keys and each merges on its own.
 
 6. **A scene's tempo is an override and never edits the map.** Launching a scene with a tempo or
    a time signature takes the launcher clock off the map; `transport.followTempoMap`, starting the
