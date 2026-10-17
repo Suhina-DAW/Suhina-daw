@@ -519,7 +519,7 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   project setting); a project that is gone says so in the status bar.
 - **Double-click makes a clip** ([#493](https://github.com/suhina-daw/suhina-daw/issues/493)):
   a setting in Settings › Interface, On by default; Off, a double-click on an empty slot or lane
-  spot no longer makes an empty MIDI clip.
+  spot no longer makes an empty clip of the track's kind.
 - Mixer commands take a list of tracks, so a selection moves together: `track.adjustVolume` and
   `track.adjustPan` move each track by the same amount, keeping what is between them, and
   `track.setMute`/`track.setSolo` take the whole list as one undo step. Dragging one header's
@@ -556,9 +556,10 @@ From Live Sets we authored ourselves in Live 12.4 ([format spec](docs/spec/als-f
   nesting, and the fold triangle on a group's header hides its tracks in both views. Drag a header
   into a group, or use Move into group / Move out of group in its menu (`track.setGroup`); nested
   groups are saved and read from Live Sets ([spec](docs/spec/arrangement-editing.md#groups-inside-groups)).
-- A double-click on an empty Session slot or an empty spot of an Arrangement lane of a MIDI track
-  makes an empty MIDI clip there, a bar long and on the grid (`clip.create`, also over MCP); in
-  the Arrangement it is selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-midi-clip)).
+- A double-click on an empty Session slot or an empty spot of an Arrangement lane makes an empty
+  clip of the track's kind — MIDI on a notes track, an audio clip with no file yet on an audio
+  track — a bar long and on the grid (`clip.create`, also over MCP); in the Arrangement it is
+  selected ([spec](docs/spec/arrangement-editing.md#making-an-empty-clip)).
 - Clips: Ctrl-click adds one to the selection and Shift-click takes the run up to one, Ctrl+A
   selects the lot, and Ctrl+C, Ctrl+X, Ctrl+D, Delete and 0 (clip mute) act on the whole
   selection as one undo step ([spec](docs/spec/arrangement-editing.md#selecting-clips)). Header

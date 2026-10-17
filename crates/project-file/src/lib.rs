@@ -138,6 +138,10 @@ pub fn rebase_audio(project: &mut Project, from: &Path, to: &Path) {
     for content in &mut project.contents {
         for lane in &mut content.lanes {
             let LaneData::Audio(region) = &mut lane.data else { continue };
+            // An empty audio clip has no file yet: nothing to move.
+            if region.file.is_empty() {
+                continue;
+            }
             let here = from.join(&region.file);
             let file = if here.is_file() {
                 here

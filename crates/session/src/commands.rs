@@ -1325,7 +1325,7 @@ static COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         id: "clip.create",
-        label: "Make an empty MIDI clip on a track that plays notes: in an empty clip slot, or at a beat in the arrangement, replacing what it covers unless stacked",
+        label: "Make an empty clip on a track that holds clips: MIDI on a notes track, audio with no file yet on an audio track; in an empty clip slot, or at a beat in the arrangement, replacing what it covers unless stacked",
         params: &[
             TRACK,
             optional("scene", ParamType::Integer, "scene number, from 1, of an empty clip slot"),
