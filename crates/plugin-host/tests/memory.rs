@@ -54,18 +54,21 @@ fn the_control_bar_reads_what_the_host_reports_and_drops_what_died() {
     let (mut plugin, mut audio) = Plugin::start(launch("memory-report")).unwrap_or_else(|e| panic!("start: {e}"));
     let pid = plugin.process_id();
 
-    // The first report lands within about a second of the host starting.
-    let deadline = Instant::now() + Duration::from_millis(2500);
+    // The first report lands within about a second of the host starting; the wait is three
+    // times the cadence, so a busy runner cannot flake the test.
+    let deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < deadline && host_memory().is_empty() {
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(!host_memory().is_empty(), "no host reported its memory within two and a half seconds");
+    assert!(!host_memory().is_empty(), "no host reported its memory within three seconds");
     for bytes in host_memory() {
         assert!(sane(bytes), "the control bar would show {bytes} bytes");
     }
     assert_eq!(plugin.health(), Health::Running, "the host stayed alive");
     let mut output = [7.0f32; 2 * 64];
-    let outcome = audio.process(&[1.0; 64], &mut output, Duration::from_millis(2));
+    // The launch timeout is what an integration test may wait: a busy runner must not make a
+    // healthy host miss.
+    let outcome = audio.process(&[1.0; 64], &mut output, PATIENT);
     assert!(matches!(outcome, Outcome::Done | Outcome::Busy), "{outcome:?}");
 
     // Dropping the last instance ends the process, which stops being counted.

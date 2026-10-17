@@ -563,11 +563,18 @@ static GROUPS: Mutex<BTreeMap<GroupKey, Weak<Mutex<Group>>>> = Mutex::new(BTreeM
 
 /// The group `launch` asks for: the shared one for its host and group name, or one of its own.
 fn group_for_launch(launch: &Launch) -> Arc<Mutex<Group>> {
-    let Some(name) = &launch.group else {
-        return Arc::new(Mutex::new(Group::new()));
-    };
     let mut groups = lock(&GROUPS);
     groups.retain(|_, group| group.strong_count() > 0);
+    let Some(name) = &launch.group else {
+        // A group of its own is still one host process whose RAM the control bar counts, so it
+        // is tracked like the named ones, under a key no other group takes. The last instance
+        // dropping its half drops the entry with it (the register keeps weak references).
+        static UNNAMED: AtomicU64 = AtomicU64::new(0);
+        let key = (launch.host.clone(), format!("instance:{}", UNNAMED.fetch_add(1, Ordering::Relaxed)));
+        let group = Arc::new(Mutex::new(Group::new()));
+        groups.insert(key, Arc::downgrade(&group));
+        return group;
+    };
     let key = (launch.host.clone(), name.clone());
     if let Some(group) = groups.get(&key).and_then(Weak::upgrade) {
         return group;
@@ -1085,10 +1092,11 @@ mod tests {
             thread::sleep(Duration::from_millis(1));
         };
         remote.join().unwrap();
-        // A child that lives on and ends by itself.
+        // A child that lives on and ends by itself. `timeout` waits for a key and errors when
+        // there is no console to take it from; a ping to no host waits without input.
         let mut child = Command::new(if cfg!(windows) { "cmd" } else { "sleep" });
         if cfg!(windows) {
-            child.args(["/c", "timeout", "/t", "10", "/nobreak"]);
+            child.args(["/c", "ping", "-n", "11", "127.0.0.1", ">nul"]);
         } else {
             child.arg("10");
         }
