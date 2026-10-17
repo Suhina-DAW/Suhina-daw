@@ -2807,6 +2807,52 @@ fn a_double_click_on_an_empty_slot_of_an_audio_track_makes_an_empty_clip_there()
     assert!(harness.query_by_label("Stop Audio 1 (scene 1)").is_some(), "the slot is empty again");
 }
 
+/// The audio ask is the three of them at once: the double-click makes the empty audio clip,
+/// the menu's name field renames it, and the drag to another slot moves it, like a MIDI clip.
+#[test]
+fn an_audio_clip_renames_and_moves_like_a_midi_one() {
+    let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
+    // An audio track and its empty clip, made with the double-click.
+    harness.get_by_label("+ Audio track").click();
+    harness.run();
+    let at = harness.get_by_label("Stop Audio 1 (scene 1)").rect().center();
+    double_click_at(&mut harness, at);
+    harness.run();
+    assert!(harness.query_by_label("Launch Audio clip on Audio 1 (scene 1)").is_some());
+
+    // Renaming through the slot's menu: click into the field, select all, type, Enter.
+    harness.get_by_label("Launch Audio clip on Audio 1 (scene 1)").click_secondary();
+    harness.run();
+    harness.get_by_label_contains("Rename clip Audio clip").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness.get_by_label_contains("Rename clip Audio clip").type_text("Break");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+    assert!(harness.query_by_label("Launch Break on Audio 1 (scene 1)").is_some(), "the audio clip took the name");
+
+    // Dragging it to the next scene moves it.
+    let from = harness.get_by_label("Launch Break on Audio 1 (scene 1)").rect().center();
+    let to = harness.get_by_label("Stop Audio 1 (scene 2)").rect().center();
+    harness.hover_at(from);
+    harness.step();
+    harness.drag_at(from);
+    harness.step();
+    harness.hover_at(to);
+    harness.step();
+    harness.drop_at(to);
+    harness.run();
+    assert!(harness.query_by_label("Launch Break on Audio 1 (scene 2)").is_some(), "the audio clip moved by drag");
+    assert!(harness.query_by_label("Stop Audio 1 (scene 1)").is_some(), "the source emptied");
+    assert!(
+        matches!(harness.state().status(), Status::Done(text) if text.contains("Moved")),
+        "{:?}",
+        harness.state().status()
+    );
+}
+
 #[test]
 fn a_double_click_on_an_empty_spot_of_an_audio_lane_makes_a_clip_there() {
     let mut harness = window_with_step(demo_app(), 1.0 / 60.0);
