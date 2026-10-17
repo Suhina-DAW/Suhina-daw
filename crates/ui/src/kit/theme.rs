@@ -82,6 +82,8 @@ palette! {
         "The name of a playing clip";
     accent, "accent", 0xA6A3FF,
         "The playhead, queued clips, a key being set";
+    selection, "selection", 0xE3C86A,
+        "The selected device's outline";
     recording, "recording", 0xE5484D,
         "Recording and errors";
     recording_background, "recording.background", 0x3A2B2A,

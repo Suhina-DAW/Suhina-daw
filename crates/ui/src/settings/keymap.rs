@@ -116,7 +116,7 @@ const WINDOW_ACTIONS: [(&str, &str, &str); 62] = [
         "Edit",
     ),
     ("selection.duplicate", "Duplicate the selected clips, or the selected notes in the piano roll", "Edit"),
-    ("selection.delete", "Delete the selected clips, or the selected notes in the piano roll", "Edit"),
+    ("selection.delete", "Delete the selected clips or device, or the selected notes in the piano roll", "Edit"),
     ("selection.mute", "Mute or unmute the selected clips", "Edit"),
     ("selection.selectAll", "Select every clip in the arrangement", "Edit"),
     ("selection.split", "Split the selected clip at the playhead", "Edit"),
