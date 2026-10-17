@@ -91,7 +91,7 @@ pub struct SessionViewState {
     /// (`docs/spec/ui-clip-editor.md` › Where it opens).
     pub open_devices: Option<TrackId>,
     /// A double-click on an empty slot does nothing (Settings › Arrangement › Double-click makes a
-    /// clip is off); by default it makes an empty MIDI clip.
+    /// clip is off); by default it makes an empty clip of the track's kind.
     pub double_click_does_nothing: bool,
 }
 
@@ -280,12 +280,12 @@ pub fn show(
                 }
                 let top = bands.top + scene as f32 * PITCH;
                 let cell = Rect::from_x_y_ranges(*span, egui::Rangef::new(top, top + ROW)).intersect(column_body);
-                let target = if probe.files {
-                    DropTarget::Slot { track: column.track, scene }
-                } else {
-                    DropTarget::Track(column.track)
-                };
-                probe.offer(if probe.files { cell } else { column_body }, target);
+                // The slot under the pointer is the target, for a dropped file and for a dragged
+                // clip alike: a slot-to-slot drag moves the clip there (Ctrl: a copy).
+                probe.offer(
+                    if probe.files || probe.clip { cell } else { column_body },
+                    DropTarget::Slot { track: column.track, scene },
+                );
             }
         }
         if !probe.clip && empty.width() > 0.0 && empty.contains(probe.pointer) {
@@ -592,7 +592,8 @@ fn column_body(
         let sense = if editable { Sense::click_and_drag() } else { Sense::click() };
         let launch = match slot.state {
             // An empty slot without a stop button launches nothing. On a track it can be selected
-            // (to paste into), and on a track that plays notes a double-click makes a MIDI clip in it.
+            // (to paste into), and a double-click makes an empty clip in it — MIDI on a notes
+            // track, audio on one that plays audio.
             SlotState::Empty if editable || column.notes => {
                 let response = ui.interact(rect.intersect(clip), id.with(scene), Sense::click());
                 response.widget_info(|| {
@@ -644,18 +645,25 @@ fn column_body(
             state.select_slot(column.track, scene);
         }
         if !has_clip
-            && column.notes
+            && (column.notes || column.plays_audio)
             && !state.double_click_does_nothing
             && launch.as_ref().is_some_and(Response::double_clicked)
         {
             actions.push(Action::new("clip.create", json!({ "track": column.track.0, "scene": number })));
-            // The new clip is selected, so the detail area opens its piano roll.
+            // The new clip is selected, so the detail area shows it.
             state.select_slot(column.track, scene);
         }
         if select.as_ref().is_some_and(Response::clicked) {
             state.select_slot(column.track, scene);
         }
         if editable {
+            // The slot's rename draft dies with its menu — either of the slot's two responses may
+            // host it, so the check is once for the pair: a reopen starts from the name as it is
+            // now.
+            let menu_open = [&launch, &select].into_iter().flatten().any(egui::Response::context_menu_opened);
+            if !menu_open {
+                ui.ctx().data_mut(|d| d.remove::<String>(Id::new(("slot-rename", column.track, number))));
+            }
             for response in [&launch, &select].into_iter().flatten() {
                 // An empty slot is selected by a click, any slot by a right-click: Ctrl+C and
                 // Ctrl+V act on it.
@@ -667,17 +675,21 @@ fn column_body(
                     state.slot_drag = Some(key);
                 }
                 // The slot's menu, and a clip's launch settings under it.
-                response.context_menu(|ui| {
-                    menus::slot_menu(ui, column.track, number, has_clip, can_paste, actions);
-                    if let Some(launch) = slot.launch {
-                        ui.separator();
-                        crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions);
-                    }
-                });
+                // The menu stays open on a click inside: the rename's field and button live here.
+                egui::Popup::context_menu(response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(
+                    |ui| {
+                        menus::slot_menu(ui, column.track, number, &slot.name, has_clip, can_paste, actions);
+                        if let Some(launch) = slot.launch {
+                            ui.separator();
+                            crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions);
+                        }
+                    },
+                );
             }
         } else if let (Some(response), Some(launch)) = (&launch, slot.launch) {
-            response
-                .context_menu(|ui| crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions));
+            egui::Popup::context_menu(response)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| crate::session::slot_launch::launch_menu(ui, column.track, number, launch, actions));
         }
         let selected = state.selected_slot == Some(key);
         slot_cell(painter, rect, column, slot, hover, pulse, progress, selectable && selected);

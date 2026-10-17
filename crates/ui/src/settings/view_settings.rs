@@ -34,7 +34,7 @@ pub struct ViewSettings {
     /// The Session mixer's height, in points.
     pub mixer_height: u32,
     pub detail_layout: DetailLayout,
-    /// A double-click on an empty slot or an empty spot of a lane makes an empty MIDI clip.
+    /// A double-click on an empty slot or an empty spot of a lane makes an empty clip of the track's kind.
     pub double_click_clip: bool,
 }
 

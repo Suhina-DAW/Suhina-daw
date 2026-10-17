@@ -117,7 +117,7 @@ Each cell is a slot for one clip.
 | Slot state | Shows | Click |
 |---|---|---|
 | Empty, with stop button | stop control | stops the track at the next quantisation point |
-| Empty, without stop button | nothing; **Suhina:** a double-click creates an empty MIDI clip | nothing (**Suhina:** selects it) |
+| Empty, without stop button | nothing; **Suhina:** a double-click creates an empty clip of the track's kind (`clip.create`) | nothing (**Suhina:** selects it) |
 | Clip, stopped | a play triangle in the track colour, clip name, launch control | on the launch control: launches the clip (**Suhina:** and selects it); on the name: selects it |
 | Clip, queued | launch control in a pending (blinking) state until the quantisation point | as stopped |
 | Clip, playing | a stop square in the track colour, progress through the clip | on the launch control: **Suhina:** a trigger clip (one that listens for no release) stops at the next quantisation point; a gate, toggle or repeat clip relaunches, its release keeps its own meaning; on the name: selects it |
@@ -147,15 +147,16 @@ click ends, and going up is the release a clip in gate or repeat mode listens fo
 with its launch settings under it: **Launch mode** (Trigger, Gate, Toggle, Repeat), **Launch
 quantisation** (Global, None, 8 bars … 1/32) and **Legato**, each an undoable edit.
 
-Double-clicking an empty slot (with or without a stop button) on a track that plays notes makes an
-empty MIDI clip there (**Suhina:** while Settings › Arrangement › **Double-click makes a clip** is On,
+Double-clicking an empty slot (with or without a stop button) on a track that holds clips makes an
+empty clip of the track's kind there — MIDI on a notes track, an "Audio clip" with no file yet on
+one that plays audio (**Suhina:** while Settings › Arrangement › **Double-click makes a clip** is On,
 the default; Off, the double-click does nothing, and the Arrangement's lanes follow the same
-setting), one bar long and looping, named "MIDI clip" (`clip.create`, one undo step;
-[arrangement editing](arrangement-editing.md) › Making an empty MIDI clip), and selects it, so the
-detail area shows it; a first click on a slot with a stop button still stops the track. Audio
-tracks, groups and returns do nothing on a double-click. Editing its notes waits for the piano
-roll (#200). Double-clicking a clip opens it. Dropping a file or clip on a slot puts the clip
-there; on an empty audio track the track takes the clip's name **(observed in the corpus)**.
+setting), one bar long and looping (`clip.create`, one undo step; [arrangement editing](arrangement-editing.md)
+› Making an empty clip), and selects it, so the detail area shows it; a first click on a slot with
+a stop button still stops the track. Groups and returns do nothing on a double-click. Editing the
+notes of a MIDI clip waits for the piano roll (#200); the empty audio clip plays silence until a
+sample lands on its slot. Double-clicking a clip opens it. Dropping a file or clip on a slot puts
+the clip there; on an empty audio track the track takes the clip's name **(observed in the corpus)**.
 
 Below the last scene each track has a **stop all clips** button for that track, and the main
 column has **stop all clips** for the whole set.
@@ -181,9 +182,12 @@ a slot to the arrangement, in two ways. **Suhina** decisions, our own design:
 - **Dragging.** While a clip is dragged, holding it over the other view's name in the control bar
   for half a second switches the view, and the drag goes on there: let go over a slot and the clip
   is copied into it; over a track's lane and it is copied there, at the beat under the pointer on
-  the grid (Alt for free), stacking when the setting for its kind says so. A slot's clip can
-  also be dragged to another slot in the Session view, which copies it. A label beside the pointer
-  says where it will go ("Copy Fill to Drums, scene 5"); Escape, or letting go anywhere else (a
+  the grid (Alt for free), stacking when the setting for its kind says so. **Suhina:** a slot's
+  clip dragged to another slot in the Session view **moves** — the target's slot takes it and
+  the source's empties; the two slots **swap** when the target has a clip, so nothing is lost
+  (`clip.moveSlot`, one undo step). Ctrl (Cmd on macOS) held on the drop copies instead. A label
+  beside the pointer says where it will go ("Move Fill to Drums, scene 5", "Swap Fill and Beat A
+  in Drums, scene 5", "Copy …" with Ctrl); Escape, or letting go anywhere else (a
   header, the empty space, the clip's own slot), does nothing.
 - **Always a copy.** A clip that crosses views is copied, never moved: the arrangement and the
   launcher are separate places, and the original stays where it was. The drop runs `clip.copy`
