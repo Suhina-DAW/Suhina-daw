@@ -3909,3 +3909,54 @@ fn a_device_selects_and_deletes_even_beside_a_shown_clip() {
     harness.run();
     assert_eq!(devices(&harness), 1, "the device is back");
 }
+
+#[test]
+fn removing_a_device_below_the_selected_one_moves_the_selection_with_it() {
+    use suhina_engine::model::{Device, DeviceKind, DeviceParam, Extensions};
+    let devices = |h: &Harness<'static, App>| {
+        h.state()
+            .session()
+            .map(|s| s.project().channels[0].devices.iter().map(|d| d.name.clone()).collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    let mut project = project_with_a_device();
+    project.channels[0].devices.push(Device {
+        name: "Utility 2".into(),
+        kind: DeviceKind::Builtin("utility".into()),
+        enabled: true,
+        state: None,
+        params: vec![DeviceParam::new("gain", -3.5)],
+        automation: Vec::new(),
+        extensions: Extensions::default(),
+    });
+    let mut app = App::new();
+    app.set_session(Session::new(project), &[]);
+    let mut harness = window(app);
+    harness.get_by_label("Track Drums").click();
+    harness.run();
+    let names = devices(&harness);
+    let last = names.len() - 1;
+    // The LAST device selected, then the FIRST removed: the selection follows its device up an
+    // index, so Delete takes the same device off, not its neighbour.
+    harness.get_by_label(&format!("Device {}", names[last])).click();
+    harness.run();
+    harness.get_by_label(&format!("Device {}", names[0])).click_secondary();
+    harness.run();
+    harness.get_by_label("Remove device").click();
+    harness.run();
+    assert_eq!(devices(&harness).len(), names.len() - 1, "the first device went");
+    harness.key_press(Key::Delete);
+    harness.run();
+    assert_eq!(
+        devices(&harness),
+        Vec::<String>::new(),
+        "the selected device went with the shift; a stale selection would have deleted nothing"
+    );
+    // One undo brings the Delete back, another the menu's removal.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(devices(&harness), ["Utility 2"], "the Delete undone: the removed device back");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(devices(&harness), ["Utility", "Utility 2"], "the menu's removal undone too");
+}

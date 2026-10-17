@@ -1558,13 +1558,18 @@ impl App {
                 continue;
             }
             self.run(action);
-            // A removed device takes its selection with it, whichever way it was removed.
+            // A removed device takes its selection with it, whichever way it was removed — and
+            // the devices after it move up an index, so a selection below the removal follows.
             if action.id == "device.remove"
-                && let Some(track) = action.params["track"].as_u64()
-                && let Some(index) = action.params["device"].as_u64()
-                && self.selected_device == Some((TrackId(track as u32), index as usize))
+                && let Some(track) = action.params["track"].as_u64().and_then(|t| u32::try_from(t).ok()).map(TrackId)
+                && let Some(index) = action.params["device"].as_u64().and_then(|i| usize::try_from(i).ok())
+                && self.selected_device.is_some_and(|(t, _)| t == track)
             {
-                self.selected_device = None;
+                match self.selected_device {
+                    Some((_, selected)) if selected == index => self.selected_device = None,
+                    Some((t, selected)) if selected > index => self.selected_device = Some((t, selected - 1)),
+                    _ => {}
+                }
             }
             // The window gets Ctrl+V only as a paste of the system clipboard's text, which it
             // does not send while the clipboard holds no text: copying puts a line there, so
