@@ -352,7 +352,7 @@ pub fn show(
     let level = state.meters.main;
     // The main meter stands where a track's does: beside the fader, or at the top of the strip
     // while the mixer is too low for a fader.
-    let parts = crate::session::mixer_strip::layout(main_mixer, false);
+    let parts = crate::session::mixer_strip::layout(main_mixer, false, false);
     let at = parts.meter.unwrap_or_else(|| {
         Rect::from_min_size(
             main_mixer.min + Vec2::splat(PAD),
@@ -445,6 +445,7 @@ fn draw_column(
         column,
         &bands.groups,
         track_number,
+        bands.input_channels,
         state,
         id,
         actions,
