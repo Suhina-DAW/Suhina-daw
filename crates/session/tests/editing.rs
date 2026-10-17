@@ -46,7 +46,7 @@ fn clip(content: u32, start: f64, length: f64) -> Clip {
 fn midi_project(notes: Vec<Note>, clips: Vec<Clip>) -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = midi_project_built(notes, clips);
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

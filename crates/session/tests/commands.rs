@@ -8,7 +8,7 @@ use suhina_session::{CommandKind, Session, commands};
 fn project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 
@@ -357,7 +357,7 @@ fn a_track_routes_into_a_group_and_back_to_main() {
 fn lane_project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = lane_project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 
@@ -693,7 +693,7 @@ fn copied_clips_paste_together_and_keep_their_places() {
 fn audio_project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = audio_project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 
@@ -815,7 +815,7 @@ fn bad_fades_are_errors_that_change_nothing() {
 fn slot_project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = slot_project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 
@@ -1062,7 +1062,7 @@ fn bad_loop_edits_are_errors_and_change_nothing() {
 fn launcher_project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = launcher_project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 
@@ -1211,7 +1211,7 @@ fn malformed_copies_and_pastes_into_slots_are_errors_that_record_nothing() {
 fn midi_slot_project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = midi_slot_project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

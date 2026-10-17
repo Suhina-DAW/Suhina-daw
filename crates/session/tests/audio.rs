@@ -115,7 +115,7 @@ impl Stand {
 fn project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 
@@ -334,7 +334,7 @@ fn a_choice_is_found_by_its_host_and_device() {
 fn launcher_project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = launcher_project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

@@ -16,7 +16,7 @@ const SR: u32 = 48_000;
 fn project(volume: f64) -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = project_built(volume);
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

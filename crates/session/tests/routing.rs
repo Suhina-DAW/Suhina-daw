@@ -15,7 +15,7 @@ use suhina_session::Session;
 fn project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

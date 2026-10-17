@@ -39,7 +39,7 @@ fn clip(content: u32) -> Clip {
 fn project() -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = project_built();
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

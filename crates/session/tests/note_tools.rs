@@ -25,7 +25,7 @@ fn clip(content: u32) -> Clip {
 fn project(notes: Vec<Note>) -> Project {
     // Ids on its lanes, clips and scenes, as a session gives them.
     let mut project = project_built(notes);
-    project.assign_ids().unwrap();
+    assert_eq!(project.assign_ids(), Ok(()));
     project
 }
 

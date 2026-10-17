@@ -64,6 +64,7 @@ fn bass(session: &Session) -> Vec<ClipId> {
     session.project().arrangement.lanes[0].clips.iter().map(|c| c.id).collect()
 }
 
+#[allow(clippy::unwrap_used)] // a test helper outside #[test] functions
 fn clip(session: &Session, id: ClipId) -> Clip {
     session.project().clip(id).cloned().unwrap()
 }
