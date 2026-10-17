@@ -3879,6 +3879,7 @@ fn a_slot_drag_to_another_slot_moves_it_ctrl_drags_copy_and_an_occupied_one_swap
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run();
     // A drag onto an occupied slot swaps the two: Walk to Beat's slot, Beat to Walk's.
+    let (walk_content, _, beat_content) = slots(&harness);
     let walk = harness.get_by_label("Launch Walk on Bass (scene 2)").rect().center();
     let beat = harness.get_by_label("Launch Beat A on Drums (scene 1)").rect().center();
     harness.hover_at(walk);
@@ -3889,13 +3890,13 @@ fn a_slot_drag_to_another_slot_moves_it_ctrl_drags_copy_and_an_occupied_one_swap
     harness.step();
     harness.drop_at(beat);
     harness.run();
-    let (first, _, _) = slots(&harness);
+    let (bass, _, drums) = slots(&harness);
     assert!(
         matches!(harness.state().status(), Status::Done(text) if text.contains("Swapped")),
         "{:?}",
         harness.state().status()
     );
-    let _ = first;
+    assert_eq!((bass, drums), (beat_content, walk_content), "Beat A is in Walk's slot and Walk in Beat A's");
 }
 
 #[test]
@@ -3912,10 +3913,6 @@ fn a_slots_context_menu_renames_its_clip() {
     harness.run();
     harness.get_by_label_contains("Rename clip Walk").type_text("Walk the bass");
     harness.run();
-    eprintln!(
-        "PROBE draft: {:?}",
-        harness.ctx.data(|d| d.get_temp::<String>(egui::Id::new(("slot-rename", suhina_engine::model::TrackId(2), 2))))
-    );
     harness.key_press(Key::Enter);
     harness.run();
     // The slot's label carries the new name; one undo brings Walk back.

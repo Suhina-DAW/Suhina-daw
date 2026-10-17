@@ -249,7 +249,7 @@ pub fn clip_menu(
         });
         let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         // An empty draft clears the name: the command takes it.
-        if (enter || ui.button("Rename").clicked()) && draft.trim() != name {
+        if (enter || ui.button("Rename").clicked()) && draft.trim() != name.trim() {
             actions.push(Action::new("clip.rename", json!({ "track": track.0, "index": index, "name": draft.trim() })));
             ui.ctx().data_mut(|d| d.remove::<String>(id));
             ui.close();
@@ -404,7 +404,7 @@ pub fn slot_menu(
         });
         let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         // An empty draft clears the name: the command takes it.
-        if (enter || ui.button("Rename").clicked()) && draft.trim() != name {
+        if (enter || ui.button("Rename").clicked()) && draft.trim() != name.trim() {
             actions.push(Action::new("clip.rename", json!({ "track": track.0, "scene": scene, "name": draft.trim() })));
             ui.ctx().data_mut(|d| d.remove::<String>(id));
             ui.close();
