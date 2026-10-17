@@ -322,10 +322,15 @@ mod tests {
                 ValidationError::DuplicateScene(SceneId(7)),
             ])
         );
-        // A lane and a clip with the same value are two kinds; only one counter makes them differ.
+        // A lane and a clip with the same value: the kinds share the counter, so that is refused
+        // too, once, beside nothing else.
         let mut p = project_with_ids();
         p.arrangement.lanes[0].clips[0].id = ClipId(1);
-        assert_eq!(p.validate(), Ok(()));
+        assert_eq!(p.validate(), Err(vec![ValidationError::SharedId(1)]));
+        // A clip in a slot and a scene, the same.
+        let mut p = project_with_ids();
+        p.launcher.scenes[0].id = SceneId(9);
+        assert_eq!(p.validate(), Err(vec![ValidationError::SharedId(9)]));
     }
 
     #[test]

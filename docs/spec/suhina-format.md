@@ -42,8 +42,9 @@ UTF-8 JSON, written pretty-printed. Its parts mirror the project model
   number from 1 to 4294967294, that stays the same when the object is moved or edited
   ([ADR 0025](../decisions/0025-object-identity.md)). The three kinds take their ids from one
   counter, the project's `next_id`: no two of them share a value, and a value once used is never
-  given again, a deleted object's included. Two objects of a kind with the same `id` are refused,
-  as are `id` 0, the largest 32-bit value and anything that is not such a number.
+  given again, a deleted object's included. Two objects with the same `id` are refused, whether of
+  one kind or of two (a clip with a lane's id), as are `id` 0, the largest 32-bit value and
+  anything that is not such a number.
 - An object without an `id` (a file written before ids, or an object added by hand) gets one when
   the file is read: the next values of the counter, in document order — each arrangement lane and
   then its clips, lane by lane; then the scenes; then the slots' clips, column by column. The same

@@ -851,6 +851,9 @@ pub enum ValidationError {
     DuplicateLane(LaneId),
     /// Two scenes have this id.
     DuplicateScene(SceneId),
+    /// Objects of two kinds (a clip, a lane, a scene) have this id; the kinds share one counter,
+    /// so a value names at most one object.
+    SharedId(u32),
     /// An object has an id the project's counter has not handed out yet: the next new object
     /// would get it too.
     IdAhead(u32),
@@ -886,6 +889,7 @@ impl fmt::Display for ValidationError {
             Self::DuplicateClip(id) => write!(f, "clip id {id} is used twice"),
             Self::DuplicateLane(id) => write!(f, "arrangement lane id {id} is used twice"),
             Self::DuplicateScene(id) => write!(f, "scene id {id} is used twice"),
+            Self::SharedId(id) => write!(f, "object id {id} is used by a clip, a lane or a scene at once"),
             Self::IdAhead(id) => write!(f, "object id {id} is not below the project's next id"),
             Self::GroupCycle(id) => write!(f, "track {} is inside itself through its groups", id.0),
             Self::GroupTooDeep(id) => {
@@ -923,11 +927,20 @@ impl Project {
         let contents = unique(self.contents.iter().map(|c| c.id), ValidationError::DuplicateContent, &mut errors);
         // Objects without an id yet (0) are not duplicates of each other.
         let clip_ids = self.all_clips().map(|c| c.id).filter(|id| id.is_some());
-        unique(clip_ids, ValidationError::DuplicateClip, &mut errors);
+        let clip_ids = unique(clip_ids, ValidationError::DuplicateClip, &mut errors);
         let lane_ids = self.arrangement.lanes.iter().map(|l| l.id).filter(|id| id.is_some());
-        unique(lane_ids, ValidationError::DuplicateLane, &mut errors);
+        let lane_ids = unique(lane_ids, ValidationError::DuplicateLane, &mut errors);
         let scene_ids = self.launcher.scenes.iter().map(|s| s.id).filter(|id| id.is_some());
-        unique(scene_ids, ValidationError::DuplicateScene, &mut errors);
+        let scene_ids = unique(scene_ids, ValidationError::DuplicateScene, &mut errors);
+        // The three kinds share one counter, so a value names at most one object of any of them
+        // (ADR 0025 › 2): a lane and a clip with the same value are refused as well.
+        let mut kinds: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+        let values =
+            clip_ids.iter().map(|c| c.0).chain(lane_ids.iter().map(|l| l.0)).chain(scene_ids.iter().map(|s| s.0));
+        for value in values {
+            *kinds.entry(value).or_default() += 1;
+        }
+        errors.extend(kinds.into_iter().filter(|&(_, n)| n > 1).map(|(value, _)| ValidationError::SharedId(value)));
         let highest = self.max_object_id();
         if highest != 0 && highest >= self.next_id {
             errors.push(ValidationError::IdAhead(highest));

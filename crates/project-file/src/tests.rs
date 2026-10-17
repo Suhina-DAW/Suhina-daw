@@ -902,6 +902,8 @@ fn bad_ids_are_errors_not_crashes() {
     // A slot's clip shares the counter with the arrangement's.
     let launched = good["project"]["launcher"]["columns"][0]["slots"][0]["clip"]["id"].clone();
     refused(with(&|f| clip(f)["id"] = launched.clone()), "is used twice");
+    // Lanes, clips and scenes share the counter: a clip with a lane's id is refused too.
+    refused(with(&|f| clip(f)["id"] = lane.clone()), "by a clip, a lane or a scene at once");
 
     // 0 is no id, and the largest value is never one.
     refused(with(&|f| clip(f)["id"] = json!(0)), "clips[0].id");
