@@ -127,8 +127,8 @@ fn sample_waveform(
     });
     let source = ui.ctx().data(|data| data.get_temp::<Arc<suhina_engine::AudioData>>(sample_source_id(track, device)));
     let painter = ui.painter_at(visible);
-    painter.rect_filled(bounds, 0., crate::theme::control_background());
-    let colors = crate::theme::palette();
+    painter.rect_filled(bounds, 0., crate::kit::theme::control_background());
+    let colors = crate::kit::theme::palette();
     let compact = bounds.height() < 100.;
     let field = if compact {
         Rect::from_min_max(
@@ -374,7 +374,7 @@ fn sample_waveform(
             field.center(),
             egui::Align2::CENTER_CENTER,
             "Drop a sample here",
-            crate::theme::ui_font(12.),
+            crate::kit::theme::ui_font(12.),
             colors.text_primary,
         );
     }
@@ -411,8 +411,8 @@ fn sample_waveform(
             marker.center(),
             egui::Align2::CENTER_CENTER,
             caption,
-            crate::theme::ui_font(10.),
-            crate::theme::window_background(),
+            crate::kit::theme::ui_font(10.),
+            crate::kit::theme::window_background(),
         );
         let response = ui
             .interact(marker, egui::Id::new(("sample-marker", track.0, device, id)), egui::Sense::click_and_drag())
@@ -541,7 +541,7 @@ fn envelope(
     let values = [a.value, d.value, normalized(l, false), r.map_or(0., |p| p.value)];
     let max_time = (a.max + d.max + r.map_or(0., |p| p.max)).max(0.01);
     let plot = EnvelopePlot::new(bounds, values, max_time, adsr);
-    let palette = crate::theme::palette();
+    let palette = crate::kit::theme::palette();
     let background = palette.panel_background;
     let darker = Color32::from_rgb(
         (f32::from(background.r()) * 0.8) as u8,
@@ -1079,9 +1079,9 @@ pub(crate) fn show(
                 UiGesture::Drag if response.dragged() => {
                     let delta = response.drag_delta();
                     next += if axis == 0 {
-                        delta.x as f64 / crate::widgets::PARAMETER_DRAG_PIXELS
+                        delta.x as f64 / crate::kit::widgets::PARAMETER_DRAG_PIXELS
                     } else {
-                        -delta.y as f64 / crate::widgets::PARAMETER_DRAG_PIXELS
+                        -delta.y as f64 / crate::kit::widgets::PARAMETER_DRAG_PIXELS
                     } * fine
                         * f64::from(binding.drag_scale);
                 }
@@ -1211,7 +1211,7 @@ mod tests {
     fn sample_waveform_draws_a_line_for_each_active_voice() {
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(Default::default(), |ui| {
-            crate::theme::install(ui.ctx());
+            crate::kit::theme::install(ui.ctx());
             let mut positions = [None::<f32>; 32];
             positions[0] = Some(0.2);
             positions[7] = Some(0.7);
@@ -1244,7 +1244,7 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         for recording in [false, true] {
             let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(600., 220.)).build_ui(move |ui| {
-                crate::theme::install(ui.ctx());
+                crate::kit::theme::install(ui.ctx());
                 ui.ctx().data_mut(|d| d.insert_temp(sample_source_id(TrackId(1), 0).with("recording"), recording));
                 sample_recording(
                     ui,
@@ -1270,7 +1270,7 @@ mod tests {
             [0., 22., 900., 76.];
         let canvas = Arc::new(canvas);
         let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(916., 184.)).build_ui(move |ui| {
-            crate::theme::install(ui.ctx());
+            crate::kit::theme::install(ui.ctx());
             show(
                 ui,
                 Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 168.)),
@@ -1567,14 +1567,18 @@ mod tests {
                 parameters.iter_mut().find(|p| p.id == id).unwrap().value =
                     if filename.contains("zero") { 0. } else { normal };
             }
-            let light =
-                crate::theme::built_in_themes().into_iter().find(|(id, _)| *id == "suhina-light").unwrap().1.colors;
+            let light = crate::kit::theme::built_in_themes()
+                .into_iter()
+                .find(|(id, _)| *id == "suhina-light")
+                .unwrap()
+                .1
+                .colors;
             let preview_canvas = canvas.clone();
             let preview_parameters = parameters.clone();
             let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(916., 184.)).build_ui(move |ui| {
-                crate::theme::install(ui.ctx());
+                crate::kit::theme::install(ui.ctx());
                 if filename.contains("light") {
-                    crate::theme::set_palette(ui.ctx(), light);
+                    crate::kit::theme::set_palette(ui.ctx(), light);
                 }
                 let data = Arc::new(suhina_engine::AudioData {
                     sample_rate: 48000,
@@ -1601,7 +1605,7 @@ mod tests {
             });
             harness.run_steps(4);
             snapshot(&mut harness, filename);
-            crate::theme::set_palette(&harness.ctx, crate::theme::Palette::DARK);
+            crate::kit::theme::set_palette(&harness.ctx, crate::kit::theme::Palette::DARK);
             if view == 2. {
                 harness.get_by_label("lfo shape").click();
                 harness.run_steps(4);
@@ -1924,7 +1928,7 @@ mod tests {
         let actions = pointer_gesture(&canvas, &parameters, Pos2::new(350., 95.), Some(Pos2::new(350., 75.)));
         assert!(actions.iter().any(|a| a.params["param"] == "sensitivity"));
         let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(916., 184.)).build_ui(move |ui| {
-            crate::theme::install(ui.ctx());
+            crate::kit::theme::install(ui.ctx());
             show(
                 ui,
                 Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 168.)),
@@ -1995,7 +1999,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    crate::theme::install(ui.ctx());
+                    crate::kit::theme::install(ui.ctx());
                     show(
                         ui,
                         Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 168.)),
@@ -2114,7 +2118,7 @@ mod tests {
         );
         let snapshot_source = source.clone();
         let mut harness = egui_kittest::Harness::builder().with_size(Vec2::new(916., 184.)).build_ui(move |ui| {
-            crate::theme::install(ui.ctx());
+            crate::kit::theme::install(ui.ctx());
             ui.ctx().data_mut(|d| {
                 d.insert_temp(id, snapshot_source.clone());
                 d.insert_temp(

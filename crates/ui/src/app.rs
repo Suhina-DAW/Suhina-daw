@@ -1923,7 +1923,11 @@ impl App {
         self.place_editors(&places);
         self.sample_drops = ui
             .ctx()
-            .data(|d| d.get_temp::<Vec<crate::detail::device_canvas::SampleTarget>>(crate::detail::device_canvas::sample_targets_id()))
+            .data(|d| {
+                d.get_temp::<Vec<crate::detail::device_canvas::SampleTarget>>(
+                    crate::detail::device_canvas::sample_targets_id(),
+                )
+            })
             .unwrap_or_default();
         // The toolbar's × hides the editor.
         if std::mem::take(&mut self.piano_roll.hide_requested) {
@@ -3467,7 +3471,7 @@ impl App {
     fn drop_target(&self, items: &[BrowserItem], pointer: Option<Pos2>) -> Option<DropTarget> {
         if let Some(pointer) = pointer
             && items.len() == 1
-            && items[0].kind == crate::drop::ItemKind::Sample
+            && items[0].kind == crate::interaction::drop::ItemKind::Sample
             && let Some((_, track, device)) = self.sample_drops.iter().find(|(area, _, _)| area.contains(pointer))
         {
             return Some(DropTarget::Sampler { track: *track, device: *device });

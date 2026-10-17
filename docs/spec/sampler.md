@@ -45,8 +45,8 @@ Reverse and Retrigger). Section surfaces, headings and borders use the active
 host theme and do not intercept pointer or keyboard input. The Grain row retains
 position, scan, size, density, jitter, spread and Freeze without a cloud preview.
 
-Definition revision 7 preserves existing sound parameters and migrations from
-revisions 1 through 6. New LFO destinations and source fades default to zero;
+Definition revision 8 preserves existing sound parameters and migrations from
+revisions 1 through 7. New LFO destinations and source fades default to zero;
 LFO shape defaults to Sine. `panel_view` persists Controls (0), Envelopes (1) or LFO (2); new devices
 default to Controls. Legacy `grain_env` and `envelope_tab` remain readable but no
 longer select an editor. Existing embedded definitions update explicitly through
