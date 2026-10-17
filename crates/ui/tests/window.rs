@@ -3545,13 +3545,16 @@ fn open_on_the_start_panel_shows_the_systems_dialog() {
 fn help_about_shows_the_version_and_copies_it() {
     let mut harness = window(demo_app());
     let version = suhina_ui::app::project_dialog::VERSION;
+    let build = suhina_ui::app::project_dialog::BUILD;
+    assert!(!build.is_empty(), "the build script sets the build string");
     assert!(harness.query_by_label_contains(version).is_none());
     harness.get_by_label("Help").click();
     harness.run();
     harness.get_by_label_contains("About Suhina").click();
     harness.run();
     let line = suhina_ui::app::project_dialog::version_line();
-    assert!(line.starts_with(&format!("Suhina {version} (")), "{line}");
+    assert!(line.starts_with(&format!("Suhina {version} build ")), "{line}");
+    assert!(line.contains(build), "the copied line carries the build string: {line}");
     harness.get_by_label(&format!("Copy version: {line}")).click();
     harness.run();
     assert_eq!(harness.state().status(), &Status::Done(format!("Copied {line}")));
