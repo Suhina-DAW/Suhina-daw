@@ -855,15 +855,17 @@ fn a_file_without_ids_gives_them_in_document_order_and_always_the_same() {
     assert_eq!(lanes[0], 1);
     assert_eq!(first_clips.first(), Some(&2), "a lane's clips follow the lane");
 
-    // A clip that moves to the end of its lane in a file without ids is still read as a new
-    // position: ids come from where things are written. The clips that did not move keep theirs.
+    // The lane's two clips written the other way round, in a file without ids: ids come from
+    // where things are written, so each place keeps its id and the clips swap them. The objects
+    // after them (the scenes) keep theirs.
     let mut moved: Value = serde_json::from_str(&old).unwrap();
     let clips = moved["project"]["arrangement"]["lanes"][0]["clips"].as_array_mut().unwrap();
-    if clips.len() > 1 {
-        let last = clips.pop().unwrap();
-        clips.insert(0, last);
-    }
+    assert_eq!(clips.len(), 2, "everything() has two clips on its first lane");
+    clips.reverse();
     let moved = from_json(&moved.to_string()).unwrap();
+    let (before, after) = (&read.arrangement.lanes[0].clips, &moved.arrangement.lanes[0].clips);
+    assert_eq!((after[0].id, after[1].id), (before[0].id, before[1].id), "ids follow the places");
+    assert_eq!((after[0].start, after[1].start), (before[1].start, before[0].start), "the clips swapped");
     assert_eq!(moved.launcher.scenes, read.launcher.scenes, "the scenes after the lanes keep their ids");
 }
 

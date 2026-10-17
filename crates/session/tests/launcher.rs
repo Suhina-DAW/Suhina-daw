@@ -851,21 +851,8 @@ fn a_clip_is_renamed_by_scene_or_index_and_undo_brings_the_name_back() {
     p.arrangement.lanes.push(ArrangementLane {
         name: "Drums".into(),
         track: Some(TrackId(1)),
-        clips: vec![Clip {
-            content: ContentId(1),
-            start: 0.0,
-            length: 1.0,
-            offset: 0.0,
-            loop_range: Some(LoopRange { start: 0.0, end: 1.0 }),
-            enabled: true,
-            fade_in: 0.0,
-            fade_out: 0.0,
-            fade_in_curve: Default::default(),
-            fade_out_curve: Default::default(),
-            follow_action: Default::default(),
-            launch: Default::default(),
-            extensions: Default::default(),
-        }],
+        clips: vec![Clip { loop_range: Some(LoopRange { start: 0.0, end: 1.0 }), ..Clip::new(ContentId(1), 0.0, 1.0) }],
+        ..ArrangementLane::default()
     });
     let mut session = Session::new(p);
     run(&mut session, "clip.rename", json!({ "track": 1, "index": 0, "name": "Intro take" })).unwrap();
@@ -873,8 +860,9 @@ fn a_clip_is_renamed_by_scene_or_index_and_undo_brings_the_name_back() {
     let arranged = &p.arrangement.lanes[0].clips[0];
     assert_eq!(p.content(arranged.content).unwrap().name, "Intro take");
 
-    // An empty name clears it.
-    run(&mut session, "clip.rename", json!({ "track": 1, "index": 0, "name": "" })).unwrap();
+    // An empty name clears it; the clip named by its id this time.
+    let id = session.project().arrangement.lanes[0].clips[0].id;
+    run(&mut session, "clip.rename", json!({ "clip": id.0, "name": "" })).unwrap();
     let p = session.project();
     let arranged = &p.arrangement.lanes[0].clips[0];
     assert_eq!(p.content(arranged.content).unwrap().name, "");
