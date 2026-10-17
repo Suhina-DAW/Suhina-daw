@@ -1299,8 +1299,12 @@ fn audio_lane_project() -> Project {
         t.content = ContentKinds { notes: false, audio: true };
     }
     p.contents[0].lanes = vec![ContentLane { target: None, data: LaneData::Audio(AudioRegion::new("vocal.wav")) }];
-    let clip = p.arrangement.lanes[0].clips[0].clone();
-    p.arrangement.lanes.push(ArrangementLane { name: "Lead".into(), track: Some(TrackId(2)), clips: vec![clip] });
+    let clip = Clip::new(ContentId(1), 0.0, 4.0);
+    p.arrangement.lanes.push(ArrangementLane {
+        track: Some(TrackId(2)),
+        clips: vec![clip],
+        ..ArrangementLane::default()
+    });
     p
 }
 

@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 use suhina_engine::{ColumnStatus, LaunchCommand, MAX_START_BEAT, Quantization, Queued};
 use suhina_model::{
-    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, ClipPlace, FadeCurve, FadeShape, LaneData,
-    LoopRange, MAX_GROUP_DEPTH, Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
+    ArrangementLane, Channel, ChannelId, ChannelRole, Clip, ClipContent, FadeCurve, FadeShape, LaneData, LoopRange,
+    MAX_GROUP_DEPTH, Marker, MidiPort, Project, Scene, Slot, TimeSignature, Track, TrackId,
 };
 
 use crate::{
@@ -2073,7 +2073,7 @@ fn audio_overlaps(session: &mut Session, params: &Value) -> Result<Value, Comman
         None => None,
     };
     let track_name = |id: TrackId| p.tracks.iter().find(|t| t.id == id).map(|t| t.name.as_str()).unwrap_or_default();
-    let clip = |place: ClipPlace| {
+    let clip = |place: suhina_model::OverlapClip| {
         let name = p
             .arrangement
             .lanes

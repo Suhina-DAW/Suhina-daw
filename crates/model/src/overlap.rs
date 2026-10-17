@@ -20,7 +20,7 @@ pub const MAX_AUDIO_OVERLAPS: usize = 10_000;
 /// A clip on the arrangement, as `clip.move` and `project.clips` count it: the track of its lane
 /// and its index there, with the lane's place in [`crate::Arrangement::lanes`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ClipPlace {
+pub struct OverlapClip {
     pub track: TrackId,
     pub index: usize,
     pub lane: usize,
@@ -31,8 +31,8 @@ pub struct ClipPlace {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AudioOverlap {
     pub track: TrackId,
-    pub first: ClipPlace,
-    pub second: ClipPlace,
+    pub first: OverlapClip,
+    pub second: OverlapClip,
     pub start: f64,
     pub end: f64,
     /// One clip lies wholly within the other (or both span the same time).
@@ -47,7 +47,7 @@ pub struct AudioOverlaps {
 }
 
 struct Span {
-    place: ClipPlace,
+    place: OverlapClip,
     start: f64,
     end: f64,
 }
@@ -79,7 +79,7 @@ impl Project {
                     }
                 }
                 let Some(place_track) = lane.track.or(sounds_on.first().copied()) else { continue };
-                let place = ClipPlace { track: place_track, index, lane: lane_index };
+                let place = OverlapClip { track: place_track, index, lane: lane_index };
                 for track in sounds_on {
                     let span = Span { place, start: clip.start, end };
                     match by_track.iter_mut().find(|(t, _)| *t == track) {
@@ -164,12 +164,12 @@ mod tests {
         p.arrangement.lanes = lanes
             .into_iter()
             .map(|(track, spans)| ArrangementLane {
-                name: String::new(),
                 track: Some(TrackId(track)),
                 clips: spans
                     .into_iter()
                     .map(|(start, length)| Clip::new(ContentId(*next.next().unwrap_or(&1)), start, length))
                     .collect(),
+                ..ArrangementLane::default()
             })
             .collect();
         p
@@ -225,8 +225,8 @@ mod tests {
         let found = p.audio_overlaps().pairs;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].track, TrackId(2));
-        assert_eq!(found[0].first, ClipPlace { track: TrackId(1), index: 0, lane: 0 });
-        assert_eq!(found[0].second, ClipPlace { track: TrackId(2), index: 0, lane: 1 });
+        assert_eq!(found[0].first, OverlapClip { track: TrackId(1), index: 0, lane: 0 });
+        assert_eq!(found[0].second, OverlapClip { track: TrackId(2), index: 0, lane: 1 });
     }
 
     #[test]
