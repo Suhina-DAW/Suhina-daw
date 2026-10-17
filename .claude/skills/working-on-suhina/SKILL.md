@@ -50,9 +50,10 @@ and [`docs/architecture.md`](../../../docs/architecture.md). The usual decisions
   open, so a reopen starts from the current name. Example: the clip and slot rename in
   `crates/ui/src/interaction/menus.rs` (`clip_menu`, `slot_menu`, #563).
 - **A field the tests must find** gets a `widget_info` label like any other control. #563 also
-  gave its menu fields an explicit `.id(...)` because their label did not reach the
-  accessibility tree without one; most fields in the views have no id and are found fine. Add
-  an id when a test cannot find a labelled field, not by default.
+  gave its menu fields an explicit `.id(...)`, which its draft in temp data is keyed by and
+  which it reports the label needed there; most fields in the views have no id and are found
+  fine. Add an id when the field needs a stable identity or a test cannot find it, not by
+  default.
 
 ## egui and kittest: what has been seen (egui 0.36)
 
@@ -63,9 +64,11 @@ it no longer does.
   By the time the double-click arrives, the first click's action has run. Where both are
   handled, make the single-click action one that the double-click replaces or that is harmless
   to repeat (a selection), not an edit.
-- A kittest context menu takes no typed keys into its text field: test that the field is there
-  and test the command, and leave the typing to *How to check it*.
-  Seen in `a_slots_context_menu_renames_its_clip` (`crates/ui/tests/window.rs`, #563).
+- A text field in a context menu takes typed keys in kittest: open the menu with
+  `click_secondary()`, click the field, select its text with Ctrl+A
+  (`key_press_modifiers(Modifiers::COMMAND, Key::A)`), then `type_text(...)` and
+  `key_press(Key::Enter)`. See `a_slots_context_menu_renames_its_clip` and
+  `an_empty_rename_field_clears_the_clips_name` (`crates/ui/tests/window.rs`, #563).
 - `drop_at` carries no modifiers. To hold one over a drop, send
   `harness.event(egui::Event::ModifiersChanged(mods))` before the drag and
   `ModifiersChanged(Modifiers::NONE)` after it, as `crates/ui/tests/browser.rs` and
