@@ -68,8 +68,12 @@ and why.
 4. **The lists are edited in place, by commands.** `tempo.addPoint`, `tempo.movePoint`,
    `tempo.deletePoint`, `timeSignature.add`, `timeSignature.move` and `timeSignature.delete` are
    edits with one undo step each ([ADR 0002](0002-commands.md)). A change on a beat (or a bar) that
-   already has one replaces it, so the list holds at most one point per beat and is kept in beat
-   order. Points are addressed by their number in that order, as `tempo.points` lists them.
+   already has one replaces it, so the list is kept in beat order. Points are addressed by their
+   number in that order, as `tempo.points` lists them. Commands never put two points on one beat;
+   an imported map or a hand-written file can. The conversion keeps one such pair, a ramp followed
+   by a step (the ramp arrives at its tempo, then the tempo jumps: a Live Set's glide that ends in a
+   jump); of any other two points on one beat the later in the list wins. A command on that beat
+   replaces every point there with its one.
 
 5. **Merging is three-way, keyed by beat and by bar.** The tempo map of two versions is merged
    against their common ancestor ([0027](0027-merge-and-versions.md)) point by point, with the beat
@@ -77,6 +81,8 @@ and why.
    taken; the same change on both sides is taken once; different changes to the point on the same
    beat, or a change on one side and a deletion on the other, are a conflict reported to the user.
    No clock and no append-only history are needed, because the ancestor says what each side changed.
+   The key is the beat with the ramp flag, so a ramp-then-step pair on one beat is two keys and each
+   merges on its own.
 
 6. **A scene's tempo is an override and never edits the map.** Launching a scene with a tempo or
    a time signature takes the launcher clock off the map; `transport.followTempoMap`, starting the
