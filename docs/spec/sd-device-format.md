@@ -3,7 +3,7 @@ description: Version 4 of the data-only Suhina device graph format, SDK, track l
 read_when: .sd, Suhina device, device graph, device SDK, community effect, visual node, device UI
 type: spec
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-17
 covers:
   - crates/device-sdk/Cargo.toml
   - crates/device-sdk/src/lib.rs
@@ -61,8 +61,12 @@ branching is allowed, summing requires add/mix. `effect` graphs require one audi
 output. `instrument` graphs have no audio input, require one audio output, and use timestamped
 MIDI events as control inputs. `midi_effect` graphs use one `midi_input` and one `midi_output` in
 a single chain; `midi_transpose` changes note-on/off keys and drops keys outside 0..127, preserving
-each event's sample offset. Exactly one role-appropriate input/output is required,
-and every node must contribute to the output. Missing references, duplicate ids, invalid ports,
+each event's sample offset.
+Note-off events retain the output key of their note-on even when transpose automation changes
+while a note is held. A repeated note-on releases its previous mapped key first; a zero-velocity
+note-on releases the held mapping. Processing needs room for up to two output events per input; a note-on discarded outside the MIDI key range has no matching output note-off.
+Exactly one role-appropriate input/output is required, and every node must contribute to the output.
+Missing references, duplicate ids, invalid ports,
 missing required inputs and cycles are rejected with node/port diagnostics. Only the `in` port
 of sample_delay/delay breaks a cycle; its input is written after all current-frame evaluations.
 Delay time is an ordinary dependency, so a cycle through it is rejected.
@@ -168,8 +172,10 @@ Projects keep this embedded graph when a newer file becomes available. Run `devi
 explicitly with the newer file to update a device; its id and role must match, its device revision
 must increase, and parameter migration is applied as one undoable command.
 Parameter values are project state and can be changed with `device.setParam` or the generated
-sliders in the detail panel. The `AudioEffect` panel reserves space for each slider's value so
-controls stay inside narrow device cards.
+sliders in the detail panel. They can also be automated by stable parameter id with
+`device.setAutomation`; their lanes appear in the Arrangement parameter chooser. The
+[automation spec](automation.md) describes lane editing and playback. The `AudioEffect` panel
+reserves space for each slider's value so controls stay inside narrow device cards.
 
 All three roles execute. Instrument graphs expose `midi_key`, `midi_velocity` and `midi_gate`
 signals to the existing audio nodes to generate sound. This initial instrument runtime is

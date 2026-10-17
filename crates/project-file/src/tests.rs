@@ -69,6 +69,11 @@ fn everything() -> Project {
         Device {
             state: Some(br#"{"format":"suhina-device","version":1}"#.to_vec()),
             params: vec![DeviceParam::new("gain", 0.5)],
+            automation: vec![AutomationLane {
+                param: "gain".into(),
+                points: vec![AutomationPoint::new(0.0, 0.5), AutomationPoint::new(4.0, 1.0)],
+                enabled: true,
+            }],
             ..Device::new("Community Gain", DeviceKind::Sd)
         },
         Device { state: Some(Vec::new()), ..Device::new("Old", DeviceKind::Vst2 { id: 1_234_567 }) },

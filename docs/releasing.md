@@ -3,7 +3,7 @@ description: How versions are numbered, how release builds, the nightly and test
 read_when: release, version, release candidate, tag, binaries, release workflow, nightly, past nightlies, development build, download, test build, pull request build, try a pull request, merge queue, merge group, ready to merge label, auto-merge, update branch, merging many pull requests, batch build, Discord announcement, Discord bot, testing forum, merged thread, release notes, changelog
 type: howto
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-17
 covers:
   - .github/workflows/ci.yml
   - .github/workflows/release.yml
@@ -294,6 +294,16 @@ number stays first) and archives it. A thread already marked is not renamed agai
 cannot be reopened, so a marked thread gets no more builds. No thread, a missing setting or a
 Discord error is logged and fails nothing. Discord allows two renames of a thread in ten minutes,
 so a rate limit is waited out.
+
+**Commands.** The same Discord application also answers commands: renamed **Suhina** (it was
+*Suhina GitHub*), it is a Cloudflare Worker in its own repository,
+[suhina-daw/suhina-bot](https://github.com/suhina-daw/suhina-bot), that Discord calls for each
+command and that writes to GitHub as the App `suhina-bot` (`suhina-bot[bot]`). It never reads
+messages on its own. Its commands are listed in
+[docs/commands.md](https://github.com/suhina-daw/suhina-bot/blob/main/docs/commands.md), its
+settings, secrets and deployment in
+[docs/operations.md](https://github.com/suhina-daw/suhina-bot/blob/main/docs/operations.md); the
+plan is suhina-daw/suhina-bot#1. The scripts above keep using the bot token for marking threads.
 
 ## Packages
 

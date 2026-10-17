@@ -1,0 +1,31 @@
+# Dependabot (CONTRIBUTING.md › Dependencies). Security updates come as soon as an advisory is
+# published (Settings › Code security); these are the weekly version updates. Each pull request
+# goes through CI like any other, cargo deny included, and is reviewed before it merges.
+version: 2
+updates:
+  # The whole Cargo workspace (every crate under crates/, devices/ and apps/) from its root.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: [chore]
+    commit-message:
+      prefix: "Deps"
+    groups:
+      # Minor and patch updates together; a major update gets a pull request of its own, since it
+      # can change an API.
+      cargo-minor:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [chore]
+    commit-message:
+      prefix: "CI"
+    groups:
+      actions:
+        patterns: ["*"]
